@@ -1,1 +1,2 @@
-﻿global using Robust.Shared.Analyzers;
+#![deny(missing_docs, clippy::all, clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
