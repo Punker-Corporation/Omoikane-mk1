@@ -38,6 +38,9 @@ obj/
 _ReSharper*/
 *.[Rr]e[Ss]harper
 *.DotSettings.user
+target/
+**/target/
+Cargo.lock
 
 # Resources
 *.resources

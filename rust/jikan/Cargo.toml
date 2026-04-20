@@ -1,0 +1,12 @@
+[package]
+name = "jikan"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+keisan = { path = "../keisan" }
+serde = { version = "1", features = ["derive"] }
+
+[lib]
+path = "src/lib.rs"

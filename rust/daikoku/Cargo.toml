@@ -1,0 +1,16 @@
+[package]
+name = "daikoku"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+sekai = { path = "../sekai" }
+jikan = { path = "../jikan" }
+keisan = { path = "../keisan" }
+butsuri = { path = "../butsuri" }
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+
+[lib]
+path = "src/lib.rs"
