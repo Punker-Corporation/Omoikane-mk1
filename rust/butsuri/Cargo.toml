@@ -1,0 +1,13 @@
+[package]
+name = "butsuri"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+keisan = { path = "../keisan" }
+jikan = { path = "../jikan" }
+serde = { version = "1", features = ["derive"] }
+
+[lib]
+path = "src/lib.rs"
