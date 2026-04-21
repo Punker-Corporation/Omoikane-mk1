@@ -1,10 +1,5 @@
-use crate::{AppearanceComponent, AppearanceValue, EntityUid};
-use std::collections::{HashMap, HashSet};
-
-#[derive(Clone, Default)]
-pub struct AppearanceComponentState {
-    pub data: HashMap<String, AppearanceValue>,
-}
+use crate::{AppearanceComponent, AppearanceComponentState, EntityUid};
+use std::collections::HashSet;
 
 pub struct SharedAppearanceSystem {
     dirty_components: HashSet<EntityUid>,
@@ -32,8 +27,7 @@ impl SharedAppearanceSystem {
     }
 
     pub fn handle_state(&mut self, component: &mut AppearanceComponent, state: AppearanceComponentState) {
-        component.appearance_data = state.data;
-        component.appearance_dirty = true;
+        component.handle_component_state(state);
         self.mark_dirty(component);
     }
 

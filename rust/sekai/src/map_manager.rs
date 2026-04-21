@@ -27,8 +27,11 @@ pub struct MapManager {
     map_entities: HashMap<MapId, EntityUid>,
     grids: HashMap<GridId, EntityUid>,
     moved_grids: HashMap<MapId, HashSet<GridId>>,
+    changed_chunks: HashMap<GridId, Vec<(jikan::GameTick, keisan::Vector2i, bool)>>,
+    deleted_grids: HashMap<MapId, Vec<(jikan::GameTick, GridId)>>,
     highest_map_id: MapId,
     highest_grid_id: GridId,
+    current_tick: jikan::GameTick,
 }
 
 impl MapManager {
@@ -37,6 +40,10 @@ impl MapManager {
     }
 
     pub fn initialize(&mut self) {}
+
+    pub fn set_current_tick(&mut self, current_tick: jikan::GameTick) {
+        self.current_tick = current_tick;
+    }
 
     pub fn startup(&mut self, manager: &mut EntityManager) {
         self.ensure_nullspace_exists_and_clear(manager);
@@ -50,6 +57,7 @@ impl MapManager {
             }
         }
         self.ensure_nullspace_exists_and_clear(manager);
+        self.deleted_grids.clear();
     }
 
     pub fn restart(&mut self, manager: &mut EntityManager) {
@@ -164,9 +172,9 @@ impl MapManager {
         manager.map_grids.insert(grid_entity, grid);
         if let Some(transform) = manager.transforms.get_mut(&grid_entity) {
             transform.map_id = current_map_id;
-            transform.parent = self.get_map_entity_id(current_map_id);
             transform.rebuild_for_manager();
         }
+        let _ = manager.set_parent(grid_entity, self.get_map_entity_id(current_map_id));
 
         self.grids.insert(actual_id, grid_entity);
         actual_id
@@ -255,8 +263,15 @@ impl MapManager {
         let Some(entity) = self.grids.remove(&grid_id) else {
             return;
         };
+        let map_id = manager
+            .map_grids
+            .get(&entity)
+            .map(|grid| grid.parent_map_id)
+            .unwrap_or(MapId::NULLSPACE);
         manager.map_grids.remove(&entity);
         manager.map_grid_components.remove(&entity);
+        self.changed_chunks.remove(&grid_id);
+        self.note_grid_deleted(map_id, grid_id);
         manager.queue_delete_entity(entity);
         manager.flush_queued_deletions();
     }
@@ -271,6 +286,94 @@ impl MapManager {
 
     pub fn clear_moved_grids(&mut self, map_id: MapId) {
         self.moved_grids.remove(&map_id);
+    }
+
+    pub fn set_tile(&mut self, manager: &mut EntityManager, grid_id: GridId, indices: keisan::Vector2i, tile: crate::Tile) -> bool {
+        let Some(grid_uid) = self.grids.get(&grid_id).copied() else {
+            return false;
+        };
+        let Some(grid) = manager.map_grids.get_mut(&grid_uid) else {
+            return false;
+        };
+        if !grid.set_tile(indices, tile) {
+            return false;
+        }
+        self.note_chunk_changed(grid_id, grid.grid_tile_to_chunk_indices(indices), false);
+        true
+    }
+
+    pub fn set_tiles(
+        &mut self,
+        manager: &mut EntityManager,
+        grid_id: GridId,
+        tiles: &[(keisan::Vector2i, crate::Tile)],
+    ) -> Vec<keisan::Vector2i> {
+        let Some(grid_uid) = self.grids.get(&grid_id).copied() else {
+            return Vec::new();
+        };
+        let Some(grid) = manager.map_grids.get_mut(&grid_uid) else {
+            return Vec::new();
+        };
+        let changed = grid.set_tiles(tiles);
+        for chunk_index in &changed {
+            self.note_chunk_changed(grid_id, *chunk_index, false);
+        }
+        changed
+    }
+
+    pub fn remove_chunk(&mut self, manager: &mut EntityManager, grid_id: GridId, chunk_index: keisan::Vector2i) -> bool {
+        let Some(grid_uid) = self.grids.get(&grid_id).copied() else {
+            return false;
+        };
+        let Some(grid) = manager.map_grids.get_mut(&grid_uid) else {
+            return false;
+        };
+        if !grid.remove_chunk(chunk_index) {
+            return false;
+        }
+        self.note_chunk_changed(grid_id, chunk_index, true);
+        true
+    }
+
+    pub fn get_changed_chunks_since(
+        &self,
+        grid_id: GridId,
+        from_tick: jikan::GameTick,
+    ) -> Vec<(keisan::Vector2i, bool)> {
+        let mut latest = HashMap::new();
+        if let Some(history) = self.changed_chunks.get(&grid_id) {
+            for (tick, chunk_index, deleted) in history {
+                if *tick > from_tick {
+                    latest.insert(*chunk_index, *deleted);
+                }
+            }
+        }
+        let mut chunks = latest.into_iter().collect::<Vec<_>>();
+        chunks.sort_by(|a, b| a.0.x.cmp(&b.0.x).then(a.0.y.cmp(&b.0.y)));
+        chunks
+    }
+
+    pub fn get_deleted_grids_since(&self, map_id: MapId, from_tick: jikan::GameTick) -> Vec<GridId> {
+        self.deleted_grids
+            .get(&map_id)
+            .map(|history| {
+                history
+                    .iter()
+                    .filter_map(|(tick, grid_id)| (*tick > from_tick).then_some(*grid_id))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn cull_deleted_grid_history(&mut self, oldest_ack: jikan::GameTick) {
+        self.deleted_grids.retain(|_, history| {
+            history.retain(|(tick, _)| *tick > oldest_ack);
+            !history.is_empty()
+        });
+        self.changed_chunks.retain(|_, history| {
+            history.retain(|(tick, _, _)| *tick > oldest_ack);
+            !history.is_empty()
+        });
     }
 
     pub fn has_map_entity(&self, map_id: MapId) -> bool {
@@ -297,6 +400,20 @@ impl MapManager {
 
     pub fn get_grid_euid(&self, grid_id: GridId) -> Option<EntityUid> {
         self.grids.get(&grid_id).copied()
+    }
+
+    fn note_grid_deleted(&mut self, map_id: MapId, grid_id: GridId) {
+        self.deleted_grids
+            .entry(map_id)
+            .or_default()
+            .push((self.current_tick, grid_id));
+    }
+
+    fn note_chunk_changed(&mut self, grid_id: GridId, chunk_index: keisan::Vector2i, deleted: bool) {
+        self.changed_chunks
+            .entry(grid_id)
+            .or_default()
+            .push((self.current_tick, chunk_index, deleted));
     }
 
     fn ensure_nullspace_exists_and_clear(&mut self, manager: &mut EntityManager) {
@@ -353,5 +470,40 @@ mod tests {
         assert!(maps.get_moved_grids(map).contains(&crate::GridId::new(8)));
         maps.clear_moved_grids(map);
         assert!(maps.get_moved_grids(map).is_empty());
+    }
+
+    #[test]
+    fn map_manager_tracks_deleted_grids_incrementally() {
+        let mut entities = EntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities);
+        let map_id = maps.create_map(&mut entities, None);
+        maps.set_current_tick(jikan::GameTick::new(5));
+        let grid_id = maps.create_grid(&mut entities, map_id, None, 8);
+        maps.set_current_tick(jikan::GameTick::new(6));
+        maps.delete_grid(&mut entities, grid_id);
+        assert_eq!(maps.get_deleted_grids_since(map_id, jikan::GameTick::new(5)), vec![grid_id]);
+        maps.cull_deleted_grid_history(jikan::GameTick::new(6));
+        assert!(maps.get_deleted_grids_since(map_id, jikan::GameTick::ZERO).is_empty());
+    }
+
+    #[test]
+    fn map_manager_tracks_changed_chunks_incrementally() {
+        let mut entities = EntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities);
+        let map_id = maps.create_map(&mut entities, None);
+        let grid_id = maps.create_grid(&mut entities, map_id, None, 4);
+
+        maps.set_current_tick(jikan::GameTick::new(2));
+        assert!(maps.set_tile(&mut entities, grid_id, Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0)));
+        assert_eq!(maps.get_changed_chunks_since(grid_id, jikan::GameTick::new(1)), vec![(Vector2i::new(0, 0), false)]);
+
+        maps.set_current_tick(jikan::GameTick::new(3));
+        assert!(maps.remove_chunk(&mut entities, grid_id, Vector2i::new(0, 0)));
+        assert_eq!(maps.get_changed_chunks_since(grid_id, jikan::GameTick::new(2)), vec![(Vector2i::new(0, 0), true)]);
+
+        maps.cull_deleted_grid_history(jikan::GameTick::new(3));
+        assert!(maps.get_changed_chunks_since(grid_id, jikan::GameTick::ZERO).is_empty());
     }
 }

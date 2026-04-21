@@ -123,22 +123,31 @@ impl MapGrid {
         refs
     }
 
-    pub fn set_tile(&mut self, grid_indices: Vector2i, tile: Tile) {
+    pub fn set_tile(&mut self, grid_indices: Vector2i, tile: Tile) -> bool {
         let (chunk, chunk_tile) = self.chunk_and_offset_for_tile(grid_indices);
-        chunk.set_tile(chunk_tile.x as u16, chunk_tile.y as u16, tile);
-        self.recalculate_local_bounds();
+        let changed = chunk
+            .set_tile(chunk_tile.x as u16, chunk_tile.y as u16, tile)
+            .is_some();
+        if changed {
+            self.recalculate_local_bounds();
+        }
+        changed
     }
 
-    pub fn set_tiles(&mut self, tiles: &[(Vector2i, Tile)]) {
+    pub fn set_tiles(&mut self, tiles: &[(Vector2i, Tile)]) -> Vec<Vector2i> {
         let mut touched = HashSet::new();
         for (indices, tile) in tiles {
             let (chunk, chunk_tile) = self.chunk_and_offset_for_tile(*indices);
-            chunk.set_tile(chunk_tile.x as u16, chunk_tile.y as u16, *tile);
-            touched.insert(chunk.indices());
+            if chunk.set_tile(chunk_tile.x as u16, chunk_tile.y as u16, *tile).is_some() {
+                touched.insert(chunk.indices());
+            }
         }
         if !touched.is_empty() {
             self.recalculate_local_bounds();
         }
+        let mut touched = touched.into_iter().collect::<Vec<_>>();
+        touched.sort_by(|a, b| a.x.cmp(&b.x).then(a.y.cmp(&b.y)));
+        touched
     }
 
     pub fn get_chunk(&mut self, chunk_indices: Vector2i) -> &mut MapChunk {
@@ -151,9 +160,18 @@ impl MapGrid {
         self.chunks.get(&chunk_indices)
     }
 
-    pub fn remove_chunk(&mut self, chunk_indices: Vector2i) {
-        self.chunks.remove(&chunk_indices);
-        self.recalculate_local_bounds();
+    pub fn remove_chunk(&mut self, chunk_indices: Vector2i) -> bool {
+        let removed = self.chunks.remove(&chunk_indices).is_some();
+        if removed {
+            self.recalculate_local_bounds();
+        }
+        removed
+    }
+
+    pub fn chunk_indices(&self) -> Vec<Vector2i> {
+        let mut indices = self.chunks.keys().copied().collect::<Vec<_>>();
+        indices.sort_by(|a, b| a.x.cmp(&b.x).then(a.y.cmp(&b.y)));
+        indices
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -389,5 +407,17 @@ mod tests {
         assert_eq!(world.map_id, MapId::new(1));
         let back = grid.map_to_grid(MapCoordinates::new(world.position, world.map_id));
         assert!(back.position.approx_eq(Vector2::new(0.5, 0.5)));
+    }
+
+    #[test]
+    fn map_grid_returns_sorted_chunk_indices() {
+        let mut grid = MapGrid::new(MapId::new(1), EntityUid::new(10), GridId::new(2), 4);
+        grid.set_tile(Vector2i::new(8, 0), Tile::new(1, TileRenderFlag(0), 0));
+        grid.set_tile(Vector2i::new(-1, 0), Tile::new(2, TileRenderFlag(0), 0));
+        grid.set_tile(Vector2i::new(0, 0), Tile::new(3, TileRenderFlag(0), 0));
+        assert_eq!(
+            grid.chunk_indices(),
+            vec![Vector2i::new(-1, 0), Vector2i::new(0, 0), Vector2i::new(2, 0)]
+        );
     }
 }

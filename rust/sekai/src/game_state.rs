@@ -41,6 +41,7 @@ pub struct GameState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct GameStateMapData {
     pub grid_data: HashMap<GridId, GridDatum>,
+    pub deleted_grids: Vec<GridId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,13 +113,18 @@ mod tests {
                 controlled_entity: Some(EntityUid::new(9)),
             }],
             entity_deletions: vec![EntityUid::new(11)],
-            map_data: Some(GameStateMapData { grid_data: grids }),
+            map_data: Some(GameStateMapData {
+                grid_data: grids,
+                deleted_grids: vec![GridId::new(7)],
+            }),
             extrapolated: false,
             payload_size: 0,
         };
 
         assert_eq!(state.player_states.len(), 1);
         assert_eq!(state.entity_deletions[0], EntityUid::new(11));
-        assert!(state.map_data.unwrap().grid_data.contains_key(&GridId::new(5)));
+        let map_data = state.map_data.unwrap();
+        assert!(map_data.grid_data.contains_key(&GridId::new(5)));
+        assert_eq!(map_data.deleted_grids, vec![GridId::new(7)]);
     }
 }

@@ -23,12 +23,18 @@ impl JointSystem {
         let inserted_b = entities.inner.ensure_joints(body_b).add_joint(joint);
 
         if inserted_a && inserted_b {
-            if let Some(body) = entities.inner.physics.get_mut(&body_a) {
-                body.set_awake(true);
+            let tick = entities.inner.current_tick;
+            let physics = crate::PhysicsSystem::new();
+            let _ = physics.set_awake(entities, body_a, true);
+            let _ = physics.set_awake(entities, body_b, true);
+            if let Some(component) = entities.inner.joint_components.get_mut(&body_a) {
+                component.base.last_modified_tick = tick;
             }
-            if let Some(body) = entities.inner.physics.get_mut(&body_b) {
-                body.set_awake(true);
+            if let Some(component) = entities.inner.joint_components.get_mut(&body_b) {
+                component.base.last_modified_tick = tick;
             }
+            entities.inner.dirty_entity(body_a);
+            entities.inner.dirty_entity(body_b);
             return true;
         }
 
@@ -50,6 +56,19 @@ impl JointSystem {
             .get_mut(&body_b)
             .and_then(|component| component.remove_joint(id))
             .is_some();
+        let tick = entities.inner.current_tick;
+        if removed_a {
+            if let Some(component) = entities.inner.joint_components.get_mut(&body_a) {
+                component.base.last_modified_tick = tick;
+            }
+            entities.inner.dirty_entity(body_a);
+        }
+        if removed_b {
+            if let Some(component) = entities.inner.joint_components.get_mut(&body_b) {
+                component.base.last_modified_tick = tick;
+            }
+            entities.inner.dirty_entity(body_b);
+        }
         removed_a || removed_b
     }
 }

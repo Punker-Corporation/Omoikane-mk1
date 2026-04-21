@@ -59,9 +59,12 @@ pub use component::{
 pub use component_state_events::{
     ComponentGetState, ComponentGetStateAttemptEvent, ComponentHandleState,
 };
-pub use appearance_component::{AppearanceComponent, AppearanceValue};
-pub use appearance_system::{AppearanceComponentState, SharedAppearanceSystem};
-pub use broadphase_component::BroadphaseComponent;
+pub use appearance_component::{
+    AppearanceComponent, AppearanceComponentState, AppearanceValue, FromAppearanceValue,
+    IntoAppearanceValue,
+};
+pub use appearance_system::SharedAppearanceSystem;
+pub use broadphase_component::{BroadphaseComponent, BroadphaseComponentState};
 pub use component_event_args::{
     AddedComponentEventArgs, ComponentEventArgs, DeletedComponentEventArgs, IComponent,
     RemovedComponentEventArgs,
@@ -73,7 +76,7 @@ pub use entity_events::{
     CancellableEntityEventArgs, EntityEventArgs, EntitySessionEventArgs, EntitySessionMessage,
 };
 pub use entity_life_stage::EntityLifeStage;
-pub use entity_lookup_component::EntityLookupComponent;
+pub use entity_lookup_component::{EntityLookupComponent, EntityLookupComponentState, EntityLookupEntry};
 pub use entity_lookup_system::{EntityLookupSystem, LookupFlags};
 pub use entity_manager::{EntityManager, EntityStringRepresentation};
 pub use entity_state::{ComponentChange, EntityState};
@@ -96,16 +99,16 @@ pub use map_manager::{GridChangedEventArgs, MapEventArgs, MapManager, TileChange
 pub use metadata_component::{MetaDataComponent, MetaDataComponentState, MetaDataFlags};
 pub use metadata_system::{MetaDataSystem, MetaFlagRemoveAttemptEvent};
 pub use network_component_message::{CommonSession, NetChannel, NetworkComponentMessage};
-pub use fixtures_component::FixturesComponent;
-pub use joint_component::JointComponent;
+pub use fixtures_component::{FixturesComponent, FixturesComponentState};
+pub use joint_component::{JointComponent, JointComponentState};
 pub use game_state::{ChunkDatum, GameState, GameStateMapData, GridDatum, PlayerState, SessionStatus};
 pub use physics_component::PhysicsComponent;
 pub use physics_component_state::{BodyStatus, PhysicsComponentState};
 pub use player_messages::{MsgPlayerList, MsgPlayerListReq};
 pub use screen_coordinates::ScreenCoordinates;
 pub use serialization::{MappedStringSerializer, RobustSerializer, SerializableComponentState, SerializerStats};
-pub use shared_physics_map_component::SharedPhysicsMapComponent;
-pub use shared_physics_system::SharedPhysicsSystem;
+pub use shared_physics_map_component::{SharedPhysicsMapComponent, SharedPhysicsMapComponentState};
+pub use shared_physics_system::{PhysicsQueryHit, SharedPhysicsSystem};
 pub use tile::{Tile, TileRenderFlag};
 pub use tile_ref::TileRef;
 pub use timer_component::TimerComponent;

@@ -74,9 +74,7 @@ impl ActorSystem {
             .actors
             .insert(uid, ActorComponent::new(uid, user_id.to_string()));
 
-        if let Some(session) = players.get_session_mut(user_id) {
-            session.set_attached_entity(Some(uid));
-        }
+        let _ = players.set_attached_entity(user_id, Some(uid));
 
         ActorAttachResult {
             result: true,
@@ -91,9 +89,7 @@ impl ActorSystem {
         uid: EntityUid,
     ) -> Option<PlayerDetachedEvent> {
         let component = entities.actors.remove(&uid)?;
-        if let Some(session) = players.get_session_mut(&component.player_user_id) {
-            session.set_attached_entity(None);
-        }
+        let _ = players.set_attached_entity(&component.player_user_id, None);
         Some(PlayerDetachedEvent {
             entity: uid,
             player_user_id: component.player_user_id,

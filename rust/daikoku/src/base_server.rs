@@ -1,6 +1,7 @@
 use crate::{
     ActorSystem, EntityMessageType, FullInputCmdMessage, InputSystem, JointSystem, MsgEntity,
-    MsgStateAck, PlayerManager, ServerEntityManager, ServerGameStateManager, ServerNetManager,
+    MsgStateAck, PhysicsSystem, PlayerManager, ServerEntityManager, ServerGameStateManager,
+    ServerNetManager, TransformSystem,
 };
 use jikan::GameTick;
 use sekai::{MapManager, MsgPlayerList, TimerSystem};
@@ -37,6 +38,8 @@ pub struct DaikokuServer {
     pub network: ServerNetManager,
     pub actors: ActorSystem,
     pub input: InputSystem,
+    pub physics: PhysicsSystem,
+    pub transforms: TransformSystem,
     pub maps: MapManager,
     pub current_tick: GameTick,
     shutdown_reason: Option<String>,
@@ -55,6 +58,8 @@ impl DaikokuServer {
             network: ServerNetManager::new(),
             actors: ActorSystem::new(),
             input: InputSystem::new(),
+            physics: PhysicsSystem::new(),
+            transforms: TransformSystem::new(),
             maps: MapManager::new(),
             current_tick: GameTick::ZERO,
             shutdown_reason: None,
@@ -141,6 +146,9 @@ impl DaikokuServer {
         }
 
         self.current_tick = self.current_tick + 1;
+        self.entities.set_current_tick(self.current_tick);
+        self.players.set_current_tick(self.current_tick);
+        self.maps.set_current_tick(self.current_tick);
         let users: Vec<_> = self.players.sessions().map(|session| session.user_id.clone()).collect();
         for user_id in users {
             let requests = self.network.take_player_list_requests(&user_id);
@@ -153,7 +161,20 @@ impl DaikokuServer {
                 );
             }
             for input in self.network.take_input(&user_id) {
-                let _ = self.input.handle_input(&mut self.players, &user_id, input);
+                let _ = self.input.handle_input(&mut self.players, &user_id, input.clone());
+                let _ = self.input.apply_movement_command(
+                    &mut self.entities,
+                    &self.players,
+                    &mut self.transforms,
+                    &user_id,
+                    &input,
+                );
+                let _ = self.input.apply_movement_state(
+                    &mut self.entities,
+                    &self.players,
+                    &self.physics,
+                    &user_id,
+                );
             }
             for message in self.network.take_entities(&user_id) {
                 match message.message_type {
@@ -173,10 +194,17 @@ impl DaikokuServer {
                 }
             }
         }
+        let _ = self
+            .physics
+            .step_simulation(&mut self.entities, &mut self.transforms, frame_time);
+        let _ = self
+            .transforms
+            .process_deferred_moves(&mut self.entities, &mut self.maps);
+        let _ = self.physics.sync_map_physics(&mut self.entities, &self.maps);
         TimerSystem.update(&mut self.entities.inner, frame_time);
         let updates = self
             .game_states
-            .send_game_state_update(&mut self.entities, &self.players, self.current_tick);
+            .send_game_state_update(&mut self.entities, &mut self.maps, &mut self.players, self.current_tick);
         for (user_id, state) in updates {
             let _ = self.network.send_state(&user_id, state);
         }
@@ -191,10 +219,10 @@ impl DaikokuServer {
 mod tests {
     use super::{DaikokuServer, ServerOptions, ServerState};
     use crate::{BoundKeyState, EntityMessageType, FullInputCmdMessage, MsgEntity};
+    use butsuri::{AabbShape, Fixture, PhysShape};
     use jikan::GameTick;
-    use keisan::Vector2;
-    use sekai::SessionStatus;
-    use sekai::{EntityCoordinates, EntityUid, ScreenCoordinates, WindowId};
+    use keisan::{Box2, Vector2};
+    use sekai::{BodyType, EntityCoordinates, EntityUid, MapId, ScreenCoordinates, WindowId};
 
     #[test]
     fn base_server_starts_ticks_and_shuts_down() {
@@ -202,7 +230,8 @@ mod tests {
         server.start();
         assert_eq!(server.state, ServerState::Running);
         assert!(server.connect_player("u1", "pedel"));
-        server.players.get_session_mut("u1").unwrap().status = SessionStatus::InGame;
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
         server.tick_update(0.016);
         assert_eq!(server.current_tick.value, 1);
         assert_eq!(server.network.take_outbox("u1").len(), 1);
@@ -218,7 +247,8 @@ mod tests {
         let uid = server.entities.create_entity(Some("mob"));
         server.entities.initialize_entity(uid);
         assert!(server.attach_player("u1", uid, false));
-        server.players.get_session_mut("u1").unwrap().join_game();
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
 
         assert!(server.queue_player_input(
             "u1",
@@ -236,6 +266,14 @@ mod tests {
         server.tick_update(0.016);
         assert_eq!(server.players.get_session("u1").unwrap().controlled_entity, Some(uid));
         assert_eq!(server.players.get_session("u1").unwrap().last_processed_input, 6);
+        assert_eq!(
+            server.entities.inner.transforms.get(&uid).unwrap().local_position,
+            Vector2::new(2.0, 0.0)
+        );
+        assert_eq!(
+            server.entities.inner.physics.get(&uid).unwrap().linear_velocity,
+            Vector2::new(crate::InputSystem::MOVE_SPEED, 0.0)
+        );
     }
 
     #[test]
@@ -281,5 +319,52 @@ mod tests {
         server.tick_update(0.016);
         let outbox = server.network.take_outbox("u1");
         assert!(outbox.iter().any(|message| matches!(message, crate::OutboundMessage::PlayerList(_))));
+    }
+
+    #[test]
+    fn base_server_syncs_map_physics_world_each_tick() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        let map_id = server
+            .maps
+            .create_map(&mut server.entities.inner, Some(MapId::new(2)));
+        let map_owner = server.maps.get_map_entity_id(map_id);
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        {
+            let transform = server.entities.inner.transforms.get_mut(&uid).unwrap();
+            transform.map_id = map_id;
+            transform.rebuild_for_manager();
+        }
+        let body = server.entities.inner.ensure_physics(uid);
+        body.can_collide = true;
+        body.set_body_type(BodyType::Dynamic);
+        body.awake = true;
+        server
+            .entities
+            .inner
+            .ensure_fixtures(uid)
+            .insert_fixture(Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ));
+
+        server.tick_update(0.016);
+        assert!(server.entities.inner.broadphases.contains_key(&map_owner));
+        assert!(server
+            .entities
+            .inner
+            .physics_maps
+            .get(&map_owner)
+            .unwrap()
+            .bodies
+            .contains(&uid));
+        assert_eq!(
+            server
+                .physics
+                .query_aabb_entities(&server.entities, map_owner, Box2::new(-2.0, -2.0, 2.0, 2.0)),
+            vec![uid]
+        );
     }
 }
