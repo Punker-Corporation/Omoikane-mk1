@@ -22,6 +22,8 @@ pub struct TransformComponentState {
     pub local_position: Vector2,
     pub rotation: Angle,
     pub parent_id: EntityUid,
+    pub map_id: MapId,
+    pub grid_id: GridId,
     pub no_local_rotation: bool,
     pub anchored: bool,
 }
@@ -101,7 +103,7 @@ impl TransformComponent {
                 return parent.world_matrix * self.local_position;
             }
         }
-        Vector2::ZERO
+        self.local_position
     }
 
     pub fn coordinates(&self) -> EntityCoordinates {
@@ -159,6 +161,8 @@ impl TransformComponent {
             local_position: self.local_position,
             rotation: self.local_rotation,
             parent_id: self.parent,
+            map_id: self.map_id,
+            grid_id: self.grid_id,
             no_local_rotation: self.no_local_rotation,
             anchored: self.anchored,
         }
@@ -168,6 +172,8 @@ impl TransformComponent {
         self.parent = state.parent_id;
         self.local_position = state.local_position;
         self.local_rotation = state.rotation;
+        self.map_id = state.map_id;
+        self.grid_id = state.grid_id;
         self.no_local_rotation = state.no_local_rotation;
         self.anchored = state.anchored;
         self.rebuild_matrices();
@@ -181,11 +187,11 @@ impl TransformComponent {
                 return (position, self.local_rotation + parent.world_rotation, matrix);
             }
         }
-        (Vector2::ZERO, self.local_rotation, self.local_matrix)
+        (self.local_position, self.local_rotation, self.local_matrix)
     }
 
     fn rebuild_matrices(&mut self) {
-        let pos = if self.parent.is_valid() { self.local_position } else { Vector2::ZERO };
+        let pos = self.local_position;
         let rot = self.local_rotation.theta as f32;
         self.local_matrix = Matrix3::create_transform(pos.x, pos.y, rot, 1.0, 1.0);
         self.inv_local_matrix = Matrix3::create_inverse_transform(pos.x, pos.y, rot, 1.0, 1.0);

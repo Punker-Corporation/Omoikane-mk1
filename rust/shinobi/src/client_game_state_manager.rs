@@ -98,7 +98,9 @@ impl ClientGameStateManager {
             entities.initialize_entity(created);
         }
 
-        players.apply_player_states(&state.player_states);
+        entities.rebuild_runtime_state();
+
+        players.apply_player_states(&state.player_states, state.from_sequence == GameTick::ZERO);
         self.last_processed_tick = state.to_sequence;
         self.last_processed_seq = self.last_processed_seq.max(state.last_processed_input);
         self.pending_inputs
@@ -111,6 +113,10 @@ impl ClientGameStateManager {
 
     pub fn pending_inputs(&self) -> &[FullInputCmdMessage] {
         &self.pending_inputs
+    }
+
+    pub fn pending_inputs_snapshot(&self) -> Vec<FullInputCmdMessage> {
+        self.pending_inputs.clone()
     }
 
     pub fn applied_entity_exists(
@@ -188,6 +194,7 @@ mod tests {
                     },
                 ))
                 .collect(),
+                deleted_grids: Vec::new(),
             }),
             extrapolated: false,
             payload_size: 0,
@@ -251,5 +258,87 @@ mod tests {
                 .type_id,
             4
         );
+    }
+
+    #[test]
+    fn client_game_state_manager_applies_incremental_player_deltas_without_pruning() {
+        let mut manager = ClientGameStateManager::new();
+        let mut entities = ClientEntityManager::new();
+        let mut players = PlayerManager::new();
+        players.startup("u1", "pedel");
+        let mut net = ClientNetManager::new();
+        net.connect();
+
+        net.receive_state(MsgState::new(GameState {
+            from_sequence: GameTick::ZERO,
+            to_sequence: GameTick::new(1),
+            last_processed_input: 0,
+            entity_states: Vec::new(),
+            player_states: vec![
+                PlayerState {
+                    user_id: "u1".to_string(),
+                    name: "pedel".to_string(),
+                    status: SessionStatus::InGame,
+                    ping: 8,
+                    controlled_entity: None,
+                },
+                PlayerState {
+                    user_id: "u2".to_string(),
+                    name: "rika".to_string(),
+                    status: SessionStatus::Connected,
+                    ping: 18,
+                    controlled_entity: None,
+                },
+            ],
+            entity_deletions: Vec::new(),
+            map_data: None,
+            extrapolated: false,
+            payload_size: 0,
+        }));
+        manager.pump_network(&mut net);
+        let _ = manager.apply_next_state(&mut entities, &mut players).unwrap();
+        assert!(players.session("u2").is_some());
+
+        net.receive_state(MsgState::new(GameState {
+            from_sequence: GameTick::new(1),
+            to_sequence: GameTick::new(2),
+            last_processed_input: 0,
+            entity_states: Vec::new(),
+            player_states: vec![PlayerState {
+                user_id: "u1".to_string(),
+                name: "pedel".to_string(),
+                status: SessionStatus::InGame,
+                ping: 12,
+                controlled_entity: None,
+            }],
+            entity_deletions: Vec::new(),
+            map_data: None,
+            extrapolated: false,
+            payload_size: 0,
+        }));
+        manager.pump_network(&mut net);
+        let _ = manager.apply_next_state(&mut entities, &mut players).unwrap();
+        assert_eq!(players.session("u2").unwrap().name, "rika");
+
+        net.receive_state(MsgState::new(GameState {
+            from_sequence: GameTick::new(2),
+            to_sequence: GameTick::new(3),
+            last_processed_input: 0,
+            entity_states: Vec::new(),
+            player_states: vec![PlayerState {
+                user_id: "u2".to_string(),
+                name: "rika".to_string(),
+                status: SessionStatus::Disconnected,
+                ping: 18,
+                controlled_entity: None,
+            }],
+            entity_deletions: Vec::new(),
+            map_data: None,
+            extrapolated: false,
+            payload_size: 0,
+        }));
+        manager.pump_network(&mut net);
+        let _ = manager.apply_next_state(&mut entities, &mut players).unwrap();
+        assert!(players.session("u2").is_none());
     }
 }

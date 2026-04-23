@@ -11,7 +11,7 @@ pub mod shapes;
 pub mod transform;
 
 pub use body_type::BodyType;
-pub use broadphase::{Broadphase, BroadphaseHit};
+pub use broadphase::{Broadphase, BroadphaseEntry, BroadphaseHit};
 pub use collision_ray::CollisionRay;
 pub use contact::{Contact, ContactManifold, ContactManifoldPoint, ContactStatus, ContactType};
 pub use contact_manager::ContactManager;

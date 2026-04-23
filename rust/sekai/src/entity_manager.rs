@@ -2,11 +2,11 @@ use crate::{
     AppearanceComponent, BroadphaseComponent, Component, ComponentFactory, EntityDeletedMessage,
     EntityInitializedMessage, EntitySystemManager, EntityTerminatingEvent, EntityUid,
     EntityLookupComponent, FixturesComponent, JointComponent, MapComponent, MapCoordinates, MapGrid, MapGridComponent, MapId, MetaDataComponent,
-    PhysicsComponent, SharedPhysicsMapComponent, TimerComponent, TransformComponent, TransformResolver,
+    PhysicsComponent, SharedPhysicsMapComponent, TimerComponent, TransformComponent, TransformComponentState, TransformResolver,
     WorldTransform,
 };
 use jikan::GameTick;
-use keisan::{Angle, Matrix3, Vector2};
+use keisan::Vector2;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,10 +117,51 @@ impl EntityManager {
         component.last_modified_tick = self.current_tick;
     }
 
+    pub fn stamp_component_created(&self, component: &mut Component) {
+        component.creation_tick = self.current_tick;
+        component.last_modified_tick = self.current_tick;
+    }
+
     pub fn delete_entity(&mut self, uid: EntityUid) -> Option<(EntityTerminatingEvent, EntityDeletedMessage)> {
         let meta = self.metadata.get(&uid)?;
         if meta.entity_deleted() {
             return None;
+        }
+
+        crate::EntityLookupSystem.remove_from_entity_tree(self, uid, false);
+
+        let parent = self.transforms.get(&uid).map(|transform| transform.parent);
+        let child_world_states = self
+            .transforms
+            .get(&uid)
+            .map(|transform| {
+                transform
+                    .children
+                    .iter()
+                    .copied()
+                    .filter_map(|child| {
+                        self.world_transform(child)
+                            .map(|world| (child, world.map_id, world.grid_id, world.world_position, world.world_rotation))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if let Some(parent) = parent.filter(|parent| parent.is_valid()) {
+            if let Some(parent_transform) = self.transforms.get_mut(&parent) {
+                parent_transform.children.remove(&uid);
+            }
+        }
+
+        for (child, map_id, grid_id, world_position, world_rotation) in child_world_states {
+            if let Some(transform) = self.transforms.get_mut(&child) {
+                transform.parent = EntityUid::INVALID;
+                transform.map_id = map_id;
+                transform.grid_id = grid_id;
+                transform.local_position = world_position;
+                transform.local_rotation = world_rotation;
+                transform.rebuild_for_manager();
+            }
         }
 
         let terminate = EntityTerminatingEvent { entity: uid };
@@ -170,6 +211,8 @@ impl EntityManager {
         self.appearances.entry(uid).or_insert_with(|| {
             let mut component = AppearanceComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -178,6 +221,8 @@ impl EntityManager {
         self.entity_lookups.entry(uid).or_insert_with(|| {
             let mut component = EntityLookupComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -186,6 +231,8 @@ impl EntityManager {
         self.joint_components.entry(uid).or_insert_with(|| {
             let mut component = JointComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -194,6 +241,8 @@ impl EntityManager {
         self.map_components.entry(uid).or_insert_with(|| {
             let mut component = MapComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component.world_map = map_id;
             component
         })
@@ -203,6 +252,8 @@ impl EntityManager {
         self.timers.entry(uid).or_insert_with(|| {
             let mut component = TimerComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -211,6 +262,8 @@ impl EntityManager {
         self.physics.entry(uid).or_insert_with(|| {
             let mut component = PhysicsComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -219,6 +272,8 @@ impl EntityManager {
         self.fixtures.entry(uid).or_insert_with(|| {
             let mut component = FixturesComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -227,6 +282,8 @@ impl EntityManager {
         self.broadphases.entry(uid).or_insert_with(|| {
             let mut component = BroadphaseComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -235,6 +292,8 @@ impl EntityManager {
         self.physics_maps.entry(uid).or_insert_with(|| {
             let mut component = SharedPhysicsMapComponent::new();
             component.base.owner = uid;
+            component.base.creation_tick = self.current_tick;
+            component.base.last_modified_tick = self.current_tick;
             component
         })
     }
@@ -251,15 +310,166 @@ impl EntityManager {
         )
     }
 
+    pub fn remove_transform_component(&mut self, uid: EntityUid) -> bool {
+        if !self.transforms.contains_key(&uid) {
+            return false;
+        }
+
+        crate::EntityLookupSystem.remove_from_entity_tree(self, uid, false);
+
+        let parent = self.transforms.get(&uid).map(|transform| transform.parent);
+        let child_world_states = self
+            .transforms
+            .get(&uid)
+            .map(|transform| {
+                transform
+                    .children
+                    .iter()
+                    .copied()
+                    .filter_map(|child| {
+                        self.world_transform(child)
+                            .map(|world| (child, world.map_id, world.grid_id, world.world_position, world.world_rotation))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if let Some(parent) = parent.filter(|parent| parent.is_valid()) {
+            if let Some(parent_transform) = self.transforms.get_mut(&parent) {
+                parent_transform.children.remove(&uid);
+            }
+        }
+
+        for (child, map_id, grid_id, world_position, world_rotation) in child_world_states {
+            if let Some(transform) = self.transforms.get_mut(&child) {
+                transform.parent = EntityUid::INVALID;
+                transform.map_id = map_id;
+                transform.grid_id = grid_id;
+                transform.local_position = world_position;
+                transform.local_rotation = world_rotation;
+                transform.rebuild_for_manager();
+            }
+        }
+
+        self.transforms.remove(&uid).is_some()
+    }
+
+    pub fn remove_map_grid_component(&mut self, uid: EntityUid) -> bool {
+        let removed_component = self.map_grid_components.remove(&uid).is_some();
+        let removed_grid = self.map_grids.remove(&uid).is_some();
+        if removed_component || removed_grid {
+            crate::EntityLookupSystem.remove_from_entity_tree(self, uid, true);
+            if let Some(transform) = self.transforms.get_mut(&uid) {
+                transform.grid_id = crate::GridId::INVALID;
+            }
+            return true;
+        }
+        false
+    }
+
+    pub fn remove_map_component(&mut self, uid: EntityUid) -> bool {
+        let Some(map_id) = self.map_components.get(&uid).map(|component| component.world_map) else {
+            return false;
+        };
+
+        let children = self
+            .transforms
+            .iter()
+            .filter_map(|(child, transform)| (transform.parent == uid).then_some(*child))
+            .collect::<Vec<_>>();
+        for child in children {
+            let world = self.world_transform(child);
+            if let Some(transform) = self.transforms.get_mut(&child) {
+                transform.parent = EntityUid::INVALID;
+                transform.map_id = MapId::NULLSPACE;
+                transform.grid_id = crate::GridId::INVALID;
+                if let Some(world) = world {
+                    transform.local_position = world.world_position;
+                    transform.local_rotation = world.world_rotation;
+                }
+                transform.rebuild_for_manager();
+            }
+            if let Some(grid) = self.map_grids.get_mut(&child) {
+                grid.parent_map_id = MapId::NULLSPACE;
+            }
+        }
+
+        if let Some(transform) = self.transforms.get_mut(&uid) {
+            transform.map_id = MapId::NULLSPACE;
+        }
+        self.broadphases.remove(&uid);
+        self.physics_maps.remove(&uid);
+        self.map_components.remove(&uid).is_some() || map_id == MapId::NULLSPACE
+    }
+
+    pub fn set_parent(&mut self, uid: EntityUid, parent: EntityUid) -> bool {
+        let Some(old_parent) = self.transforms.get(&uid).map(|transform| transform.parent) else {
+            return false;
+        };
+
+        if old_parent == parent {
+            return true;
+        }
+
+        if old_parent.is_valid() {
+            if let Some(transform) = self.transforms.get_mut(&old_parent) {
+                transform.children.remove(&uid);
+            }
+        }
+
+        if let Some(transform) = self.transforms.get_mut(&uid) {
+            transform.parent = parent;
+            transform.rebuild_for_manager();
+        }
+
+        if parent.is_valid() {
+            if let Some(transform) = self.transforms.get_mut(&parent) {
+                transform.children.insert(uid);
+            }
+        }
+
+        true
+    }
+
+    pub fn apply_transform_state(&mut self, uid: EntityUid, state: TransformComponentState) -> bool {
+        let Some(old_parent) = self.transforms.get(&uid).map(|transform| transform.parent) else {
+            return false;
+        };
+
+        if old_parent != state.parent_id {
+            if old_parent.is_valid() {
+                if let Some(transform) = self.transforms.get_mut(&old_parent) {
+                    transform.children.remove(&uid);
+                }
+            }
+            if state.parent_id.is_valid() {
+                if let Some(transform) = self.transforms.get_mut(&state.parent_id) {
+                    transform.children.insert(uid);
+                }
+            }
+        }
+
+        if let Some(transform) = self.transforms.get_mut(&uid) {
+            transform.handle_transform_state(state);
+            return true;
+        }
+
+        false
+    }
+
     fn alloc_entity(&mut self, uid: EntityUid, prototype_name: Option<&str>) {
         self.entities.insert(uid);
         let mut meta = MetaDataComponent::new();
         meta.base.owner = uid;
+        meta.base.creation_tick = self.current_tick;
+        meta.base.last_modified_tick = self.current_tick;
         meta.prototype_id = prototype_name.map(str::to_string);
         self.metadata.insert(uid, meta);
 
         let mut xform = TransformComponent::new();
         xform.base.owner = uid;
+        xform.base.creation_tick = self.current_tick;
+        xform.base.last_modified_tick = self.current_tick;
         xform.map_id = MapId::NULLSPACE;
         self.transforms.insert(uid, xform);
         self.components.insert(uid, Vec::new());
@@ -313,10 +523,10 @@ impl TransformResolver for EntityManager {
         Some(WorldTransform {
             map_id: xform.map_id,
             grid_id: xform.grid_id,
-            world_position: Vector2::ZERO,
-            world_rotation: Angle::ZERO,
-            world_matrix: Matrix3::IDENTITY,
-            inv_world_matrix: Matrix3::IDENTITY,
+            world_position: xform.local_position,
+            world_rotation: xform.local_rotation,
+            world_matrix: xform.local_matrix,
+            inv_world_matrix: xform.inv_local_matrix,
         })
     }
 }
@@ -324,9 +534,10 @@ impl TransformResolver for EntityManager {
 #[cfg(test)]
 mod tests {
     use super::EntityManager;
-    use crate::MapCoordinates;
-    use crate::MapId;
-    use keisan::Vector2;
+    use crate::{MapCoordinates, Tile, TileRenderFlag, TransformComponentState};
+    use crate::transform_component::TransformResolver;
+    use crate::{GridId, MapId};
+    use keisan::{Angle, Box2, Vector2, Vector2i};
 
     #[test]
     fn entity_manager_allocates_initializes_and_deletes() {
@@ -359,5 +570,119 @@ mod tests {
         assert!(manager.map_components.contains_key(&uid));
         assert!(manager.physics.contains_key(&uid));
         assert!(manager.physics_maps.contains_key(&uid));
+    }
+
+    #[test]
+    fn entity_manager_tracks_transform_parent_links_and_preserves_child_world_space_on_delete() {
+        let mut manager = EntityManager::new();
+        let parent = manager.create_entity_uninitialized(None);
+        let child = manager.create_entity_uninitialized(None);
+        manager.transforms.get_mut(&parent).unwrap().local_position = Vector2::new(5.0, 0.0);
+        manager.transforms.get_mut(&parent).unwrap().rebuild_for_manager();
+        manager.apply_transform_state(
+            child,
+            TransformComponentState {
+                local_position: Vector2::new(1.0, 2.0),
+                rotation: Angle::ZERO,
+                parent_id: parent,
+                map_id: MapId::NULLSPACE,
+                grid_id: crate::GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+
+        assert!(manager.transforms.get(&parent).unwrap().children.contains(&child));
+        assert_eq!(manager.world_transform(child).unwrap().world_position, Vector2::new(6.0, 2.0));
+
+        manager.queue_delete_entity(parent);
+        manager.flush_queued_deletions();
+
+        let child_transform = manager.transforms.get(&child).unwrap();
+        assert_eq!(child_transform.parent, crate::EntityUid::INVALID);
+        assert_eq!(child_transform.local_position, Vector2::new(6.0, 2.0));
+    }
+
+    #[test]
+    fn entity_manager_delete_cleans_spatial_runtime_references() {
+        let mut manager = EntityManager::new();
+        let map = manager.create_entity_uninitialized(None);
+        manager.ensure_map(MapId::new(1), map);
+        manager.transforms.get_mut(&map).unwrap().map_id = MapId::new(1);
+
+        let grid_uid = manager.create_entity_uninitialized(None);
+        let grid = manager
+            .map_grid_components
+            .entry(grid_uid)
+            .or_insert_with(crate::MapGridComponent::new);
+        grid.base.owner = grid_uid;
+        grid.grid_index = GridId::new(3);
+        let map_grid = grid.alloc_map_grid(grid_uid, MapId::new(1), 1).clone();
+        manager.map_grids.insert(grid_uid, map_grid);
+        manager.set_parent(grid_uid, map);
+        manager
+            .map_grids
+            .get_mut(&grid_uid)
+            .unwrap()
+            .set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
+
+        let moving = manager.create_entity_uninitialized(None);
+        manager.apply_transform_state(
+            moving,
+            TransformComponentState {
+                local_position: Vector2::new(0.5, 0.5),
+                rotation: Angle::ZERO,
+                parent_id: grid_uid,
+                map_id: MapId::new(1),
+                grid_id: GridId::new(3),
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        crate::EntityLookupSystem.update_bounds(&mut manager, moving);
+
+        let anchored = manager.create_entity_uninitialized(None);
+        manager.apply_transform_state(
+            anchored,
+            TransformComponentState {
+                local_position: Vector2::new(0.5, 0.5),
+                rotation: Angle::ZERO,
+                parent_id: grid_uid,
+                map_id: MapId::new(1),
+                grid_id: GridId::new(3),
+                no_local_rotation: false,
+                anchored: true,
+            },
+        );
+        crate::EntityLookupSystem.update_bounds(&mut manager, anchored);
+
+        assert_eq!(
+            crate::EntityLookupSystem.get_entities_intersecting(&manager, GridId::new(3), Vector2i::new(0, 0)),
+            vec![moving, anchored]
+        );
+        assert_eq!(
+            crate::EntityLookupSystem.get_entities_intersecting_world_aabb(
+                &manager,
+                grid_uid,
+                Box2::new(-1.0, -1.0, 1.0, 1.0),
+                true,
+            ),
+            vec![moving, anchored]
+        );
+
+        manager.queue_delete_entity(moving);
+        manager.flush_queued_deletions();
+        assert_eq!(
+            crate::EntityLookupSystem.get_entities_intersecting(&manager, GridId::new(3), Vector2i::new(0, 0)),
+            vec![anchored]
+        );
+
+        manager.queue_delete_entity(anchored);
+        manager.flush_queued_deletions();
+        assert!(
+            crate::EntityLookupSystem
+                .get_entities_intersecting(&manager, GridId::new(3), Vector2i::new(0, 0))
+                .is_empty()
+        );
     }
 }

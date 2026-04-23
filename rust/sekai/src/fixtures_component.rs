@@ -1,7 +1,13 @@
 use crate::Component;
 use butsuri::{Fixture, Transform as PhysicsTransform};
 use keisan::Box2;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FixturesComponentState {
+    pub fixtures: Vec<Fixture>,
+}
 
 #[derive(Debug, Clone)]
 pub struct FixturesComponent {
@@ -40,6 +46,20 @@ impl FixturesComponent {
             .extend(self.fixtures.values().cloned());
     }
 
+    pub fn get_component_state(&self) -> FixturesComponentState {
+        let mut fixtures = self.fixtures.values().cloned().collect::<Vec<_>>();
+        fixtures.sort_by(|a, b| a.id.cmp(&b.id));
+        FixturesComponentState { fixtures }
+    }
+
+    pub fn handle_component_state(&mut self, state: FixturesComponentState) {
+        self.fixtures.clear();
+        self.serialized_fixtures.clear();
+        for fixture in state.fixtures {
+            self.fixtures.insert(fixture.id.clone(), fixture);
+        }
+    }
+
     pub fn compute_aabb(&self, transform: PhysicsTransform) -> Option<Box2> {
         let mut bounds: Option<Box2> = None;
         for fixture in self.fixtures.values() {
@@ -76,7 +96,7 @@ impl Default for FixturesComponent {
 
 #[cfg(test)]
 mod tests {
-    use super::FixturesComponent;
+    use super::{FixturesComponent, FixturesComponentState};
     use butsuri::{AabbShape, Fixture, PhysShape, Transform};
     use keisan::{Box2, Vector2};
 
@@ -89,5 +109,21 @@ mod tests {
         ));
         let bounds = component.compute_aabb(Transform::new(Vector2::new(5.0, 2.0), 0.0)).unwrap();
         assert_eq!(bounds, Box2::new(4.0, 1.0, 6.0, 3.0));
+    }
+
+    #[test]
+    fn fixtures_component_roundtrips_component_state() {
+        let mut component = FixturesComponent::new();
+        component.insert_fixture(Fixture::new(
+            "main",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        ));
+        let state = component.get_component_state();
+        let mut restored = FixturesComponent::new();
+        restored.handle_component_state(FixturesComponentState {
+            fixtures: state.fixtures,
+        });
+        assert_eq!(restored.fixture_count(), 1);
+        assert!(restored.fixtures.contains_key("main"));
     }
 }

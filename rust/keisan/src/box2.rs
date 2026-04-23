@@ -1,7 +1,8 @@
 use crate::{ApproxEq, MathHelper, Vector2};
 use core::fmt;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Box2 {
     pub left: f32,
     pub bottom: f32,

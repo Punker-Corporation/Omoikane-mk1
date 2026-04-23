@@ -11,11 +11,16 @@ impl AppearanceSystem {
         Self::default()
     }
 
-    pub fn mark_dirty(&mut self, entities: &ServerEntityManager, uid: EntityUid) -> bool {
-        let Some(component) = entities.inner.appearances.get(&uid) else {
+    pub fn mark_dirty(&mut self, entities: &mut ServerEntityManager, uid: EntityUid) -> bool {
+        if !entities.inner.appearances.contains_key(&uid) {
             return false;
-        };
-        self.shared.mark_dirty(component);
+        }
+        let tick = entities.inner.current_tick;
+        if let Some(component) = entities.inner.appearances.get_mut(&uid) {
+            component.base.last_modified_tick = tick;
+            self.shared.mark_dirty(component);
+        }
+        entities.inner.dirty_entity(uid);
         true
     }
 
@@ -44,9 +49,14 @@ mod tests {
         let uid = entities.create_entity(None);
         entities.inner.ensure_appearance(uid).set_data("mode", 1u8);
         let mut system = AppearanceSystem::new();
-        assert!(system.mark_dirty(&entities, uid));
+        entities.set_current_tick(jikan::GameTick::new(4));
+        assert!(system.mark_dirty(&mut entities, uid));
         let state = system.get_state(&entities, uid).unwrap();
         assert_eq!(state.data.len(), 1);
+        assert_eq!(
+            entities.inner.metadata.get(&uid).unwrap().entity_last_modified_tick,
+            jikan::GameTick::new(4)
+        );
         assert!(system.clear_dirty(&mut entities, uid));
     }
 }

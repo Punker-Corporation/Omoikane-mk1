@@ -1,7 +1,8 @@
 use crate::{BodyType, PhysShape, Transform};
 use keisan::{Box2, MathHelper};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fixture {
     pub id: String,
     pub shape: PhysShape,

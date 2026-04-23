@@ -151,7 +151,7 @@ impl PlayerManager {
         self.sessions.values()
     }
 
-    pub fn apply_player_states(&mut self, states: &[PlayerState]) {
+    pub fn apply_player_states(&mut self, states: &[PlayerState], full_snapshot: bool) {
         if states.is_empty() {
             return;
         }
@@ -161,6 +161,15 @@ impl PlayerManager {
 
         for state in states {
             seen.push(state.user_id.clone());
+            if state.status == SessionStatus::Disconnected {
+                self.sessions.remove(&state.user_id);
+                if Some(&state.user_id) == local_id.as_ref() {
+                    let player = self.local_player.as_mut().expect("local player exists");
+                    player.detach_entity();
+                    player.switch_state(SessionStatus::Disconnected);
+                }
+                continue;
+            }
             let entry = self
                 .sessions
                 .entry(state.user_id.clone())
@@ -186,7 +195,9 @@ impl PlayerManager {
             }
         }
 
-        self.sessions.retain(|user_id, _| seen.contains(user_id));
+        if full_snapshot {
+            self.sessions.retain(|user_id, _| seen.contains(user_id));
+        }
     }
 }
 
@@ -214,10 +225,52 @@ mod tests {
                 ping: 34,
                 controlled_entity: None,
             },
-        ]);
+        ], true);
         let local = manager.local_player().unwrap();
         assert_eq!(local.controlled_entity, Some(EntityUid::new(9)));
         assert_eq!(local.session.status, SessionStatus::InGame);
         assert_eq!(manager.session("u2").unwrap().name, "rika");
+    }
+
+    #[test]
+    fn player_manager_applies_incremental_updates_without_pruning() {
+        let mut manager = PlayerManager::new();
+        manager.startup("u1", "pedel");
+        manager.apply_player_states(&[
+            PlayerState {
+                user_id: "u1".to_string(),
+                name: "pedel".to_string(),
+                status: SessionStatus::InGame,
+                ping: 12,
+                controlled_entity: Some(EntityUid::new(9)),
+            },
+            PlayerState {
+                user_id: "u2".to_string(),
+                name: "rika".to_string(),
+                status: SessionStatus::Connected,
+                ping: 34,
+                controlled_entity: None,
+            },
+        ], true);
+
+        manager.apply_player_states(&[PlayerState {
+            user_id: "u1".to_string(),
+            name: "pedel".to_string(),
+            status: SessionStatus::InGame,
+            ping: 18,
+            controlled_entity: Some(EntityUid::new(9)),
+        }], false);
+
+        assert_eq!(manager.session("u2").unwrap().name, "rika");
+
+        manager.apply_player_states(&[PlayerState {
+            user_id: "u2".to_string(),
+            name: "rika".to_string(),
+            status: SessionStatus::Disconnected,
+            ping: 34,
+            controlled_entity: None,
+        }], false);
+
+        assert!(manager.session("u2").is_none());
     }
 }

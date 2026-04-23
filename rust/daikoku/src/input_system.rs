@@ -1,8 +1,9 @@
 use jikan::GameTick;
+use keisan::Vector2;
 use sekai::{EntityCoordinates, ScreenCoordinates};
 use std::collections::HashMap;
 
-use crate::PlayerManager;
+use crate::{PlayerManager, ServerEntityManager, TransformSystem};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundKeyFunction {
@@ -94,6 +95,9 @@ pub struct InputSystem {
 }
 
 impl InputSystem {
+    pub const MOVE_STEP: f32 = 1.0;
+    pub const MOVE_SPEED: f32 = 62.5;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -139,9 +143,7 @@ impl InputSystem {
             .or_default()
             .set_state(message.input_function_id, message.state);
 
-        if let Some(session) = players.get_session_mut(user_id) {
-            session.last_processed_input = *last_processed;
-        }
+        let _ = players.set_last_processed_input(user_id, *last_processed);
 
         true
     }
@@ -153,12 +155,92 @@ impl InputSystem {
     pub fn get_last_input_command(&self, user_id: &str) -> Option<u32> {
         self.last_processed_input_cmd.get(user_id).copied()
     }
+
+    pub fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
+        if state != BoundKeyState::Down {
+            return Vector2::ZERO;
+        }
+
+        match function.function_name.as_str() {
+            "MoveUp" => Vector2::new(0.0, Self::MOVE_STEP),
+            "MoveDown" => Vector2::new(0.0, -Self::MOVE_STEP),
+            "MoveLeft" => Vector2::new(-Self::MOVE_STEP, 0.0),
+            "MoveRight" => Vector2::new(Self::MOVE_STEP, 0.0),
+            _ => Vector2::ZERO,
+        }
+    }
+
+    pub fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
+        let mut velocity = Vector2::ZERO;
+        if states.is_down(&"MoveUp".into()) {
+            velocity.y += Self::MOVE_SPEED;
+        }
+        if states.is_down(&"MoveDown".into()) {
+            velocity.y -= Self::MOVE_SPEED;
+        }
+        if states.is_down(&"MoveLeft".into()) {
+            velocity.x -= Self::MOVE_SPEED;
+        }
+        if states.is_down(&"MoveRight".into()) {
+            velocity.x += Self::MOVE_SPEED;
+        }
+        velocity
+    }
+
+    pub fn desired_velocity_for(&self, user_id: &str) -> Option<Vector2> {
+        self.player_inputs.get(user_id).map(Self::desired_velocity)
+    }
+
+    pub fn apply_movement_command(
+        &self,
+        entities: &mut ServerEntityManager,
+        players: &PlayerManager,
+        transforms: &mut TransformSystem,
+        user_id: &str,
+        message: &FullInputCmdMessage,
+    ) -> bool {
+        let Some(controlled) = players.get_session(user_id).and_then(|session| session.controlled_entity) else {
+            return false;
+        };
+
+        let delta = Self::movement_delta(&message.input_function_id, message.state);
+        if delta == Vector2::ZERO {
+            return false;
+        }
+
+        let current = entities
+            .inner
+            .transforms
+            .get(&controlled)
+            .map(|transform| transform.local_position)
+            .unwrap_or(Vector2::ZERO);
+
+        transforms.set_local_position(entities, controlled, current + delta)
+    }
+
+    pub fn apply_movement_state(
+        &self,
+        entities: &mut ServerEntityManager,
+        players: &PlayerManager,
+        physics: &crate::PhysicsSystem,
+        user_id: &str,
+    ) -> bool {
+        let Some(controlled) = players.get_session(user_id).and_then(|session| session.controlled_entity) else {
+            return false;
+        };
+        let Some(velocity) = self.desired_velocity_for(user_id) else {
+            return false;
+        };
+
+        let _ = physics.handle_dynamic_init(entities, controlled);
+        physics.set_linear_velocity(entities, controlled, velocity)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{BoundKeyState, FullInputCmdMessage, InputSystem};
-    use crate::PlayerManager;
+    use crate::{PlayerManager, ServerEntityManager, TransformSystem};
     use jikan::GameTick;
     use keisan::Vector2;
     use sekai::{EntityCoordinates, EntityUid, ScreenCoordinates, WindowId};
@@ -187,5 +269,71 @@ mod tests {
             .unwrap()
             .is_down(&"MoveUp".into()));
         assert_eq!(players.get_session("u1").unwrap().last_processed_input, 9);
+    }
+
+    #[test]
+    fn input_system_applies_movement_to_controlled_entity() {
+        let mut players = PlayerManager::new(4);
+        players.connect("u1", "pedel");
+        assert!(players.set_attached_entity("u1", Some(EntityUid::new(7))));
+
+        let mut entities = ServerEntityManager::new();
+        entities.alloc_entity(None, EntityUid::new(7));
+        entities.initialize_entity(EntityUid::new(7));
+
+        let system = InputSystem::new();
+        let mut transforms = TransformSystem::new();
+        let message = FullInputCmdMessage::new(
+            GameTick::new(5),
+            0,
+            9,
+            "MoveRight",
+            BoundKeyState::Down,
+            EntityCoordinates::new(EntityUid::new(7), Vector2::ZERO),
+            ScreenCoordinates::new_xy(10.0, 12.0, WindowId::MAIN),
+        );
+
+        assert!(system.apply_movement_command(&mut entities, &players, &mut transforms, "u1", &message));
+        assert_eq!(entities.inner.transforms.get(&EntityUid::new(7)).unwrap().local_position, Vector2::new(1.0, 0.0));
+    }
+
+    #[test]
+    fn input_system_derives_velocity_from_held_commands() {
+        let mut players = PlayerManager::new(4);
+        players.connect("u1", "pedel");
+        let mut system = InputSystem::new();
+        system.handle_player_connected("u1");
+
+        assert!(system.handle_input(
+            &mut players,
+            "u1",
+            FullInputCmdMessage::new(
+                GameTick::new(1),
+                0,
+                1,
+                "MoveRight",
+                BoundKeyState::Down,
+                EntityCoordinates::new(EntityUid::new(7), Vector2::ZERO),
+                ScreenCoordinates::new_xy(0.0, 0.0, WindowId::MAIN),
+            ),
+        ));
+        assert!(system.handle_input(
+            &mut players,
+            "u1",
+            FullInputCmdMessage::new(
+                GameTick::new(1),
+                0,
+                2,
+                "MoveUp",
+                BoundKeyState::Down,
+                EntityCoordinates::new(EntityUid::new(7), Vector2::ZERO),
+                ScreenCoordinates::new_xy(0.0, 0.0, WindowId::MAIN),
+            ),
+        ));
+
+        assert_eq!(
+            system.desired_velocity_for("u1"),
+            Some(Vector2::new(InputSystem::MOVE_SPEED, InputSystem::MOVE_SPEED))
+        );
     }
 }

@@ -1,6 +1,7 @@
 use keisan::{Angle, Vector2};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Quaternion2D {
     pub c: f32,
     pub s: f32,
@@ -37,7 +38,7 @@ impl Quaternion2D {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
     pub position: Vector2,
     pub rotation: Quaternion2D,

@@ -1,13 +1,14 @@
 use crate::Transform;
 use keisan::{Box2, Vector2};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShapeType {
     Aabb,
     Circle,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AabbShape {
     pub local_bounds: Box2,
     pub radius: f32,
@@ -32,7 +33,7 @@ impl AabbShape {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CircleShape {
     pub position: Vector2,
     pub radius: f32,
@@ -54,7 +55,7 @@ impl CircleShape {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PhysShape {
     Aabb(AabbShape),
     Circle(CircleShape),
