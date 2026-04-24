@@ -1,4 +1,4 @@
-use crate::{BodyType, PhysShape, Transform};
+use crate::{BodyType, CollisionRay, PhysShape, Transform};
 use keisan::{Box2, MathHelper};
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +32,10 @@ impl Fixture {
 
     pub fn compute_aabb(&self, transform: Transform) -> Box2 {
         self.shape.compute_aabb(transform)
+    }
+
+    pub fn ray_cast(&self, transform: Transform, ray: CollisionRay) -> Option<(f32, keisan::Vector2)> {
+        self.shape.ray_cast(transform, ray.into())
     }
 
     pub fn area(&self) -> f32 {

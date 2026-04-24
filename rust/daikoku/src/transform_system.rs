@@ -1,20 +1,17 @@
 use crate::ServerEntityManager;
 use keisan::{Angle, Vector2, Vector2i};
-use sekai::{EntityCoordinates, EntityLookupSystem, EntityUid, GridId, MoveEvent, SharedTransformSystem};
+use sekai::{EntityUid, GridId, MoveEvent};
 
 #[derive(Debug, Default, Clone)]
-pub struct TransformSystem {
-    shared: SharedTransformSystem,
-    lookup: EntityLookupSystem,
-}
+pub struct TransformSystem;
 
 impl TransformSystem {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
-    pub fn defer_move_event(&mut self, entities: &ServerEntityManager, move_event: MoveEvent) {
-        self.shared.defer_move_event(&entities.inner, move_event);
+    pub fn defer_move_event(&mut self, entities: &mut ServerEntityManager, move_event: MoveEvent) {
+        entities.inner.defer_move_event(move_event);
     }
 
     pub fn process_deferred_moves(
@@ -22,8 +19,8 @@ impl TransformSystem {
         entities: &mut ServerEntityManager,
         maps: &mut sekai::MapManager,
     ) -> Vec<MoveEvent> {
-        let processed = self.shared.process_deferred_moves(&entities.inner);
-        for move_event in &processed {
+        let mut processed = entities.inner.process_deferred_move_events();
+        for move_event in &mut processed {
             if let Some(grid_component) = entities.inner.map_grid_components.get(&move_event.sender) {
                 if let Some(transform) = entities.inner.transforms.get(&move_event.sender) {
                     maps.mark_grid_moved(transform.map_id, grid_component.grid_index);
@@ -38,22 +35,17 @@ impl TransformSystem {
                     }
                 }
             }
-            self.lookup.update_subtree_bounds(&mut entities.inner, move_event.sender);
+            let previous_map = entities
+                .inner
+                .transforms
+                .get(&move_event.sender)
+                .map(|transform| transform.map_id)
+                .unwrap_or(sekai::MapId::NULLSPACE);
+            entities
+                .inner
+                .apply_transform_move_event_and_reconcile(move_event.sender, previous_map, move_event);
         }
         processed
-    }
-
-    pub fn get_world_position(&self, entities: &ServerEntityManager, uid: EntityUid) -> Option<keisan::Vector2> {
-        self.shared.get_world_position(&entities.inner, uid)
-    }
-
-    pub fn get_mover_coordinates(
-        &self,
-        entities: &ServerEntityManager,
-        uid: EntityUid,
-    ) -> Option<EntityCoordinates> {
-        let xform = entities.inner.transforms.get(&uid)?;
-        Some(self.shared.get_mover_coordinates(&entities.inner, xform))
     }
 
     pub fn set_local_position(
@@ -62,16 +54,42 @@ impl TransformSystem {
         uid: EntityUid,
         position: Vector2,
     ) -> bool {
-        let tick = entities.inner.current_tick;
-        let Some(transform) = entities.inner.transforms.get_mut(&uid) else {
+        let rotation = entities.inner.local_rotation(uid);
+        let Some(rotation) = rotation else {
             return false;
         };
-        let Some(event) = transform.set_local_position(position) else {
+        let Some(event) = entities.inner.set_local_transform_deferred(uid, position, rotation) else {
             return false;
         };
-        transform.base.last_modified_tick = tick;
-        entities.inner.dirty_entity(uid);
-        self.shared.defer_move_event(&entities.inner, event);
+        entities.inner.defer_move_event(event);
+        true
+    }
+
+    pub fn set_local_transform(
+        &mut self,
+        entities: &mut ServerEntityManager,
+        uid: EntityUid,
+        position: Vector2,
+        rotation: Angle,
+    ) -> bool {
+        let Some(event) = entities.inner.set_local_transform_deferred(uid, position, rotation) else {
+            return false;
+        };
+        entities.inner.defer_move_event(event);
+        true
+    }
+
+    pub fn offset_local_transform(
+        &mut self,
+        entities: &mut ServerEntityManager,
+        uid: EntityUid,
+        delta: Vector2,
+        angular_delta: Angle,
+    ) -> bool {
+        let Some(event) = entities.inner.offset_local_transform_deferred(uid, delta, angular_delta) else {
+            return false;
+        };
+        entities.inner.defer_move_event(event);
         true
     }
 
@@ -81,29 +99,14 @@ impl TransformSystem {
         uid: EntityUid,
         rotation: Angle,
     ) -> bool {
-        let tick = entities.inner.current_tick;
-        let coordinates = {
-            let Some(transform) = entities.inner.transforms.get_mut(&uid) else {
-                return false;
-            };
-            let changed = transform.set_local_rotation(rotation).is_some();
-            if !changed {
-                return false;
-            }
-            let coordinates = transform.coordinates();
-            transform.base.last_modified_tick = tick;
-            coordinates
+        let position = entities.inner.local_position(uid);
+        let Some(position) = position else {
+            return false;
         };
-
-        entities.inner.dirty_entity(uid);
-        self.shared.defer_move_event(
-            &entities.inner,
-            MoveEvent {
-                sender: uid,
-                old_position: coordinates,
-                new_position: coordinates,
-            },
-        );
+        let Some(event) = entities.inner.set_local_transform_deferred(uid, position, rotation) else {
+            return false;
+        };
+        entities.inner.defer_move_event(event);
         true
     }
 
@@ -124,72 +127,32 @@ impl TransformSystem {
             return false;
         };
 
-        let tick = entities.inner.current_tick;
-        let old = entities
-            .inner
-            .transforms
-            .get(&uid)
-            .map(|transform| transform.coordinates());
-
-        if !entities.inner.set_parent(uid, grid_uid) {
+        let Some(existing) = entities.inner.transforms.get(&uid).cloned() else {
             return false;
-        }
-
-        let new = {
-            let Some(transform) = entities.inner.transforms.get_mut(&uid) else {
-                return false;
-            };
-            transform.map_id = map_id;
-            transform.grid_id = grid_id;
-            transform.local_position = tile_center;
-            transform.anchored = true;
-            transform.rebuild_for_manager();
-            transform.base.last_modified_tick = tick;
-            transform.coordinates()
         };
-
-        entities.inner.dirty_entity(uid);
-        self.shared.defer_move_event(
-            &entities.inner,
-            MoveEvent {
-                sender: uid,
-                old_position: old.unwrap_or(new),
-                new_position: new,
+        let Some(event) = entities.inner.apply_transform_state_with_move_event(
+            uid,
+            sekai::TransformComponentState {
+                local_position: tile_center,
+                rotation: existing.local_rotation,
+                parent_id: grid_uid,
+                map_id,
+                grid_id,
+                no_local_rotation: existing.no_local_rotation,
+                anchored: true,
             },
-        );
+        ) else {
+            return false;
+        };
+        entities.inner.defer_move_event(event);
         true
     }
 
     pub fn unanchor_entity(&mut self, entities: &mut ServerEntityManager, uid: EntityUid) -> bool {
-        let tick = entities.inner.current_tick;
-        let Some(old) = entities
-            .inner
-            .transforms
-            .get(&uid)
-            .filter(|transform| transform.anchored)
-            .map(|transform| transform.coordinates())
-        else {
+        let Some(event) = entities.inner.set_anchored_with_move_event(uid, false) else {
             return false;
         };
-
-        let new = {
-            let Some(transform) = entities.inner.transforms.get_mut(&uid) else {
-                return false;
-            };
-            transform.anchored = false;
-            transform.base.last_modified_tick = tick;
-            transform.coordinates()
-        };
-
-        entities.inner.dirty_entity(uid);
-        self.shared.defer_move_event(
-            &entities.inner,
-            MoveEvent {
-                sender: uid,
-                old_position: old,
-                new_position: new,
-            },
-        );
+        entities.inner.defer_move_event(event);
         true
     }
 }
@@ -198,16 +161,16 @@ impl TransformSystem {
 mod tests {
     use super::TransformSystem;
     use crate::ServerEntityManager;
-    use sekai::{GridId, MapId, MapManager, Tile, TileRenderFlag};
-    use keisan::Vector2i;
+    use butsuri::{AabbShape, BodyType, Fixture, PhysShape};
+    use sekai::{EntityUid, GridId, MapId, MapManager, Tile, TileRenderFlag};
+    use keisan::{ApproxEq, Box2, Vector2, Vector2i};
 
     #[test]
     fn transform_system_reads_world_position_for_entities() {
         let entities = ServerEntityManager::new();
         let mut entities = entities;
         let uid = entities.create_entity(None);
-        let system = TransformSystem::new();
-        assert_eq!(system.get_world_position(&entities, uid), Some(keisan::Vector2::ZERO));
+        assert_eq!(entities.inner.world_position(uid), Some(keisan::Vector2::ZERO));
     }
 
     #[test]
@@ -220,8 +183,11 @@ mod tests {
         let grid_uid = maps.get_grid_euid(grid_id).unwrap();
         let uid = entities.create_entity(None);
         entities.initialize_entity(uid);
-        entities.inner.transforms.get_mut(&uid).unwrap().parent = grid_uid;
-        entities.inner.transforms.get_mut(&uid).unwrap().rebuild_for_manager();
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(uid, |transform| {
+                transform.parent = grid_uid;
+            }));
 
         let mut system = TransformSystem::new();
         assert!(system.set_local_position(&mut entities, uid, keisan::Vector2::new(1.0, 0.0)));
@@ -232,6 +198,82 @@ mod tests {
         let processed = system.process_deferred_moves(&mut entities, &mut maps);
         assert_eq!(processed.len(), 1);
         assert!(maps.get_moved_grids(map_id).contains(&grid_id));
+    }
+
+    #[test]
+    fn transform_system_deferred_moves_refresh_map_physics_runtime() {
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(90)));
+
+        let uid = entities.create_entity(None);
+        entities.initialize_entity(uid);
+        let _ = entities.inner.apply_transform_state(
+            uid,
+            sekai::TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        let body = entities.inner.ensure_physics(uid);
+        body.set_body_type(BodyType::Dynamic);
+        body.can_collide = true;
+        body.awake = true;
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+        entities.inner.refresh_map_physics_runtime(map_id);
+        assert_eq!(
+            entities
+                .inner
+                .entities_in_map_aabb(map_id, Box2::new(-1.0, -1.0, 1.0, 1.0)),
+            vec![uid]
+        );
+
+        let mut system = TransformSystem::new();
+        assert!(system.set_local_position(&mut entities, uid, Vector2::new(3.0, 0.0)));
+        let processed = system.process_deferred_moves(&mut entities, &mut maps);
+        assert_eq!(processed.len(), 1);
+        assert!(entities
+            .inner
+            .entities_in_map_aabb(map_id, Box2::new(-1.0, -1.0, 1.0, 1.0))
+            .is_empty());
+        assert_eq!(
+            entities
+                .inner
+                .entities_in_map_aabb(map_id, Box2::new(2.0, -1.0, 4.0, 1.0)),
+            vec![uid]
+        );
+    }
+
+    #[test]
+    fn transform_system_sets_position_and_rotation_atomically() {
+        let mut entities = ServerEntityManager::new();
+        let uid = entities.create_entity(None);
+        entities.initialize_entity(uid);
+
+        let mut system = TransformSystem::new();
+        assert!(system.set_local_transform(
+            &mut entities,
+            uid,
+            keisan::Vector2::new(2.0, -1.0),
+            keisan::Angle::from_degrees(30.0),
+        ));
+        let processed = system.process_deferred_moves(&mut entities, &mut sekai::MapManager::new());
+        assert_eq!(processed.len(), 1);
+        let transform = entities.inner.transforms.get(&uid).unwrap();
+        assert_eq!(transform.local_position, keisan::Vector2::new(2.0, -1.0));
+        assert_eq!(transform.local_rotation, keisan::Angle::from_degrees(30.0));
     }
 
     #[test]
@@ -259,12 +301,74 @@ mod tests {
         assert_eq!(transform.parent, grid_uid);
         assert_eq!(transform.local_position, keisan::Vector2::new(0.5, 0.5));
         assert_eq!(
-            sekai::EntityLookupSystem.get_entities_intersecting(&entities.inner, grid_id, Vector2i::new(0, 0)),
+            entities.inner.entities_at_tile(grid_id, Vector2i::new(0, 0)),
             vec![uid]
         );
 
         assert!(system.unanchor_entity(&mut entities, uid));
         let _ = system.process_deferred_moves(&mut entities, &mut maps);
+        assert!(!entities.inner.transforms.get(&uid).unwrap().anchored);
+    }
+
+    #[test]
+    fn transform_system_anchor_entity_preserves_map_velocities_for_dynamic_bodies() {
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(6)));
+        let grid_id = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(9)), 8);
+        let grid_uid = maps.get_grid_euid(grid_id).unwrap();
+        entities
+            .inner
+            .map_grids
+            .get_mut(&grid_uid)
+            .unwrap()
+            .set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
+
+        let grid_body = entities.inner.ensure_physics(grid_uid);
+        grid_body.set_body_type(sekai::BodyType::Dynamic);
+        grid_body.linear_velocity = Vector2::new(2.0, -1.0);
+        grid_body.angular_velocity = 0.75;
+
+        let uid = entities.create_entity(None);
+        entities.initialize_entity(uid);
+        let body = entities.inner.ensure_physics(uid);
+        body.set_body_type(sekai::BodyType::Dynamic);
+        body.linear_velocity = Vector2::new(-0.5, 1.25);
+        body.angular_velocity = 1.0;
+
+        let old_linear = entities.inner.entity_map_linear_velocity(uid).unwrap();
+        let old_angular = entities.inner.entity_map_angular_velocity(uid).unwrap();
+
+        let mut system = TransformSystem::new();
+        assert!(system.anchor_entity(&mut entities, uid, grid_uid, grid_id, Vector2i::new(0, 0)));
+
+        let new_linear = entities.inner.entity_map_linear_velocity(uid).unwrap();
+        let new_angular = entities.inner.entity_map_angular_velocity(uid).unwrap();
+        assert!(new_linear.approx_eq_with_tolerance(old_linear, 0.0001));
+        assert!((new_angular - old_angular).abs() <= 0.0001);
+    }
+
+    #[test]
+    fn transform_system_unanchor_entity_uses_shared_anchor_path() {
+        let mut entities = ServerEntityManager::new();
+        let uid = entities.create_entity(None);
+        entities.initialize_entity(uid);
+        let _ = entities.inner.apply_transform_state(
+            uid,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::new(1.0, 1.0),
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id: MapId::new(7),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: true,
+            },
+        );
+
+        let mut system = TransformSystem::new();
+        assert!(system.unanchor_entity(&mut entities, uid));
         assert!(!entities.inner.transforms.get(&uid).unwrap().anchored);
     }
 }

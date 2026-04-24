@@ -1,5 +1,5 @@
 use jikan::GameTick;
-use keisan::Vector2;
+use keisan::{Angle, Vector2};
 use sekai::{EntityCoordinates, ScreenCoordinates};
 use std::collections::HashMap;
 
@@ -208,14 +208,7 @@ impl InputSystem {
             return false;
         }
 
-        let current = entities
-            .inner
-            .transforms
-            .get(&controlled)
-            .map(|transform| transform.local_position)
-            .unwrap_or(Vector2::ZERO);
-
-        transforms.set_local_position(entities, controlled, current + delta)
+        transforms.offset_local_transform(entities, controlled, delta, Angle::ZERO)
     }
 
     pub fn apply_movement_state(

@@ -14,6 +14,21 @@ pub struct ClientNetManager {
     outbound_player_list_requests: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ClientInboundBatch {
+    pub states: Vec<MsgState>,
+    pub entities: Vec<MsgEntity>,
+    pub player_lists: Vec<MsgPlayerList>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClientOutboundBatch {
+    pub acks: Vec<MsgStateAck>,
+    pub inputs: Vec<FullInputCmdMessage>,
+    pub entities: Vec<MsgEntity>,
+    pub player_list_requests: usize,
+}
+
 impl ClientNetManager {
     pub fn new() -> Self {
         Self::default()
@@ -68,6 +83,14 @@ impl ClientNetManager {
         self.inbound_player_lists.pop_front()
     }
 
+    pub fn take_inbound_batch(&mut self) -> ClientInboundBatch {
+        ClientInboundBatch {
+            states: self.inbound_states.drain(..).collect(),
+            entities: self.inbound_entities.drain(..).collect(),
+            player_lists: self.inbound_player_lists.drain(..).collect(),
+        }
+    }
+
     pub fn send_ack(&mut self, ack: MsgStateAck) {
         if self.connected {
             self.outbound_acks.push(ack);
@@ -106,6 +129,15 @@ impl ClientNetManager {
 
     pub fn take_player_list_requests(&mut self) -> usize {
         std::mem::take(&mut self.outbound_player_list_requests)
+    }
+
+    pub fn take_outbound_batch(&mut self) -> ClientOutboundBatch {
+        ClientOutboundBatch {
+            acks: self.take_acks(),
+            inputs: self.take_inputs(),
+            entities: self.take_entities(),
+            player_list_requests: self.take_player_list_requests(),
+        }
     }
 }
 

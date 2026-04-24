@@ -1,9 +1,6 @@
 use crate::{PlayerManager, PvsSystem, ServerEntityManager};
 use jikan::GameTick;
-use sekai::{
-    ChunkDatum, GameState, GameStateMapData, GridDatum, MapManager, RobustSerializer,
-    SerializedEntityState,
-};
+use sekai::{GameState, MapManager, RobustSerializer};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -46,6 +43,10 @@ impl ServerGameStateManager {
         }
     }
 
+    fn last_ack_for(&self, user_id: &str) -> GameTick {
+        *self.acked_states.get(user_id).unwrap_or(&GameTick::ZERO)
+    }
+
     pub fn send_game_state_update(
         &mut self,
         entities: &mut ServerEntityManager,
@@ -53,18 +54,55 @@ impl ServerGameStateManager {
         players: &mut PlayerManager,
         cur_tick: GameTick,
     ) -> Vec<(String, GameState)> {
+        let (updates, oldest_ack) =
+            self.build_updates_for_in_game_sessions(entities, maps, players, cur_tick);
+
+        self.post_send_cleanup(entities, maps, players, oldest_ack);
+
+        updates
+    }
+
+    fn build_updates_for_in_game_sessions(
+        &mut self,
+        entities: &mut ServerEntityManager,
+        maps: &MapManager,
+        players: &PlayerManager,
+        cur_tick: GameTick,
+    ) -> (Vec<(String, GameState)>, GameTick) {
         let mut updates = Vec::new();
         let mut oldest_ack = GameTick::MAX_VALUE;
 
         for session in players.in_game_sessions() {
-            let last_ack = *self
-                .acked_states
-                .get(&session.user_id)
-                .unwrap_or(&GameTick::ZERO);
-            let (visible, deletions, newly_visible) = self.pvs.calculate_visible_entities(entities, session);
-            let entity_states = self.collect_entity_states(entities, &visible, &newly_visible, last_ack);
-            let map_data = self.collect_map_data(entities, maps, &visible, &deletions, &newly_visible, last_ack);
-            let state = GameState {
+            let (user_id, state, last_ack) =
+                self.build_session_update(entities, maps, players, session, cur_tick);
+            oldest_ack = oldest_ack.min(last_ack);
+            updates.push((user_id, state));
+        }
+
+        (updates, oldest_ack)
+    }
+
+    fn build_session_update(
+        &mut self,
+        entities: &mut ServerEntityManager,
+        maps: &MapManager,
+        players: &PlayerManager,
+        session: &crate::player_manager::PlayerSession,
+        cur_tick: GameTick,
+    ) -> (String, GameState, GameTick) {
+        let last_ack = self.last_ack_for(&session.user_id);
+        let (visible, deletions, newly_visible) = self.pvs.calculate_visible_entities(entities, session);
+        let entity_states = entities.build_entity_states_for_sync(
+            &mut self.serializer,
+            &visible,
+            &newly_visible,
+            last_ack,
+        );
+        let map_data = maps.collect_game_state_map_data(&entities.inner, &visible, &newly_visible, last_ack);
+
+        (
+            session.user_id.clone(),
+            GameState {
                 from_sequence: last_ack,
                 to_sequence: cur_tick,
                 last_processed_input: session.last_processed_input,
@@ -74,13 +112,18 @@ impl ServerGameStateManager {
                 map_data,
                 extrapolated: false,
                 payload_size: 0,
-            };
-            if last_ack < oldest_ack {
-                oldest_ack = last_ack;
-            }
-            updates.push((session.user_id.clone(), state));
-        }
+            },
+            last_ack,
+        )
+    }
 
+    fn post_send_cleanup(
+        &mut self,
+        entities: &mut ServerEntityManager,
+        maps: &mut MapManager,
+        players: &mut PlayerManager,
+        oldest_ack: GameTick,
+    ) {
         if oldest_ack > self.last_oldest_ack {
             self.last_oldest_ack = oldest_ack;
             entities.cull_deletion_history(oldest_ack);
@@ -91,137 +134,8 @@ impl ServerGameStateManager {
         for map_id in maps.get_all_map_ids() {
             maps.clear_moved_grids(map_id);
         }
-
-        updates
     }
 
-    fn collect_entity_states(
-        &mut self,
-        entities: &mut ServerEntityManager,
-        ids: &[sekai::EntityUid],
-        newly_visible: &[sekai::EntityUid],
-        from_tick: GameTick,
-    ) -> Vec<SerializedEntityState> {
-        let mut states = Vec::new();
-        let newly_visible = newly_visible
-            .iter()
-            .copied()
-            .collect::<std::collections::HashSet<_>>();
-        for uid in ids.iter().copied() {
-            if newly_visible.contains(&uid) {
-                if let Some(state) = entities.build_entity_state(&mut self.serializer, uid) {
-                    if !state.component_changes.is_empty() {
-                        states.push(state);
-                    }
-                }
-                continue;
-            }
-            if !entities.entity_dirty_since(uid, from_tick) {
-                continue;
-            }
-            if let Some(state) = entities.build_entity_state_since(&mut self.serializer, uid, from_tick) {
-                if !state.component_changes.is_empty() {
-                    states.push(state);
-                }
-            }
-        }
-        states
-    }
-
-    fn collect_map_data(
-        &self,
-        entities: &ServerEntityManager,
-        maps: &MapManager,
-        visible: &[sekai::EntityUid],
-        _deletions: &[sekai::EntityUid],
-        newly_visible: &[sekai::EntityUid],
-        from_tick: GameTick,
-    ) -> Option<GameStateMapData> {
-        let mut grid_data = HashMap::new();
-        let mut deleted_grids = Vec::new();
-        let all_grids = from_tick == GameTick::ZERO;
-        let visible_grids = visible
-            .iter()
-            .filter_map(|uid| entities.inner.map_grid_components.get(uid).map(|component| component.grid_index))
-            .collect::<std::collections::HashSet<_>>();
-        let newly_visible_grids = newly_visible
-            .iter()
-            .filter_map(|uid| entities.inner.map_grid_components.get(uid).map(|component| component.grid_index))
-            .collect::<std::collections::HashSet<_>>();
-        let moved = maps
-            .get_all_map_ids()
-            .into_iter()
-            .flat_map(|map_id| maps.get_moved_grids(map_id).into_iter())
-            .collect::<std::collections::HashSet<_>>();
-
-        for grid in entities.inner.map_grids.values() {
-            if all_grids {
-                if !visible_grids.contains(&grid.index) {
-                    continue;
-                }
-            } else {
-                let moved_match = moved.contains(&grid.index) && visible_grids.contains(&grid.index);
-                let newly_visible_match = newly_visible_grids.contains(&grid.index);
-                let changed_chunks = maps.get_changed_chunks_since(grid.index, from_tick);
-                let chunk_changed_match = !changed_chunks.is_empty() && visible_grids.contains(&grid.index);
-                if !moved_match && !newly_visible_match && !chunk_changed_match {
-                    continue;
-                }
-            }
-            let mut chunk_data = Vec::new();
-            if all_grids || newly_visible_grids.contains(&grid.index) {
-                for chunk_index in grid.chunk_indices() {
-                    let Some(chunk) = grid.try_get_chunk(chunk_index) else {
-                        continue;
-                    };
-                    let mut tile_data = Vec::with_capacity((grid.chunk_size as usize).pow(2));
-                    for x in 0..grid.chunk_size {
-                        for y in 0..grid.chunk_size {
-                            tile_data.push(chunk.get_tile(x, y));
-                        }
-                    }
-                    chunk_data.push(ChunkDatum::create_modified(chunk_index, tile_data));
-                }
-            } else {
-                for (chunk_index, deleted) in maps.get_changed_chunks_since(grid.index, from_tick) {
-                    if deleted {
-                        chunk_data.push(ChunkDatum::create_deleted(chunk_index));
-                        continue;
-                    }
-                    let Some(chunk) = grid.try_get_chunk(chunk_index) else {
-                        continue;
-                    };
-                    let mut tile_data = Vec::with_capacity((grid.chunk_size as usize).pow(2));
-                    for x in 0..grid.chunk_size {
-                        for y in 0..grid.chunk_size {
-                            tile_data.push(chunk.get_tile(x, y));
-                        }
-                    }
-                    chunk_data.push(ChunkDatum::create_modified(chunk_index, tile_data));
-                }
-            }
-
-            grid_data.insert(
-                grid.index,
-                GridDatum {
-                    coordinates: sekai::MapCoordinates::new(grid.world_position, grid.parent_map_id),
-                    angle: grid.world_rotation,
-                    chunk_data,
-                },
-            );
-        }
-        for map_id in maps.get_all_map_ids() {
-            deleted_grids.extend(maps.get_deleted_grids_since(map_id, from_tick));
-        }
-        if grid_data.is_empty() && deleted_grids.is_empty() {
-            None
-        } else {
-            Some(GameStateMapData {
-                grid_data,
-                deleted_grids,
-            })
-        }
-    }
 }
 
 impl Default for ServerGameStateManager {
@@ -280,6 +194,43 @@ mod tests {
     }
 
     #[test]
+    fn server_game_state_manager_build_game_state_for_session_uses_shared_helpers() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.connect("u1", "pedel");
+        players.set_current_tick(GameTick::new(5));
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(4)));
+        let grid_id = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(14)), 8);
+        let uid = entities.create_entity(Some("mob"));
+        entities.initialize_entity(uid);
+        entities.set_current_tick(GameTick::new(5));
+        entities.inner.dirty_entity(uid);
+        maps.mark_grid_moved(map_id, grid_id);
+
+        let session = players.get_session("u1").unwrap().clone();
+        let (_user_id, state, _last_ack) = states.build_session_update(
+            &mut entities,
+            &maps,
+            &players,
+            &session,
+            GameTick::new(5),
+        );
+
+        assert_eq!(state.from_sequence, GameTick::ZERO);
+        assert_eq!(state.to_sequence, GameTick::new(5));
+        assert!(state.entity_states.iter().any(|entity| entity.uid == uid));
+        assert!(state.map_data.as_ref().is_some_and(|map_data| map_data.grid_data.contains_key(&grid_id)));
+    }
+
+    #[test]
     fn server_game_state_manager_sends_full_grid_data_for_newly_visible_grids() {
         let mut states = ServerGameStateManager::new();
         states.initialize();
@@ -298,11 +249,11 @@ mod tests {
 
         let controlled = entities.create_entity(Some("mob"));
         entities.initialize_entity(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         assert!(players.set_attached_entity("u1", Some(controlled)));
 
         let near_grid = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(9)), 8);
@@ -317,11 +268,12 @@ mod tests {
         let far_grid = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(10)), 8);
         let far_uid = maps.get_grid_euid(far_grid).unwrap();
         {
-            let transform = entities.inner.transforms.get_mut(&far_uid).unwrap();
-            transform.local_position = keisan::Vector2::new(100.0, 0.0);
-            transform.rebuild_for_manager();
+            assert!(entities
+                .inner
+                .mutate_transform_and_reconcile(far_uid, |transform| {
+                    transform.local_position = keisan::Vector2::new(100.0, 0.0);
+                }));
         }
-        entities.inner.map_grids.get_mut(&far_uid).unwrap().world_position = keisan::Vector2::new(100.0, 0.0);
         maps.set_current_tick(GameTick::new(1));
         assert!(maps.set_tile(
             &mut entities.inner,
@@ -342,12 +294,11 @@ mod tests {
 
         states.ack("u1", GameTick::new(2));
         players.set_current_tick(GameTick::new(3));
-        {
-            let transform = entities.inner.transforms.get_mut(&far_uid).unwrap();
-            transform.local_position = keisan::Vector2::new(1.0, 0.0);
-            transform.rebuild_for_manager();
-        }
-        entities.inner.map_grids.get_mut(&far_uid).unwrap().world_position = keisan::Vector2::new(1.0, 0.0);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(far_uid, |transform| {
+                transform.local_position = keisan::Vector2::new(1.0, 0.0);
+            }));
 
         let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(3));
         let map_data = updates[0].1.map_data.as_ref().unwrap();
@@ -373,11 +324,11 @@ mod tests {
         let grid_id = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(9)), 4);
         let controlled = entities.create_entity(Some("mob"));
         entities.initialize_entity(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         assert!(players.set_attached_entity("u1", Some(controlled)));
 
         maps.set_current_tick(GameTick::new(1));
@@ -426,22 +377,21 @@ mod tests {
 
         let controlled = entities.create_entity(Some("mob"));
         entities.initialize_entity(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         assert!(players.set_attached_entity("u1", Some(controlled)));
 
         let near_grid = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(9)), 8);
         let far_grid = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(10)), 8);
         let far_uid = maps.get_grid_euid(far_grid).unwrap();
-        {
-            let transform = entities.inner.transforms.get_mut(&far_uid).unwrap();
-            transform.local_position = keisan::Vector2::new(100.0, 0.0);
-            transform.rebuild_for_manager();
-        }
-        entities.inner.map_grids.get_mut(&far_uid).unwrap().world_position = keisan::Vector2::new(100.0, 0.0);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(far_uid, |transform| {
+                transform.local_position = keisan::Vector2::new(100.0, 0.0);
+            }));
 
         let _ = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
         states.ack("u1", GameTick::new(1));
@@ -503,11 +453,11 @@ mod tests {
         let grid_id = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(9)), 4);
         let controlled = entities.create_entity(Some("mob"));
         entities.initialize_entity(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         assert!(players.set_attached_entity("u1", Some(controlled)));
 
         maps.set_current_tick(GameTick::new(1));
@@ -555,11 +505,11 @@ mod tests {
         let grid_id = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(9)), 4);
         let controlled = entities.create_entity(Some("mob"));
         entities.initialize_entity(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         assert!(players.set_attached_entity("u1", Some(controlled)));
 
         maps.set_current_tick(GameTick::new(1));
@@ -641,11 +591,11 @@ mod tests {
 
         let other = entities.create_entity(Some("crate"));
         entities.initialize_entity(other);
-        {
-            let transform = entities.inner.transforms.get_mut(&other).unwrap();
-            transform.local_position = keisan::Vector2::new(100.0, 0.0);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(other, |transform| {
+                transform.local_position = keisan::Vector2::new(100.0, 0.0);
+            }));
 
         let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
         assert_eq!(updates[0].1.entity_states.len(), 1);
@@ -653,11 +603,11 @@ mod tests {
 
         states.ack("u1", GameTick::new(1));
         players.set_current_tick(GameTick::new(2));
-        {
-            let transform = entities.inner.transforms.get_mut(&other).unwrap();
-            transform.local_position = keisan::Vector2::new(1.0, 0.0);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(other, |transform| {
+                transform.local_position = keisan::Vector2::new(1.0, 0.0);
+            }));
 
         let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
         assert!(updates[0].1.entity_states.iter().any(|state| state.uid == other));
@@ -668,5 +618,326 @@ mod tests {
             .find(|state| state.uid == other)
             .unwrap();
         assert!(full_state.component_changes.iter().any(|change| change.net_id == 1 && change.created));
+    }
+
+    #[test]
+    fn server_game_state_manager_sends_runtime_component_deltas_after_immediate_physics_changes() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.set_current_tick(GameTick::new(1));
+        players.connect("u1", "pedel");
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(8)));
+        let map_uid = maps.get_map_entity_id(map_id);
+        let grid_id = maps.create_grid(&mut entities.inner, map_id, Some(GridId::new(12)), 8);
+        let grid_uid = maps.get_grid_euid(grid_id).unwrap();
+
+        let controlled = entities.create_entity(Some("mob"));
+        entities.initialize_entity(controlled);
+        let _ = entities.inner.apply_transform_state(
+            controlled,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::ZERO,
+                rotation: keisan::Angle::ZERO,
+                parent_id: grid_uid,
+                map_id,
+                grid_id,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        let body = entities.inner.ensure_physics(controlled);
+        body.can_collide = true;
+        body.set_body_type(sekai::BodyType::Dynamic);
+        body.awake = true;
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            controlled,
+            butsuri::Fixture::new(
+                "main",
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    keisan::Box2::new(-0.5, -0.5, 0.5, 0.5),
+                    0.0,
+                )),
+            ),
+        );
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
+        assert!(updates[0].1.entity_states.iter().any(|state| state.uid == map_uid));
+
+        states.ack("u1", GameTick::new(1));
+        entities.set_current_tick(GameTick::new(2));
+        players.set_current_tick(GameTick::new(2));
+        maps.set_current_tick(GameTick::new(2));
+        let physics = crate::PhysicsSystem::new();
+        assert!(physics.set_awake(&mut entities, controlled, false));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
+        let map_state = updates[0]
+            .1
+            .entity_states
+            .iter()
+            .find(|state| state.uid == map_uid)
+            .unwrap();
+        assert!(map_state
+            .component_changes
+            .iter()
+            .any(|change| change.net_id == 11));
+    }
+
+    #[test]
+    fn server_game_state_manager_sends_physics_map_delta_when_linear_velocity_wakes_body() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.set_current_tick(GameTick::new(1));
+        players.connect("u1", "pedel");
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(9)));
+        let map_uid = maps.get_map_entity_id(map_id);
+
+        let controlled = entities.create_entity(Some("mob"));
+        entities.initialize_entity(controlled);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
+        let body = entities.inner.ensure_physics(controlled);
+        body.can_collide = true;
+        body.set_body_type(sekai::BodyType::Dynamic);
+        body.awake = false;
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            controlled,
+            butsuri::Fixture::new(
+                "main",
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    keisan::Box2::new(-0.5, -0.5, 0.5, 0.5),
+                    0.0,
+                )),
+            ),
+        );
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+
+        let _ = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
+        states.ack("u1", GameTick::new(1));
+
+        entities.set_current_tick(GameTick::new(2));
+        players.set_current_tick(GameTick::new(2));
+        maps.set_current_tick(GameTick::new(2));
+        let physics = crate::PhysicsSystem::new();
+        assert!(physics.set_linear_velocity(&mut entities, controlled, keisan::Vector2::new(1.0, 0.0)));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
+        let map_state = updates[0]
+            .1
+            .entity_states
+            .iter()
+            .find(|state| state.uid == map_uid)
+            .unwrap();
+        assert!(map_state
+            .component_changes
+            .iter()
+            .any(|change| change.net_id == 11));
+    }
+
+    #[test]
+    fn server_game_state_manager_sends_physics_map_delta_when_gravity_changes() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.set_current_tick(GameTick::new(1));
+        players.connect("u1", "pedel");
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(10)));
+        let map_uid = maps.get_map_entity_id(map_id);
+
+        let controlled = entities.create_entity(Some("mob"));
+        entities.initialize_entity(controlled);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+
+        let _ = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
+        states.ack("u1", GameTick::new(1));
+
+        entities.set_current_tick(GameTick::new(2));
+        players.set_current_tick(GameTick::new(2));
+        maps.set_current_tick(GameTick::new(2));
+        let physics = crate::PhysicsSystem::new();
+        assert!(physics.set_map_gravity(&mut entities, &maps, map_id, keisan::Vector2::new(0.0, -9.8)));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
+        let map_state = updates[0]
+            .1
+            .entity_states
+            .iter()
+            .find(|state| state.uid == map_uid)
+            .unwrap();
+        assert!(map_state
+            .component_changes
+            .iter()
+            .any(|change| change.net_id == 11));
+    }
+
+    #[test]
+    fn server_game_state_manager_does_not_resend_idle_awake_physics_without_real_change() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.set_current_tick(GameTick::new(1));
+        players.connect("u1", "pedel");
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(32)));
+
+        let controlled = entities.create_entity(Some("mob"));
+        entities.initialize_entity(controlled);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
+        let body = entities.inner.ensure_physics(controlled);
+        body.can_collide = true;
+        body.set_body_type(sekai::BodyType::Dynamic);
+        body.awake = true;
+        body.sleeping_allowed = false;
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
+        assert!(updates[0].1.entity_states.iter().any(|state| state.uid == controlled));
+
+        states.ack("u1", GameTick::new(1));
+        entities.set_current_tick(GameTick::new(2));
+        players.set_current_tick(GameTick::new(2));
+        maps.set_current_tick(GameTick::new(2));
+        let physics = crate::PhysicsSystem::new();
+        let mut transforms = crate::TransformSystem::new();
+        assert_eq!(physics.step_simulation(&mut entities, &mut transforms, 0.1), 0);
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
+        assert!(updates[0].1.entity_states.is_empty());
+    }
+
+    #[test]
+    fn server_game_state_manager_does_not_resend_physics_for_force_or_torque_alone() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.set_current_tick(GameTick::new(1));
+        players.connect("u1", "pedel");
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(34)));
+
+        let controlled = entities.create_entity(Some("mob"));
+        entities.initialize_entity(controlled);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
+        let body = entities.inner.ensure_physics(controlled);
+        body.can_collide = true;
+        body.set_body_type(sekai::BodyType::Dynamic);
+        body.awake = true;
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
+        assert!(updates[0].1.entity_states.iter().any(|state| state.uid == controlled));
+
+        states.ack("u1", GameTick::new(1));
+        entities.set_current_tick(GameTick::new(2));
+        players.set_current_tick(GameTick::new(2));
+        maps.set_current_tick(GameTick::new(2));
+        let physics = crate::PhysicsSystem::new();
+        assert!(physics.apply_force(&mut entities, controlled, keisan::Vector2::new(2.0, 0.0)));
+        assert!(physics.apply_torque(&mut entities, controlled, 4.0));
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
+        assert!(updates[0].1.entity_states.is_empty());
+    }
+
+    #[test]
+    fn server_game_state_manager_resends_physics_after_force_drives_velocity_change() {
+        let mut states = ServerGameStateManager::new();
+        states.initialize();
+        states.handle_client_connected("u1");
+
+        let mut players = PlayerManager::new(4);
+        players.set_current_tick(GameTick::new(1));
+        players.connect("u1", "pedel");
+        assert!(players.join_game("u1"));
+
+        let mut entities = ServerEntityManager::new();
+        let mut maps = MapManager::new();
+        maps.startup(&mut entities.inner);
+        let map_id = maps.create_map(&mut entities.inner, Some(MapId::new(35)));
+
+        let controlled = entities.create_entity(Some("mob"));
+        entities.initialize_entity(controlled);
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
+        let body = entities.inner.ensure_physics(controlled);
+        body.can_collide = true;
+        body.set_body_type(sekai::BodyType::Dynamic);
+        body.awake = true;
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+
+        let _ = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(1));
+        states.ack("u1", GameTick::new(1));
+
+        entities.set_current_tick(GameTick::new(2));
+        players.set_current_tick(GameTick::new(2));
+        maps.set_current_tick(GameTick::new(2));
+        let physics = crate::PhysicsSystem::new();
+        assert!(physics.apply_force(&mut entities, controlled, keisan::Vector2::new(2.0, 0.0)));
+        let mut transforms = crate::TransformSystem::new();
+        assert_eq!(physics.step_simulation(&mut entities, &mut transforms, 0.5), 1);
+
+        let updates = states.send_game_state_update(&mut entities, &mut maps, &mut players, GameTick::new(2));
+        let entity_state = updates[0]
+            .1
+            .entity_states
+            .iter()
+            .find(|state| state.uid == controlled)
+            .unwrap();
+        assert!(entity_state.component_changes.iter().any(|change| change.net_id == 5));
     }
 }

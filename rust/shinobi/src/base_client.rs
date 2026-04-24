@@ -1,6 +1,6 @@
 use crate::{
-    ClientEntityManager, ClientGameStateManager, ClientNetManager, InputSystem, MapSystem,
-    PhysicsSystem, PlayerManager, TransformSystem,
+    ClientEntityManager, ClientGameStateManager, ClientNetManager, InputSystem, PhysicsSystem,
+    PlayerManager, TransformSystem,
 };
 use daikoku::{BoundKeyFunction, BoundKeyState, DaikokuServer, FullInputCmdMessage};
 use keisan::Vector2;
@@ -34,7 +34,6 @@ pub struct BaseClient {
     pub game_states: ClientGameStateManager,
     pub input: InputSystem,
     pub transforms: TransformSystem,
-    pub maps: MapSystem,
     pub physics: PhysicsSystem,
 }
 
@@ -49,7 +48,6 @@ impl BaseClient {
             game_states: ClientGameStateManager::new(),
             input: InputSystem::new(),
             transforms: TransformSystem::new(),
-            maps: MapSystem::new(),
             physics: PhysicsSystem::new(),
         }
     }
@@ -83,21 +81,11 @@ impl BaseClient {
         function: impl Into<BoundKeyFunction>,
         state: BoundKeyState,
     ) -> bool {
-        let Some(controlled) = self
-            .players
-            .local_player()
-            .and_then(|player| player.controlled_entity)
-        else {
+        let Some(controlled) = self.players.controlled_entity() else {
             return false;
         };
 
-        let world_offset = self
-            .entities
-            .inner
-            .transforms
-            .get(&controlled)
-            .map(|transform| transform.local_position)
-            .unwrap_or(Vector2::ZERO);
+        let world_offset = self.entities.inner.local_position(controlled).unwrap_or(Vector2::ZERO);
 
         let message = self.input.build_local_input(
             self.game_states.last_processed_tick + 1,
@@ -120,52 +108,12 @@ impl BaseClient {
     }
 
     pub fn tick_update(&mut self) {
-        self.game_states.pump_network(&mut self.network);
-        while let Some(player_list) = self.network.next_player_list() {
-            self.players.apply_player_states(&player_list.plyrs, true);
-        }
-        while let Some(message) = self.network.next_entity() {
-            self.entities
-                .handle_entity_network_message(self.game_states.last_processed_tick, message);
-        }
-        if let Some(_state) = self
+        self.process_network_inbound();
+        if let Some((_state, context)) = self
             .game_states
-            .apply_next_state(&mut self.entities, &mut self.players)
+            .apply_next_state_with_runtime_context(&mut self.entities, &mut self.players)
         {
-            let pending_inputs = self.game_states.pending_inputs_snapshot();
-            let local_controlled = self
-                .players
-                .local_player()
-                .and_then(|player| player.controlled_entity);
-            let pending_for_local = local_controlled.is_some_and(|controlled| {
-                pending_inputs
-                    .iter()
-                    .any(|input| input.coordinates.entity_id == controlled)
-            });
-            self.input
-                .replay_pending_inputs(&mut self.entities, &self.players, &pending_inputs);
-            for lerp in self.entities.take_pending_transform_lerps() {
-                if pending_for_local && Some(lerp.uid) == local_controlled {
-                    continue;
-                }
-                self.transforms.queue_snapshot_lerp(
-                    lerp.uid,
-                    lerp.source,
-                    lerp.destination,
-                    lerp.source_angle,
-                    lerp.destination_angle,
-                    lerp.parent,
-                    lerp.parent,
-                    lerp.source_anchored,
-                    lerp.destination_anchored,
-                );
-            }
-            self.run_level = ClientRunLevel::InGame;
-            if pending_for_local {
-                if let Some(controlled) = local_controlled {
-                    self.physics.suppress_prediction_once(controlled);
-                }
-            }
+            self.handle_applied_state(context);
         }
         self.entities.tick_update(self.game_states.last_processed_tick);
         let _ = self
@@ -181,18 +129,48 @@ impl BaseClient {
             .local_player()
             .map(|player| player.user_id.clone())
             .unwrap_or_default();
-        for ack in self.network.take_acks() {
+        let batch = self.network.take_outbound_batch();
+        for ack in batch.acks {
             server.ack_state(&local_user, ack);
         }
-        for input in self.network.take_inputs() {
+        for input in batch.inputs {
             let _ = server.receive_input(&local_user, input);
         }
-        for message in self.network.take_entities() {
+        for message in batch.entities {
             let _ = server.receive_entity_message(&local_user, message);
         }
-        let requests = self.network.take_player_list_requests();
-        for _ in 0..requests {
+        for _ in 0..batch.player_list_requests {
             let _ = server.receive_player_list_request(&local_user);
+        }
+    }
+
+    fn process_network_inbound(&mut self) {
+        let batch = self.network.take_inbound_batch();
+        for state in batch.states {
+            self.game_states.handle_state_message(&mut self.network, state);
+        }
+        for player_list in batch.player_lists {
+            self.players.apply_player_states(&player_list.plyrs, true);
+        }
+        for message in batch.entities {
+            self.entities
+                .handle_entity_network_message(self.game_states.last_processed_tick, message);
+        }
+    }
+
+    fn handle_applied_state(
+        &mut self,
+        context: crate::client_game_state_manager::GameStateRuntimeApplyContext,
+    ) {
+        self.input
+            .replay_pending_inputs(&mut self.entities, &self.players, &context.pending_inputs);
+        self.transforms.queue_pending_snapshot_lerps(
+            self.entities.take_pending_transform_lerps(),
+            context.pending_for_local.then_some(context.local_controlled).flatten(),
+        );
+        self.run_level = ClientRunLevel::InGame;
+        if let (true, Some(controlled)) = (context.pending_for_local, context.local_controlled) {
+            self.physics.suppress_prediction_once(controlled);
         }
     }
 }
@@ -287,24 +265,29 @@ mod tests {
         ));
         let uid = server.entities.create_entity(Some("mob"));
         server.entities.initialize_entity(uid);
-        {
-            let transform = server.entities.inner.transforms.get_mut(&uid).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
-        {
-            let physics = server.entities.inner.ensure_physics(uid);
-            physics.can_collide = true;
-            physics.set_body_type(sekai::BodyType::Dynamic);
-            physics.awake = true;
-        }
-        server.entities.inner.ensure_fixtures(uid).insert_fixture(Fixture::new(
-            "main",
-            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        assert!(server
+            .entities
+            .inner
+            .mutate_transform_and_reconcile(uid, |transform| {
+                transform.map_id = map_id;
+            }));
+        assert!(server.entities.inner.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
         ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
+        );
         let mut joint = Joint::new(uid.raw(), 999, JointType::Distance);
         joint.id = "rope".to_string();
-        server.entities.inner.ensure_joints(uid).add_joint(joint);
+        assert!(server.entities.inner.add_joint_between(joint));
         server.attach_player("u1", uid, false);
         server.players.set_current_tick(GameTick::FIRST);
         assert!(server.players.join_game("u1"));
@@ -329,14 +312,7 @@ mod tests {
         assert_eq!(client.players.local_player().unwrap().controlled_entity, Some(uid));
         assert_eq!(client.entities.inner.fixtures.get(&uid).unwrap().fixture_count(), 1);
         assert_eq!(client.entities.inner.joint_components.get(&uid).unwrap().joint_count(), 1);
-        let client_grid_uid = client
-            .entities
-            .inner
-            .map_grid_components
-            .iter()
-            .find(|(_, component)| component.grid_index == grid_id)
-            .map(|(uid, _)| *uid)
-            .unwrap();
+        let client_grid_uid = client.entities.inner.grid_entity_for(grid_id).unwrap();
         assert_eq!(
             client
                 .entities
@@ -349,19 +325,19 @@ mod tests {
             .type_id,
             7
         );
-        let map_owner = client.entities.map_entity_for(map_id).unwrap();
         assert_eq!(
             client
-                .physics
-                .query_aabb_entities(&client.entities, map_owner, Box2::new(-2.0, -2.0, 2.0, 2.0)),
+                .entities
+                .inner
+                .entities_in_map_aabb(map_id, Box2::new(-2.0, -2.0, 2.0, 2.0)),
             vec![uid]
         );
         assert_eq!(
             client
-                .physics
+                .entities
+                .inner
                 .intersect_ray(
-                    &client.entities,
-                    map_owner,
+                    map_id,
                     CollisionRay::new(Vector2::new(-5.0, 0.0), Vector2::UNIT_X, -1),
                     10.0,
                     true,
@@ -369,6 +345,123 @@ mod tests {
                 .entity,
             uid
         );
+    }
+
+    #[test]
+    fn client_roundtrips_map_gravity_and_uses_it_for_local_prediction() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        let map_id = server.maps.create_map(&mut server.entities.inner, Some(MapId::new(11)));
+        assert!(server
+            .physics
+            .set_map_gravity(&mut server.entities, &server.maps, map_id, Vector2::new(0.0, -10.0)));
+        assert!(server
+            .physics
+            .set_auto_clear_forces(&mut server.entities, &server.maps, map_id, true));
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        let _ = server.entities.inner.apply_transform_state(
+            uid,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        {
+            let physics = server.entities.inner.ensure_physics(uid);
+            physics.can_collide = true;
+            physics.set_body_type(sekai::BodyType::Dynamic);
+            physics.awake = true;
+        }
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+        server.attach_player("u1", uid, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+
+        server.tick_update(0.0);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.game_states.pump_network(&mut client.network);
+        let _ = client
+            .game_states
+            .apply_next_state(&mut client.entities, &mut client.players)
+            .unwrap();
+
+        let _client_map_uid = client.entities.map_entity_for(map_id).unwrap();
+        assert_eq!(client.entities.inner.map_gravity(map_id), Some(Vector2::new(0.0, -10.0)));
+        assert_eq!(client.entities.inner.map_auto_clear_forces(map_id), Some(true));
+
+        let _ = client
+            .input
+            .apply_held_movement_state(&mut client.entities, &client.players);
+        client.entities.inner.physics.get_mut(&uid).unwrap().predict = true;
+        client.physics.update(&mut client.entities, 0.016);
+
+        let physics = client.entities.inner.physics.get(&uid).unwrap();
+        assert_eq!(physics.linear_velocity, Vector2::new(0.0, -0.159488));
+        assert_eq!(physics.angular_velocity, 0.0);
+        assert_eq!(physics.force, Vector2::ZERO);
+        assert_eq!(physics.torque, 0.0);
+        let transform = client.entities.inner.transforms.get(&uid).unwrap();
+        assert!((transform.local_position.x - 0.0).abs() < 0.0001);
+        assert!(transform.local_position.y < 0.0);
+        assert_eq!(transform.local_rotation, Angle::ZERO);
+    }
+
+    #[test]
+    fn client_roundtrips_paused_map_state_from_server() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+
+        let map_id = server.maps.create_map(&mut server.entities.inner, Some(MapId::new(19)));
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        let _ = server.entities.inner.apply_transform_state(
+            uid,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        server.attach_player("u1", uid, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+        let map_uid = server.entities.inner.map_entity_for(map_id).unwrap();
+        assert!(server.entities.inner.set_map_paused(map_uid, true));
+
+        server.tick_update(0.0);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        assert!(client.entities.inner.is_map_paused(map_id));
     }
 
     #[test]
@@ -382,11 +475,12 @@ mod tests {
             .create_grid(&mut server.entities.inner, map_id, Some(sekai::GridId::new(9)), 4);
         let controlled = server.entities.create_entity(Some("mob"));
         server.entities.initialize_entity(controlled);
-        {
-            let transform = server.entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(server
+            .entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         server.attach_player("u1", controlled, false);
         server.players.set_current_tick(GameTick::FIRST);
         assert!(server.players.join_game("u1"));
@@ -431,14 +525,7 @@ mod tests {
         client.tick_update();
         client.flush_to_server(&mut server);
 
-        let client_grid_uid = client
-            .entities
-            .inner
-            .map_grid_components
-            .iter()
-            .find(|(_, component)| component.grid_index == grid_id)
-            .map(|(uid, _)| *uid)
-            .unwrap();
+        let client_grid_uid = client.entities.inner.grid_entity_for(grid_id).unwrap();
         let grid = client.entities.inner.map_grids.get(&client_grid_uid).unwrap();
         assert_eq!(grid.get_tile_ref(Vector2i::new(4, 0)).tile.type_id, 9);
         assert_eq!(grid.get_tile_ref(Vector2i::new(0, 0)).tile.type_id, 1);
@@ -483,11 +570,12 @@ mod tests {
 
         let controlled = server.entities.create_entity(Some("mob"));
         server.entities.initialize_entity(controlled);
-        {
-            let transform = server.entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(server
+            .entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         server.attach_player("u1", controlled, false);
         server.players.set_current_tick(GameTick::FIRST);
         assert!(server.players.join_game("u1"));
@@ -506,7 +594,7 @@ mod tests {
                 anchored: false,
             },
         );
-        sekai::EntityLookupSystem.update_bounds(&mut server.entities.inner, child);
+        server.entities.inner.reconcile_transform_runtime(child, None);
 
         server.tick_update(0.016);
 
@@ -518,14 +606,7 @@ mod tests {
         client.tick_update();
         client.flush_to_server(&mut server);
 
-        let client_grid_uid = client
-            .entities
-            .inner
-            .map_grid_components
-            .iter()
-            .find(|(_, component)| component.grid_index == grid_id)
-            .map(|(uid, _)| *uid)
-            .unwrap();
+        let client_grid_uid = client.entities.inner.grid_entity_for(grid_id).unwrap();
         assert!(client.entities.inner.map_grids.contains_key(&client_grid_uid));
         assert_eq!(
             client
@@ -582,11 +663,12 @@ mod tests {
 
         let controlled = server.entities.create_entity(Some("mob"));
         server.entities.initialize_entity(controlled);
-        {
-            let transform = server.entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
+        assert!(server
+            .entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = map_id;
+            }));
         server.attach_player("u1", controlled, false);
         server.players.set_current_tick(GameTick::FIRST);
         assert!(server.players.join_game("u1"));
@@ -601,16 +683,9 @@ mod tests {
         client.flush_to_server(&mut server);
 
         let client_map_uid = client.entities.map_entity_for(map_id).unwrap();
-        let client_grid_uid = client
-            .entities
-            .inner
-            .map_grid_components
-            .iter()
-            .find(|(_, component)| component.grid_index == grid_id)
-            .map(|(uid, _)| *uid)
-            .unwrap();
-        assert!(client.entities.inner.broadphases.contains_key(&client_map_uid));
-        assert!(client.entities.inner.physics_maps.contains_key(&client_map_uid));
+        let client_grid_uid = client.entities.inner.grid_entity_for(grid_id).unwrap();
+        assert!(client.entities.inner.has_map_broadphase(map_id));
+        assert!(client.entities.inner.has_map_physics_runtime(map_id));
         assert_eq!(client.entities.inner.transforms.get(&client_grid_uid).unwrap().parent, client_map_uid);
 
         server.current_tick = GameTick::new(2);
@@ -627,8 +702,8 @@ mod tests {
 
         assert!(client.entities.map_entity_for(map_id).is_none());
         assert!(!client.entities.inner.map_components.contains_key(&client_map_uid));
-        assert!(!client.entities.inner.broadphases.contains_key(&client_map_uid));
-        assert!(!client.entities.inner.physics_maps.contains_key(&client_map_uid));
+        assert!(!client.entities.inner.has_map_broadphase(map_id));
+        assert!(!client.entities.inner.has_map_physics_runtime(map_id));
         if let Some(grid_transform) = client.entities.inner.transforms.get(&client_grid_uid) {
             assert_eq!(grid_transform.parent, EntityUid::INVALID);
             assert_eq!(grid_transform.map_id, MapId::NULLSPACE);
@@ -653,6 +728,325 @@ mod tests {
             assert!(!client.entities.inner.map_grid_components.contains_key(&client_grid_uid));
             assert!(!client.entities.inner.map_grids.contains_key(&client_grid_uid));
         }
+    }
+
+    #[test]
+    fn client_roundtrips_incremental_physics_and_fixtures_deletions_from_server() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        let map_id = server.maps.create_map(&mut server.entities.inner, Some(MapId::new(5)));
+
+        let controlled = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(controlled);
+        let _ = server.entities.inner.apply_transform_state(
+            controlled,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(server.entities.inner.configure_physics_body(
+            controlled,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            controlled,
+            Fixture::new(
+                "controlled",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+        server.attach_player("u1", controlled, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+
+        let other = server.entities.create_entity(Some("other"));
+        server.entities.initialize_entity(other);
+        let _ = server.entities.inner.apply_transform_state(
+            other,
+            TransformComponentState {
+                local_position: Vector2::new(0.5, 0.0),
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(server.entities.inner.configure_physics_body(
+            other,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            other,
+            Fixture::new(
+                "other",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        server.tick_update(0.016);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+        client.flush_to_server(&mut server);
+        let _ = client.entities.inner.drain_map_contact_events(map_id);
+
+        assert_eq!(client.entities.inner.map_contact_count(map_id), 1);
+
+        server.current_tick = GameTick::new(2);
+        server.entities.set_current_tick(GameTick::new(2));
+        server.players.set_current_tick(GameTick::new(2));
+        server.maps.set_current_tick(GameTick::new(2));
+        assert!(server
+            .entities
+            .remove_component_by_net_id(controlled, 5));
+        assert!(server
+            .entities
+            .remove_component_by_net_id(other, 7));
+
+        server.tick_update(0.016);
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        assert_eq!(client.entities.inner.map_contact_count(map_id), 0);
+        let events = client.entities.inner.drain_map_contact_events(map_id);
+        assert!(events.is_empty());
+        assert!(
+            client
+                .entities
+                .inner
+                .entities_in_map_aabb(map_id, Box2::new(-1.0, -1.0, 1.0, 1.0))
+                .is_empty()
+        );
+        assert!(!client.entities.inner.physics.contains_key(&controlled));
+        assert!(!client.entities.inner.fixtures.contains_key(&other));
+    }
+
+    #[test]
+    fn client_roundtrips_incremental_joint_component_deletion_from_server() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        let map_id = server.maps.create_map(&mut server.entities.inner, Some(MapId::new(6)));
+
+        let controlled = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(controlled);
+        let _ = server.entities.inner.apply_transform_state(
+            controlled,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(server.entities.inner.configure_physics_body(
+            controlled,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            controlled,
+            Fixture::new(
+                "controlled",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+        server.attach_player("u1", controlled, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+
+        let other = server.entities.create_entity(Some("other"));
+        server.entities.initialize_entity(other);
+        let _ = server.entities.inner.apply_transform_state(
+            other,
+            TransformComponentState {
+                local_position: Vector2::new(0.5, 0.0),
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(server.entities.inner.configure_physics_body(
+            other,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            other,
+            Fixture::new(
+                "other",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        let mut joint = Joint::new(controlled.raw(), other.raw(), JointType::Distance);
+        joint.id = "rope".to_string();
+        joint.collide_connected = false;
+        assert!(server.entities.inner.add_joint_between(joint));
+
+        server.tick_update(0.016);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+        client.flush_to_server(&mut server);
+        let _ = client.entities.inner.drain_map_contact_events(map_id);
+
+        assert_eq!(client.entities.inner.map_contact_count(map_id), 0);
+
+        server.current_tick = GameTick::new(2);
+        server.entities.set_current_tick(GameTick::new(2));
+        server.players.set_current_tick(GameTick::new(2));
+        server.maps.set_current_tick(GameTick::new(2));
+        assert!(server
+            .entities
+            .remove_component_by_net_id(controlled, 8));
+
+        server.tick_update(0.016);
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        assert_eq!(client.entities.inner.map_contact_count(map_id), 1);
+        let events = client.entities.inner.drain_map_contact_events(map_id);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, butsuri::ContactStatus::StartTouching);
+        assert!(!client.entities.inner.joint_components.contains_key(&controlled));
+        assert_eq!(client.entities.inner.joint_components.get(&other).unwrap().joint_count(), 0);
+    }
+
+    #[test]
+    fn client_roundtrips_physics_deletion_with_implicit_joint_deletion_from_server() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        let map_id = server.maps.create_map(&mut server.entities.inner, Some(MapId::new(7)));
+
+        let controlled = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(controlled);
+        let _ = server.entities.inner.apply_transform_state(
+            controlled,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(server.entities.inner.configure_physics_body(
+            controlled,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            controlled,
+            Fixture::new(
+                "controlled",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+        server.attach_player("u1", controlled, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+
+        let other = server.entities.create_entity(Some("other"));
+        server.entities.initialize_entity(other);
+        let _ = server.entities.inner.apply_transform_state(
+            other,
+            TransformComponentState {
+                local_position: Vector2::new(0.5, 0.0),
+                rotation: Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id,
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(server.entities.inner.configure_physics_body(
+            other,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            other,
+            Fixture::new(
+                "other",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        let mut joint = Joint::new(controlled.raw(), other.raw(), JointType::Distance);
+        joint.id = "rope".to_string();
+        joint.collide_connected = false;
+        assert!(server.entities.inner.add_joint_between(joint));
+
+        server.tick_update(0.016);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+        client.flush_to_server(&mut server);
+
+        assert!(client.entities.inner.joint_components.contains_key(&controlled));
+        assert_eq!(client.entities.inner.joint_components.get(&other).unwrap().joint_count(), 1);
+
+        server.current_tick = GameTick::new(2);
+        server.entities.set_current_tick(GameTick::new(2));
+        server.players.set_current_tick(GameTick::new(2));
+        server.maps.set_current_tick(GameTick::new(2));
+        assert!(server
+            .entities
+            .remove_component_by_net_id(controlled, 5));
+
+        server.tick_update(0.016);
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        assert!(!client.entities.inner.physics.contains_key(&controlled));
+        assert!(!client.entities.inner.joint_components.contains_key(&controlled));
+        assert_eq!(client.entities.inner.joint_components.get(&other).unwrap().joint_count(), 0);
     }
 
     #[test]
@@ -780,7 +1174,158 @@ mod tests {
         assert!(!client.handle_local_input("MoveRight", BoundKeyState::Down));
         assert_eq!(client.entities.inner.transforms.get(&uid).unwrap().local_position, Vector2::new(1.0, 0.0));
         client.tick_update();
-        assert_eq!(client.entities.inner.transforms.get(&uid).unwrap().local_position, Vector2::new(2.0, 0.0));
+        assert_eq!(client.entities.inner.transforms.get(&uid).unwrap().local_position, Vector2::new(1.9968, 0.0));
+    }
+
+    #[test]
+    fn base_client_stops_predicted_integration_after_authoritative_sleep_state() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        {
+            let physics = server.entities.inner.ensure_physics(uid);
+            physics.can_collide = true;
+            physics.set_body_type(sekai::BodyType::Dynamic);
+            physics.awake = true;
+            physics.linear_velocity = Vector2::new(3.0, 0.0);
+        }
+        server.attach_player("u1", uid, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+        server.tick_update(0.0);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+        client.flush_to_server(&mut server);
+
+        assert_eq!(client.entities.inner.physics.get(&uid).unwrap().linear_velocity, Vector2::new(2.9904, 0.0));
+        assert!(client.entities.inner.physics.get(&uid).unwrap().awake);
+
+        server.current_tick = GameTick::new(2);
+        server.entities.set_current_tick(GameTick::new(2));
+        server.players.set_current_tick(GameTick::new(2));
+        server.maps.set_current_tick(GameTick::new(2));
+        let physics = daikoku::PhysicsSystem::new();
+        assert!(physics.set_awake(&mut server.entities, uid, false));
+        server.tick_update(0.0);
+
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        let physics = client.entities.inner.physics.get(&uid).unwrap();
+        assert!(!physics.awake);
+        assert_eq!(physics.linear_velocity, Vector2::ZERO);
+        let position = client.entities.inner.transforms.get(&uid).unwrap().local_position;
+        client.tick_update();
+        assert_eq!(client.entities.inner.transforms.get(&uid).unwrap().local_position, position);
+    }
+
+    #[test]
+    fn base_client_roundtrips_non_sleeping_fixed_rotation_physics_state_from_server() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        {
+            let physics = server.entities.inner.ensure_physics(uid);
+            physics.can_collide = true;
+            physics.set_body_type(sekai::BodyType::Dynamic);
+            physics.awake = false;
+            physics.sleeping_allowed = true;
+            physics.angular_velocity = 4.0;
+        }
+        server.attach_player("u1", uid, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+
+        server.tick_update(0.0);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+        client.flush_to_server(&mut server);
+
+        server.current_tick = GameTick::new(2);
+        server.entities.set_current_tick(GameTick::new(2));
+        server.players.set_current_tick(GameTick::new(2));
+        server.maps.set_current_tick(GameTick::new(2));
+        let physics = daikoku::PhysicsSystem::new();
+        assert!(physics.set_sleeping_allowed(&mut server.entities, uid, false));
+        assert!(physics.set_fixed_rotation(&mut server.entities, uid, true));
+        assert!(physics.set_body_status(&mut server.entities, uid, sekai::BodyStatus::InAir));
+        server.tick_update(0.0);
+
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        let physics = client.entities.inner.physics.get(&uid).unwrap();
+        assert!(physics.awake);
+        assert!(!physics.sleeping_allowed);
+        assert!(physics.fixed_rotation);
+        assert_eq!(physics.angular_velocity, 0.0);
+        assert_eq!(physics.body_status, sekai::BodyStatus::InAir);
+    }
+
+    #[test]
+    fn base_client_roundtrips_collision_wake_and_rebuilds_can_collide_semantics() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        let map_id = server.maps.create_map(&mut server.entities.inner, Some(MapId::new(18)));
+        let grid_id = server
+            .maps
+            .create_grid(&mut server.entities.inner, map_id, Some(GridId::new(44)), 8);
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        let grid_uid = server.entities.inner.grid_entity_for(grid_id).unwrap();
+        let _ = server.entities.inner.apply_transform_state(
+            uid,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: grid_uid,
+                map_id,
+                grid_id,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        {
+            let physics = server.entities.inner.ensure_physics(uid);
+            physics.set_body_type(sekai::BodyType::Dynamic);
+            physics.can_collide = true;
+            physics.set_awake(false);
+        }
+        server.entities.inner.ensure_collision_wake(uid);
+        server.entities.inner.refresh_entity_physics_runtime(uid);
+        server.attach_player("u1", uid, false);
+        server.players.set_current_tick(GameTick::FIRST);
+        assert!(server.players.join_game("u1"));
+        server.tick_update(0.0);
+
+        let mut client = BaseClient::new(ClientOptions {
+            username: "pedel".to_string(),
+        });
+        client.startup("u1");
+        feed_server_states_to_client(&mut client, &mut server, "u1");
+        client.tick_update();
+
+        assert!(!client.entities.inner.physics.get(&uid).unwrap().can_collide);
+        assert!(!client.entities.inner.physics.get(&uid).unwrap().awake);
+        assert!(client.entities.inner.collision_wakes.get(&uid).unwrap().enabled);
     }
 
     #[test]
