@@ -81,6 +81,13 @@ pub struct ServerNetManager {
     inbound_player_list_requests: HashMap<String, usize>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SessionInboundBatch {
+    pub player_list_requests: usize,
+    pub inputs: Vec<FullInputCmdMessage>,
+    pub entities: Vec<MsgEntity>,
+}
+
 impl ServerNetManager {
     pub fn new() -> Self {
         Self::default()
@@ -195,6 +202,14 @@ impl ServerNetManager {
 
     pub fn take_player_list_requests(&mut self, user_id: &str) -> usize {
         self.inbound_player_list_requests.remove(user_id).unwrap_or_default()
+    }
+
+    pub fn take_session_inbound(&mut self, user_id: &str) -> SessionInboundBatch {
+        SessionInboundBatch {
+            player_list_requests: self.take_player_list_requests(user_id),
+            inputs: self.take_input(user_id),
+            entities: self.take_entities(user_id),
+        }
     }
 
     pub fn send_player_list(&mut self, user_id: &str, list: MsgPlayerList) -> bool {

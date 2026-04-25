@@ -14,6 +14,9 @@ pub struct PhysicsComponent {
     pub sleep_time: f32,
     pub can_collide: bool,
     pub fixed_rotation: bool,
+    pub ignore_gravity: bool,
+    pub linear_damping: f32,
+    pub angular_damping: f32,
     pub linear_velocity: Vector2,
     pub angular_velocity: f32,
     pub force: Vector2,
@@ -22,6 +25,8 @@ pub struct PhysicsComponent {
 }
 
 impl PhysicsComponent {
+    const ANGULAR_VELOCITY_TOLERANCE: f32 = 0.00001;
+
     pub fn new() -> Self {
         Self {
             base: Component::new("Physics"),
@@ -34,6 +39,9 @@ impl PhysicsComponent {
             sleep_time: 0.0,
             can_collide: false,
             fixed_rotation: false,
+            ignore_gravity: false,
+            linear_damping: 0.2,
+            angular_damping: 0.2,
             linear_velocity: Vector2::ZERO,
             angular_velocity: 0.0,
             force: Vector2::ZERO,
@@ -66,6 +74,12 @@ impl PhysicsComponent {
             return;
         }
 
+        if !value && !self.sleeping_allowed {
+            self.awake = true;
+            self.sleep_time = 0.0;
+            return;
+        }
+
         if self.awake == value {
             return;
         }
@@ -75,6 +89,27 @@ impl PhysicsComponent {
             self.reset_dynamics();
             self.sleep_time = 0.0;
         }
+    }
+
+    pub fn set_sleeping_allowed(&mut self, value: bool) {
+        if self.sleeping_allowed == value {
+            return;
+        }
+
+        self.sleeping_allowed = value;
+        if !value {
+            self.set_awake(true);
+        }
+    }
+
+    pub fn set_fixed_rotation(&mut self, value: bool) {
+        if self.fixed_rotation == value {
+            return;
+        }
+
+        self.fixed_rotation = value;
+        self.angular_velocity = 0.0;
+        self.torque = 0.0;
     }
 
     pub fn set_linear_velocity(&mut self, velocity: Vector2) {
@@ -93,6 +128,83 @@ impl PhysicsComponent {
         self.linear_velocity = velocity;
     }
 
+    pub fn set_angular_velocity(&mut self, velocity: f32) {
+        if self.body_type == BodyType::Static {
+            return;
+        }
+
+        if self.fixed_rotation {
+            self.angular_velocity = 0.0;
+            return;
+        }
+
+        if velocity * velocity > 0.0 {
+            self.set_awake(true);
+        }
+
+        if (self.angular_velocity - velocity).abs() <= Self::ANGULAR_VELOCITY_TOLERANCE {
+            return;
+        }
+
+        self.angular_velocity = velocity;
+    }
+
+    pub fn set_body_status(&mut self, status: BodyStatus) {
+        self.body_status = status;
+    }
+
+    pub fn set_ignore_gravity(&mut self, value: bool) {
+        self.ignore_gravity = value;
+    }
+
+    pub fn set_linear_damping(&mut self, value: f32) {
+        if value.is_finite() {
+            self.linear_damping = value.max(0.0);
+        }
+    }
+
+    pub fn set_angular_damping(&mut self, value: f32) {
+        if value.is_finite() {
+            self.angular_damping = value.max(0.0);
+        }
+    }
+
+    pub fn apply_force(&mut self, force: Vector2) {
+        if self.body_type != BodyType::Dynamic {
+            return;
+        }
+
+        self.set_awake(true);
+        self.force = self.force + force;
+    }
+
+    pub fn apply_torque(&mut self, torque: f32) {
+        if self.body_type != BodyType::Dynamic {
+            return;
+        }
+
+        self.set_awake(true);
+        self.torque += torque;
+    }
+
+    pub fn apply_linear_impulse(&mut self, impulse: Vector2) {
+        if self.body_type == BodyType::Static {
+            return;
+        }
+
+        self.set_awake(true);
+        self.set_linear_velocity(self.linear_velocity + impulse);
+    }
+
+    pub fn apply_angular_impulse(&mut self, impulse: f32) {
+        if self.body_type == BodyType::Static {
+            return;
+        }
+
+        self.set_awake(true);
+        self.set_angular_velocity(self.angular_velocity + impulse);
+    }
+
     pub fn reset_dynamics(&mut self) {
         self.torque = 0.0;
         self.angular_velocity = 0.0;
@@ -103,6 +215,7 @@ impl PhysicsComponent {
     pub fn get_component_state(&self) -> PhysicsComponentState {
         PhysicsComponentState::new(
             self.can_collide,
+            self.awake,
             self.sleeping_allowed,
             self.fixed_rotation,
             self.body_status,
@@ -113,13 +226,14 @@ impl PhysicsComponent {
     }
 
     pub fn handle_component_state(&mut self, state: PhysicsComponentState) {
-        self.sleeping_allowed = state.sleeping_allowed;
-        self.fixed_rotation = state.fixed_rotation;
+        self.set_sleeping_allowed(state.sleeping_allowed);
+        self.set_fixed_rotation(state.fixed_rotation);
         self.can_collide = state.can_collide;
-        self.body_status = state.status;
-        self.linear_velocity = state.linear_velocity;
-        self.angular_velocity = state.angular_velocity;
+        self.set_body_status(state.status);
         self.set_body_type(state.body_type);
+        self.set_linear_velocity(state.linear_velocity);
+        self.set_angular_velocity(state.angular_velocity);
+        self.set_awake(state.awake);
         self.predict = false;
     }
 
@@ -153,7 +267,7 @@ impl Default for PhysicsComponent {
 #[cfg(test)]
 mod tests {
     use super::PhysicsComponent;
-    use crate::{EntityUid, FixturesComponent, GridId, MapId, TransformComponent, TransformResolver, WorldTransform};
+    use crate::{BodyStatus, EntityUid, FixturesComponent, GridId, MapId, PhysicsComponentState, TransformComponent, TransformResolver, WorldTransform};
     use butsuri::{AabbShape, BodyType, Fixture, PhysShape};
     use keisan::{Angle, Box2, Matrix3, Vector2};
 
@@ -191,5 +305,94 @@ mod tests {
         xform.set_parent(EntityUid::new(7));
         let bounds = body.get_aabb(&xform, &fixtures, &Resolver).unwrap();
         assert_eq!(bounds, Box2::new(3.0, 4.0, 5.0, 6.0));
+    }
+
+    #[test]
+    fn physics_component_disabling_sleeping_wakes_body() {
+        let mut body = PhysicsComponent::new();
+        body.set_body_type(BodyType::Dynamic);
+        body.set_awake(false);
+        body.set_sleeping_allowed(false);
+        assert!(body.awake);
+        assert!(!body.sleeping_allowed);
+    }
+
+    #[test]
+    fn physics_component_fixed_rotation_zeroes_angular_state() {
+        let mut body = PhysicsComponent::new();
+        body.set_body_type(BodyType::Dynamic);
+        body.angular_velocity = 3.0;
+        body.torque = 2.0;
+        body.set_fixed_rotation(true);
+        assert!(body.fixed_rotation);
+        assert_eq!(body.angular_velocity, 0.0);
+        assert_eq!(body.torque, 0.0);
+        body.set_angular_velocity(5.0);
+        assert_eq!(body.angular_velocity, 0.0);
+    }
+
+    #[test]
+    fn physics_component_handle_state_keeps_non_sleeping_bodies_awake() {
+        let mut body = PhysicsComponent::new();
+        body.handle_component_state(PhysicsComponentState::new(
+            true,
+            false,
+            false,
+            false,
+            BodyStatus::OnGround,
+            Vector2::ZERO,
+            0.0,
+            BodyType::Dynamic,
+        ));
+        assert!(!body.sleeping_allowed);
+        assert!(body.awake);
+    }
+
+    #[test]
+    fn physics_component_accumulates_force_and_wakes_dynamic_bodies() {
+        let mut body = PhysicsComponent::new();
+        body.set_body_type(BodyType::Dynamic);
+        body.set_awake(false);
+        body.apply_force(Vector2::new(2.0, -1.0));
+        assert!(body.awake);
+        assert_eq!(body.force, Vector2::new(2.0, -1.0));
+        body.apply_force(Vector2::new(-1.0, 3.0));
+        assert_eq!(body.force, Vector2::new(1.0, 2.0));
+    }
+
+    #[test]
+    fn physics_component_applies_linear_and_angular_impulses() {
+        let mut body = PhysicsComponent::new();
+        body.set_body_type(BodyType::Dynamic);
+        body.set_awake(false);
+        body.apply_linear_impulse(Vector2::new(1.5, -0.5));
+        assert!(body.awake);
+        assert_eq!(body.linear_velocity, Vector2::new(1.5, -0.5));
+
+        body.apply_angular_impulse(2.0);
+        assert_eq!(body.angular_velocity, 2.0);
+    }
+
+    #[test]
+    fn physics_component_accumulates_torque_and_wakes_dynamic_bodies() {
+        let mut body = PhysicsComponent::new();
+        body.set_body_type(BodyType::Dynamic);
+        body.set_awake(false);
+        body.apply_torque(1.5);
+        assert!(body.awake);
+        assert_eq!(body.torque, 1.5);
+        body.apply_torque(-0.5);
+        assert_eq!(body.torque, 1.0);
+    }
+
+    #[test]
+    fn physics_component_tracks_gravity_and_damping_flags() {
+        let mut body = PhysicsComponent::new();
+        body.set_ignore_gravity(true);
+        body.set_linear_damping(0.6);
+        body.set_angular_damping(0.4);
+        assert!(body.ignore_gravity);
+        assert_eq!(body.linear_damping, 0.6);
+        assert_eq!(body.angular_damping, 0.4);
     }
 }

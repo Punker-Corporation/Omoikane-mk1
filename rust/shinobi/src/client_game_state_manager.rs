@@ -8,6 +8,13 @@ pub struct GameStateAppliedArgs {
     pub applied_state: GameState,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameStateRuntimeApplyContext {
+    pub pending_inputs: Vec<FullInputCmdMessage>,
+    pub local_controlled: Option<EntityUid>,
+    pub pending_for_local: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClientGameStateManager {
     processor: ClientGameStateProcessor,
@@ -77,38 +84,19 @@ impl ClientGameStateManager {
         players: &mut PlayerManager,
     ) -> Option<GameState> {
         let state = self.processor.pop_next_state()?;
-        let mut created_entities = Vec::new();
-
-        for entity_state in &state.entity_states {
-            if !entities.entity_exists(entity_state.uid) {
-                created_entities.push(entity_state.uid);
-            }
-            let _ = entities.apply_serialized_entity_state(&mut self.serializer, entity_state);
-        }
-
-        if let Some(map_data) = &state.map_data {
-            entities.apply_map_data(map_data);
-        }
-
-        for deleted in &state.entity_deletions {
-            entities.delete_entity(*deleted);
-        }
-
-        for created in created_entities {
-            entities.initialize_entity(created);
-        }
-
-        entities.rebuild_runtime_state();
-
-        players.apply_player_states(&state.player_states, state.from_sequence == GameTick::ZERO);
-        self.last_processed_tick = state.to_sequence;
-        self.last_processed_seq = self.last_processed_seq.max(state.last_processed_input);
-        self.pending_inputs
-            .retain(|input| input.input_sequence > self.last_processed_seq);
-        self.applied_states.push(GameStateAppliedArgs {
-            applied_state: state.clone(),
-        });
+        self.apply_state(entities, players, &state);
         Some(state)
+    }
+
+    pub fn apply_next_state_with_runtime_context(
+        &mut self,
+        entities: &mut ClientEntityManager,
+        players: &mut PlayerManager,
+    ) -> Option<(GameState, GameStateRuntimeApplyContext)> {
+        let state = self.processor.pop_next_state()?;
+        self.apply_state(entities, players, &state);
+        let context = self.runtime_apply_context(players);
+        Some((state, context))
     }
 
     pub fn pending_inputs(&self) -> &[FullInputCmdMessage] {
@@ -119,6 +107,24 @@ impl ClientGameStateManager {
         self.pending_inputs.clone()
     }
 
+    pub fn has_pending_input_for(&self, entity: EntityUid) -> bool {
+        self.pending_inputs
+            .iter()
+            .any(|input| input.coordinates.entity_id == entity)
+    }
+
+    pub fn runtime_apply_context(&self, players: &PlayerManager) -> GameStateRuntimeApplyContext {
+        let pending_inputs = self.pending_inputs_snapshot();
+        let local_controlled = players.controlled_entity();
+        let pending_for_local =
+            local_controlled.is_some_and(|controlled| self.has_pending_input_for(controlled));
+        GameStateRuntimeApplyContext {
+            pending_inputs,
+            local_controlled,
+            pending_for_local,
+        }
+    }
+
     pub fn applied_entity_exists(
         &self,
         entities: &ClientEntityManager,
@@ -126,11 +132,28 @@ impl ClientGameStateManager {
     ) -> bool {
         entities.entity_exists(uid)
     }
+
+    fn apply_state(
+        &mut self,
+        entities: &mut ClientEntityManager,
+        players: &mut PlayerManager,
+        state: &GameState,
+    ) {
+        let _created_entities = entities.apply_game_state(&mut self.serializer, state);
+        players.apply_player_states(&state.player_states, state.from_sequence == GameTick::ZERO);
+        self.last_processed_tick = state.to_sequence;
+        self.last_processed_seq = self.last_processed_seq.max(state.last_processed_input);
+        self.pending_inputs
+            .retain(|input| input.input_sequence > self.last_processed_seq);
+        self.applied_states.push(GameStateAppliedArgs {
+            applied_state: state.clone(),
+        });
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ClientGameStateManager;
+    use super::{ClientGameStateManager, GameStateRuntimeApplyContext};
     use crate::{ClientEntityManager, ClientNetManager, PlayerManager};
     use daikoku::MsgState;
     use jikan::GameTick;
@@ -240,13 +263,7 @@ mod tests {
         assert_eq!(applied.to_sequence, GameTick::new(3));
         assert!(entities.entity_exists(EntityUid::new(55)));
         assert_eq!(players.local_player().unwrap().controlled_entity, Some(EntityUid::new(55)));
-        let grid_uid = entities
-            .inner
-            .map_grid_components
-            .iter()
-            .find(|(_, component)| component.grid_index == GridId::new(8))
-            .map(|(uid, _)| *uid)
-            .unwrap();
+        let grid_uid = entities.inner.grid_entity_for(GridId::new(8)).unwrap();
         assert_eq!(
             entities
                 .inner
@@ -257,6 +274,14 @@ mod tests {
                 .tile
                 .type_id,
             4
+        );
+        assert_eq!(
+            manager.runtime_apply_context(&players),
+            GameStateRuntimeApplyContext {
+                pending_inputs: Vec::new(),
+                local_controlled: Some(EntityUid::new(55)),
+                pending_for_local: false,
+            }
         );
     }
 

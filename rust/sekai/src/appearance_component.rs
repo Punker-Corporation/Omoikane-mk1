@@ -136,18 +136,19 @@ impl AppearanceComponent {
         }
     }
 
-    pub fn set_data<T>(&mut self, key: impl Into<String>, value: T)
+    pub fn set_data<T>(&mut self, key: impl Into<String>, value: T) -> bool
     where
         T: IntoAppearanceValue,
     {
         let key = key.into();
         let value = value.into_appearance_value();
         if self.appearance_data.get(&key) == Some(&value) {
-            return;
+            return false;
         }
 
         self.appearance_data.insert(key, value);
         self.appearance_dirty = true;
+        true
     }
 
     pub fn get_data<T>(&self, key: &str) -> Option<T>

@@ -4,7 +4,7 @@ use crate::{
     ServerNetManager, TransformSystem,
 };
 use jikan::GameTick;
-use sekai::{MapManager, MsgPlayerList, TimerSystem};
+use sekai::{MapManager, MsgPlayerList};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerOptions {
@@ -68,7 +68,6 @@ impl DaikokuServer {
 
     pub fn start(&mut self) {
         self.players.initialize(self.options.max_players);
-        self.entities.initialize();
         self.game_states.initialize();
         self.network.initialize();
         self.input.initialize();
@@ -151,48 +150,7 @@ impl DaikokuServer {
         self.maps.set_current_tick(self.current_tick);
         let users: Vec<_> = self.players.sessions().map(|session| session.user_id.clone()).collect();
         for user_id in users {
-            let requests = self.network.take_player_list_requests(&user_id);
-            for _ in 0..requests {
-                let _ = self.network.send_player_list(
-                    &user_id,
-                    MsgPlayerList {
-                        plyrs: self.players.get_player_states(),
-                    },
-                );
-            }
-            for input in self.network.take_input(&user_id) {
-                let _ = self.input.handle_input(&mut self.players, &user_id, input.clone());
-                let _ = self.input.apply_movement_command(
-                    &mut self.entities,
-                    &self.players,
-                    &mut self.transforms,
-                    &user_id,
-                    &input,
-                );
-                let _ = self.input.apply_movement_state(
-                    &mut self.entities,
-                    &self.players,
-                    &self.physics,
-                    &user_id,
-                );
-            }
-            for message in self.network.take_entities(&user_id) {
-                match message.message_type {
-                    EntityMessageType::ComponentMessage => {
-                        self.entities.receive_component_message(
-                            user_id.clone(),
-                            message.entity_uid,
-                            message.net_id,
-                            message.component_message.unwrap_or_default(),
-                        );
-                    }
-                    EntityMessageType::SystemMessage => {
-                        self.entities
-                            .receive_system_message(user_id.clone(), message.system_message.unwrap_or_default());
-                    }
-                    EntityMessageType::Error => {}
-                }
-            }
+            self.process_session_inbound(&user_id);
         }
         let _ = self
             .physics
@@ -201,12 +159,69 @@ impl DaikokuServer {
             .transforms
             .process_deferred_moves(&mut self.entities, &mut self.maps);
         let _ = self.physics.sync_map_physics(&mut self.entities, &self.maps);
-        TimerSystem.update(&mut self.entities.inner, frame_time);
+        self.entities.inner.update_timer_runtime(frame_time);
         let updates = self
             .game_states
             .send_game_state_update(&mut self.entities, &mut self.maps, &mut self.players, self.current_tick);
         for (user_id, state) in updates {
             let _ = self.network.send_state(&user_id, state);
+        }
+    }
+
+    fn process_session_inbound(&mut self, user_id: &str) {
+        let batch = self.network.take_session_inbound(user_id);
+        self.process_player_list_requests(user_id, batch.player_list_requests);
+        self.process_input_batch(user_id, batch.inputs);
+        self.process_entity_messages(user_id, batch.entities);
+    }
+
+    fn process_player_list_requests(&mut self, user_id: &str, requests: usize) {
+        for _ in 0..requests {
+            let _ = self.network.send_player_list(
+                user_id,
+                MsgPlayerList {
+                    plyrs: self.players.get_player_states(),
+                },
+            );
+        }
+    }
+
+    fn process_input_batch(&mut self, user_id: &str, inputs: Vec<FullInputCmdMessage>) {
+        for input in inputs {
+            let _ = self.input.handle_input(&mut self.players, user_id, input.clone());
+            let _ = self.input.apply_movement_command(
+                &mut self.entities,
+                &self.players,
+                &mut self.transforms,
+                user_id,
+                &input,
+            );
+            let _ = self.input.apply_movement_state(
+                &mut self.entities,
+                &self.players,
+                &self.physics,
+                user_id,
+            );
+        }
+    }
+
+    fn process_entity_messages(&mut self, user_id: &str, messages: Vec<MsgEntity>) {
+        for message in messages {
+            match message.message_type {
+                EntityMessageType::ComponentMessage => {
+                    self.entities.receive_component_message(
+                        user_id.to_string(),
+                        message.entity_uid,
+                        message.net_id,
+                        message.component_message.unwrap_or_default(),
+                    );
+                }
+                EntityMessageType::SystemMessage => {
+                    self.entities
+                        .receive_system_message(user_id.to_string(), message.system_message.unwrap_or_default());
+                }
+                EntityMessageType::Error => {}
+            }
         }
     }
 
@@ -268,11 +283,11 @@ mod tests {
         assert_eq!(server.players.get_session("u1").unwrap().last_processed_input, 6);
         assert_eq!(
             server.entities.inner.transforms.get(&uid).unwrap().local_position,
-            Vector2::new(2.0, 0.0)
+            Vector2::new(1.9968, 0.0)
         );
         assert_eq!(
             server.entities.inner.physics.get(&uid).unwrap().linear_velocity,
-            Vector2::new(crate::InputSystem::MOVE_SPEED, 0.0)
+            Vector2::new(62.3, 0.0)
         );
     }
 
@@ -328,43 +343,132 @@ mod tests {
         let map_id = server
             .maps
             .create_map(&mut server.entities.inner, Some(MapId::new(2)));
-        let map_owner = server.maps.get_map_entity_id(map_id);
-
         let uid = server.entities.create_entity(Some("mob"));
         server.entities.initialize_entity(uid);
-        {
-            let transform = server.entities.inner.transforms.get_mut(&uid).unwrap();
-            transform.map_id = map_id;
-            transform.rebuild_for_manager();
-        }
-        let body = server.entities.inner.ensure_physics(uid);
-        body.can_collide = true;
-        body.set_body_type(BodyType::Dynamic);
-        body.awake = true;
-        server
-            .entities
-            .inner
-            .ensure_fixtures(uid)
-            .insert_fixture(Fixture::new(
-                "main",
-                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
-            ));
-
-        server.tick_update(0.016);
-        assert!(server.entities.inner.broadphases.contains_key(&map_owner));
         assert!(server
             .entities
             .inner
-            .physics_maps
-            .get(&map_owner)
-            .unwrap()
-            .bodies
-            .contains(&uid));
+            .mutate_transform_and_reconcile(uid, |transform| {
+                transform.map_id = map_id;
+            }));
+        assert!(server.entities.inner.configure_physics_body(
+            uid,
+            Some(BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
+        );
+
+        server.tick_update(0.016);
+        assert!(server.entities.inner.has_map_broadphase(map_id));
+        assert!(server
+            .entities
+            .inner
+            .map_contains_body(map_id, uid));
         assert_eq!(
             server
-                .physics
-                .query_aabb_entities(&server.entities, map_owner, Box2::new(-2.0, -2.0, 2.0, 2.0)),
+                .entities
+                .inner
+                .entities_in_map_aabb(map_id, Box2::new(-2.0, -2.0, 2.0, 2.0)),
             vec![uid]
         );
+    }
+
+    #[test]
+    fn base_server_applies_map_gravity_and_auto_clear_forces_during_tick() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        let map_id = server
+            .maps
+            .create_map(&mut server.entities.inner, Some(MapId::new(3)));
+        assert!(server
+            .physics
+            .set_map_gravity(&mut server.entities, &server.maps, map_id, Vector2::new(0.0, -10.0)));
+        assert!(server
+            .physics
+            .set_auto_clear_forces(&mut server.entities, &server.maps, map_id, true));
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        assert!(server
+            .entities
+            .inner
+            .mutate_transform_and_reconcile(uid, |transform| {
+                transform.map_id = map_id;
+            }));
+        assert!(server.entities.inner.configure_physics_body(
+            uid,
+            Some(BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        assert!(server.entities.inner.mutate_physics_and_reconcile(uid, |body| {
+            body.force = Vector2::new(2.0, 0.0);
+            body.torque = 4.0;
+        }));
+        let _ = server.entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
+        );
+
+        server.tick_update(0.5);
+        let body = server.entities.inner.physics.get(&uid).unwrap();
+        assert_eq!(body.linear_velocity, Vector2::new(0.9, -4.5));
+        assert_eq!(body.angular_velocity, 1.8);
+        assert_eq!(body.force, Vector2::ZERO);
+        assert_eq!(body.torque, 0.0);
+        let transform = server.entities.inner.transforms.get(&uid).unwrap();
+        assert_eq!(transform.local_position, Vector2::new(0.45, -2.25));
+        assert!((transform.local_rotation.theta - 0.9).abs() < 0.0001);
+    }
+
+    #[test]
+    fn base_server_steps_force_and_impulse_applications_into_authoritative_motion() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        let map_id = server
+            .maps
+            .create_map(&mut server.entities.inner, Some(MapId::new(33)));
+
+        let uid = server.entities.create_entity(Some("mob"));
+        server.entities.initialize_entity(uid);
+        assert!(server
+            .entities
+            .inner
+            .mutate_transform_and_reconcile(uid, |transform| {
+                transform.map_id = map_id;
+            }));
+        assert!(server.entities.inner.configure_physics_body(
+            uid,
+            Some(BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+
+        assert!(server.physics.apply_force(&mut server.entities, uid, Vector2::new(2.0, 0.0)));
+        assert!(server.physics.apply_linear_impulse(&mut server.entities, uid, Vector2::new(1.0, 0.0)));
+        assert!(server.physics.apply_angular_impulse(&mut server.entities, uid, 4.0));
+
+        server.tick_update(0.5);
+        let body = server.entities.inner.physics.get(&uid).unwrap();
+        assert_eq!(body.linear_velocity, Vector2::new(1.8, 0.0));
+        assert_eq!(body.angular_velocity, 3.6);
+        assert_eq!(body.force, Vector2::new(2.0, 0.0));
+        assert_eq!(body.torque, 0.0);
+        let transform = server.entities.inner.transforms.get(&uid).unwrap();
+        assert_eq!(transform.local_position, Vector2::new(0.9, 0.0));
+        assert!((transform.local_rotation.theta - 1.8).abs() < 0.0001);
     }
 }

@@ -59,12 +59,7 @@ impl PvsSystem {
         entities: &ServerEntityManager,
         map_id: sekai::MapId,
     ) -> Option<EntityUid> {
-        entities
-            .inner
-            .map_components
-            .iter()
-            .find(|(_, component)| component.world_map == map_id)
-            .map(|(uid, _)| *uid)
+        entities.inner.map_entity_for(map_id)
     }
 
     fn augment_with_support_entities(
@@ -74,10 +69,9 @@ impl PvsSystem {
         controlled: Option<EntityUid>,
     ) {
         if let Some(controlled) = controlled {
-            if let Some(transform) = entities.inner.transforms.get(&controlled) {
-                if let Some(map_uid) = Self::map_entity_for_world_map(entities, transform.map_id) {
-                    current.insert(map_uid);
-                }
+            let map_id = entities.inner.map_id_for(controlled);
+            if let Some(map_uid) = Self::map_entity_for_world_map(entities, map_id) {
+                current.insert(map_uid);
             }
         }
 
@@ -90,10 +84,9 @@ impl PvsSystem {
                 continue;
             }
 
-            if let Some(transform) = entities.inner.transforms.get(&entity) {
-                if let Some(map_uid) = Self::map_entity_for_world_map(entities, transform.map_id) {
-                    current.insert(map_uid);
-                }
+            let map_id = entities.inner.map_id_for(entity);
+            if let Some(map_uid) = Self::map_entity_for_world_map(entities, map_id) {
+                current.insert(map_uid);
             }
         }
     }
@@ -104,14 +97,9 @@ impl PvsSystem {
         session: &PlayerSession,
     ) -> (Vec<EntityUid>, Vec<EntityUid>, Vec<EntityUid>) {
         let mut current = if !self.culling_enabled {
-            entities.inner.entities.iter().copied().collect::<HashSet<_>>()
+            entities.inner.entity_uids(true).into_iter().collect::<HashSet<_>>()
         } else if let Some(controlled) = session.controlled_entity {
-            let controlled_map = entities
-                .inner
-                .transforms
-                .get(&controlled)
-                .map(|transform| transform.map_id)
-                .unwrap_or(sekai::MapId::NULLSPACE);
+            let controlled_map = entities.inner.map_id_for(controlled);
             let center = entities
                 .inner
                 .world_transform(controlled)
@@ -119,31 +107,11 @@ impl PvsSystem {
                 .unwrap_or(keisan::Vector2::ZERO);
             entities
                 .inner
-                .entities
-                .iter()
-                .copied()
-                .filter(|entity| {
-                    if entities
-                        .inner
-                        .map_components
-                        .get(entity)
-                        .is_some_and(|component| component.world_map == controlled_map)
-                    {
-                        return true;
-                    }
-                    entities
-                        .inner
-                        .world_transform(*entity)
-                        .map(|world| {
-                            world.map_id == controlled_map
-                                && (world.world_position - center).length_squared()
-                                    <= self.view_size * self.view_size
-                        })
-                        .unwrap_or(false)
-                })
+                .entities_in_map_radius(controlled_map, center, self.view_size, true, true)
+                .into_iter()
                 .collect::<HashSet<_>>()
         } else {
-            entities.inner.entities.iter().copied().collect::<HashSet<_>>()
+            entities.inner.entity_uids(true).into_iter().collect::<HashSet<_>>()
         };
         self.augment_with_support_entities(entities, &mut current, session.controlled_entity);
 
@@ -220,11 +188,11 @@ mod tests {
 
         let other = entities.create_entity(None);
         entities.initialize_entity(other);
-        {
-            let transform = entities.inner.transforms.get_mut(&other).unwrap();
-            transform.local_position = keisan::Vector2::new(100.0, 0.0);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(other, |transform| {
+                transform.local_position = keisan::Vector2::new(100.0, 0.0);
+            }));
 
         let mut pvs = PvsSystem::new();
         pvs.view_size = 8.0;
@@ -234,11 +202,11 @@ mod tests {
         assert!(!visible.contains(&other));
         assert!(!gained.contains(&other));
 
-        {
-            let transform = entities.inner.transforms.get_mut(&other).unwrap();
-            transform.local_position = keisan::Vector2::new(1.0, 0.0);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(other, |transform| {
+                transform.local_position = keisan::Vector2::new(1.0, 0.0);
+            }));
 
         let (visible, deletions, gained) = pvs.calculate_visible_entities(&entities, session);
         assert!(visible.contains(&other));
@@ -261,11 +229,11 @@ mod tests {
         let controlled = entities.create_entity(None);
         entities.initialize_entity(controlled);
         session.controlled_entity = Some(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = sekai::MapId::new(2);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = sekai::MapId::new(2);
+            }));
 
         let mut pvs = PvsSystem::new();
         pvs.handle_player_status_changed(session);
@@ -286,20 +254,20 @@ mod tests {
         let controlled = entities.create_entity(None);
         entities.initialize_entity(controlled);
         session.controlled_entity = Some(controlled);
-        {
-            let transform = entities.inner.transforms.get_mut(&controlled).unwrap();
-            transform.map_id = sekai::MapId::new(2);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(controlled, |transform| {
+                transform.map_id = sekai::MapId::new(2);
+            }));
 
         let other = entities.create_entity(None);
         entities.initialize_entity(other);
-        {
-            let transform = entities.inner.transforms.get_mut(&other).unwrap();
-            transform.map_id = sekai::MapId::new(3);
-            transform.local_position = keisan::Vector2::new(1.0, 0.0);
-            transform.rebuild_for_manager();
-        }
+        assert!(entities
+            .inner
+            .mutate_transform_and_reconcile(other, |transform| {
+                transform.map_id = sekai::MapId::new(3);
+                transform.local_position = keisan::Vector2::new(1.0, 0.0);
+            }));
 
         let mut pvs = PvsSystem::new();
         pvs.view_size = 8.0;

@@ -143,6 +143,12 @@ impl PlayerManager {
         self.local_player.as_mut()
     }
 
+    pub fn controlled_entity(&self) -> Option<EntityUid> {
+        self.local_player
+            .as_ref()
+            .and_then(|player| player.controlled_entity)
+    }
+
     pub fn session(&self, user_id: &str) -> Option<&ClientSession> {
         self.sessions.get(user_id)
     }
@@ -228,6 +234,7 @@ mod tests {
         ], true);
         let local = manager.local_player().unwrap();
         assert_eq!(local.controlled_entity, Some(EntityUid::new(9)));
+        assert_eq!(manager.controlled_entity(), Some(EntityUid::new(9)));
         assert_eq!(local.session.status, SessionStatus::InGame);
         assert_eq!(manager.session("u2").unwrap().name, "rika");
     }

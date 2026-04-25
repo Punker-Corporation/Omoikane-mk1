@@ -1,4 +1,7 @@
-use crate::Component;
+use crate::{
+    CollisionChangeMessage, Component, JointAddedEvent, JointRemovedEvent, PhysicsSleepMessage,
+    PhysicsWakeMessage,
+};
 use butsuri::{Contact, ContactManager, ContactStatus};
 use keisan::Vector2;
 use serde::{Deserialize, Serialize};
@@ -10,6 +13,15 @@ use crate::EntityUid;
 pub struct PhysicsContactEvent {
     pub status: ContactStatus,
     pub contact: Contact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PhysicsRuntimeEvent {
+    Wake(PhysicsWakeMessage),
+    Sleep(PhysicsSleepMessage),
+    CollisionChange(CollisionChangeMessage),
+    JointAdded(JointAddedEvent),
+    JointRemoved(JointRemovedEvent),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,6 +41,7 @@ pub struct SharedPhysicsMapComponent {
     pub awake_bodies: HashSet<EntityUid>,
     contact_manager: ContactManager,
     contact_events: VecDeque<PhysicsContactEvent>,
+    runtime_events: VecDeque<PhysicsRuntimeEvent>,
     deferred_updates: HashSet<EntityUid>,
     queued_wake: HashSet<EntityUid>,
     queued_sleep: HashSet<EntityUid>,
@@ -45,6 +58,7 @@ impl SharedPhysicsMapComponent {
             awake_bodies: HashSet::new(),
             contact_manager: ContactManager::new(),
             contact_events: VecDeque::new(),
+            runtime_events: VecDeque::new(),
             deferred_updates: HashSet::new(),
             queued_wake: HashSet::new(),
             queued_sleep: HashSet::new(),
@@ -90,6 +104,14 @@ impl SharedPhysicsMapComponent {
 
     pub fn drain_contact_events(&mut self) -> Vec<PhysicsContactEvent> {
         self.contact_events.drain(..).collect()
+    }
+
+    pub fn queue_runtime_event(&mut self, event: PhysicsRuntimeEvent) {
+        self.runtime_events.push_back(event);
+    }
+
+    pub fn drain_runtime_events(&mut self) -> Vec<PhysicsRuntimeEvent> {
+        self.runtime_events.drain(..).collect()
     }
 
     pub fn add_awake_body(&mut self, body: EntityUid) {
@@ -156,6 +178,7 @@ impl SharedPhysicsMapComponent {
         self.queued_collision_changes.clear();
         self.contact_manager.clear();
         self.contact_events.clear();
+        self.runtime_events.clear();
     }
 }
 
@@ -167,7 +190,7 @@ impl Default for SharedPhysicsMapComponent {
 
 #[cfg(test)]
 mod tests {
-    use super::{PhysicsContactEvent, SharedPhysicsMapComponent, SharedPhysicsMapComponentState};
+    use super::{PhysicsContactEvent, PhysicsRuntimeEvent, SharedPhysicsMapComponent, SharedPhysicsMapComponentState};
     use crate::EntityUid;
     use butsuri::{Contact, ContactStatus, ContactType};
     use keisan::Vector2;
@@ -199,6 +222,20 @@ mod tests {
                 status: ContactStatus::StartTouching,
                 contact: Contact::new("a", "b", ContactType::Aabb),
             }]
+        );
+    }
+
+    #[test]
+    fn physics_map_component_queues_and_drains_runtime_events() {
+        let mut map = SharedPhysicsMapComponent::new();
+        map.queue_runtime_event(PhysicsRuntimeEvent::Wake(crate::PhysicsWakeMessage {
+            body: EntityUid::new(5),
+        }));
+        assert_eq!(
+            map.drain_runtime_events(),
+            vec![PhysicsRuntimeEvent::Wake(crate::PhysicsWakeMessage {
+                body: EntityUid::new(5),
+            })]
         );
     }
 
