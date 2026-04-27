@@ -53,9 +53,14 @@ impl<T: Stopwatch> GameTiming<T> {
         let (cached_time, last_time_tick) = self.cached_cur_time;
         let mut time = cached_time;
         if self.cur_tick.value >= last_time_tick.value {
-            time += self.tick_period().mul_f64((self.cur_tick.value - last_time_tick.value) as f64);
+            time += self
+                .tick_period()
+                .mul_f64((self.cur_tick.value - last_time_tick.value) as f64);
         } else {
-            time = time.saturating_sub(self.tick_period().mul_f64((last_time_tick.value - self.cur_tick.value) as f64));
+            time = time.saturating_sub(
+                self.tick_period()
+                    .mul_f64((last_time_tick.value - self.cur_tick.value) as f64),
+            );
         }
         if !self.in_simulation {
             time + self.tick_remainder
@@ -125,7 +130,8 @@ impl<T: Stopwatch> GameTiming<T> {
         if self.in_simulation {
             u16::MAX
         } else {
-            (u16::MAX as f64 * self.tick_remainder.as_secs_f64() / self.tick_period().as_secs_f64()) as u16
+            (u16::MAX as f64 * self.tick_remainder.as_secs_f64() / self.tick_period().as_secs_f64())
+                as u16
         }
     }
 
@@ -168,9 +174,15 @@ impl<T: Stopwatch> GameTiming<T> {
     fn cache_cur_time(&mut self) {
         let (cached_time, last_time_tick) = self.cached_cur_time;
         let new_time = if self.cur_tick.value >= last_time_tick.value {
-            cached_time + self.tick_period().mul_f64((self.cur_tick.value - last_time_tick.value) as f64)
+            cached_time
+                + self
+                    .tick_period()
+                    .mul_f64((self.cur_tick.value - last_time_tick.value) as f64)
         } else {
-            cached_time.saturating_sub(self.tick_period().mul_f64((last_time_tick.value - self.cur_tick.value) as f64))
+            cached_time.saturating_sub(
+                self.tick_period()
+                    .mul_f64((last_time_tick.value - self.cur_tick.value) as f64),
+            )
         };
         self.cached_cur_time = (new_time, self.cur_tick);
     }

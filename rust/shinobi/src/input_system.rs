@@ -1,5 +1,5 @@
-use daikoku::{BoundKeyFunction, BoundKeyState, FullInputCmdMessage, PlayerCommandStates};
 use butsuri::BodyType;
+use daikoku::{BoundKeyFunction, BoundKeyState, FullInputCmdMessage, PlayerCommandStates};
 use jikan::GameTick;
 use keisan::Vector2;
 use sekai::{EntityCoordinates, EntityUid, MapCoordinates, ScreenCoordinates, WindowId};
@@ -18,10 +18,6 @@ impl InputSystem {
 
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn cmd_states(&self) -> &PlayerCommandStates {
-        &self.cmd_states
     }
 
     pub fn handle_input_command(
@@ -108,7 +104,10 @@ impl InputSystem {
             return;
         }
 
-        let _ = entities.offset_local_transform(controlled, delta, keisan::Angle::ZERO);
+        let _ =
+            entities
+                .inner
+                .offset_local_transform_immediate(controlled, delta, keisan::Angle::ZERO);
     }
 
     pub fn apply_held_movement_state(
@@ -129,7 +128,7 @@ impl InputSystem {
         true
     }
 
-    pub fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
+    fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
         if state != BoundKeyState::Down {
             return Vector2::ZERO;
         }
@@ -158,16 +157,18 @@ impl InputSystem {
                 .physics
                 .get(&controlled)
                 .is_some_and(|body| body.force != Vector2::ZERO || body.torque != 0.0);
-        let _ = entities.mutate_predicted_physics(controlled, |body| {
-            body.can_collide = true;
-            body.set_body_type(BodyType::Dynamic);
-            body.predict = true;
-            body.linear_velocity = velocity;
-            body.set_awake(velocity != Vector2::ZERO || has_external_dynamics);
-        });
+        let _ = entities
+            .inner
+            .mutate_physics_and_reconcile(controlled, |body| {
+                body.can_collide = true;
+                body.set_body_type(BodyType::Dynamic);
+                body.predict = true;
+                body.linear_velocity = velocity;
+                body.set_awake(velocity != Vector2::ZERO || has_external_dynamics);
+            });
     }
 
-    pub fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
+    fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
         let mut velocity = Vector2::ZERO;
         if states.is_down(&"MoveUp".into()) {
             velocity.y += Self::MOVE_SPEED;
@@ -215,11 +216,16 @@ impl InputSystem {
 #[cfg(test)]
 mod tests {
     use super::InputSystem;
-    use crate::{ClientEntityManager, ClientGameStateManager, ClientNetManager, PhysicsSystem, PlayerManager};
+    use crate::{
+        ClientEntityManager, ClientGameStateManager, ClientNetManager, PhysicsSystem, PlayerManager,
+    };
     use daikoku::{BoundKeyState, FullInputCmdMessage};
     use jikan::GameTick;
     use keisan::{Angle, Box2, Vector2, Vector2i};
-    use sekai::{ChunkDatum, EntityCoordinates, EntityUid, GameStateMapData, GridDatum, GridId, MapCoordinates, MapId, ScreenCoordinates, Tile, TileRenderFlag, WindowId};
+    use sekai::{
+        ChunkDatum, EntityCoordinates, EntityUid, GameStateMapData, GridDatum, GridId,
+        MapCoordinates, MapId, ScreenCoordinates, Tile, TileRenderFlag, WindowId,
+    };
 
     #[test]
     fn input_system_tracks_local_state_and_prediction() {
@@ -227,7 +233,7 @@ mod tests {
         let mut players = PlayerManager::new();
         players.startup("u1", "pedel");
         let uid = entities.create_entity(None, EntityUid::new(4));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         players.local_player_mut().unwrap().attach_entity(uid);
         let mut state = ClientGameStateManager::new();
         let mut net = ClientNetManager::new();
@@ -242,11 +248,22 @@ mod tests {
             EntityCoordinates::new(EntityUid::new(4), Vector2::ZERO),
             ScreenCoordinates::new_xy(0.0, 0.0, WindowId::MAIN),
         );
-        input.handle_input_command(&mut entities, &players, &mut state, &mut net, "MoveUp", msg.clone(), false);
-        assert!(input.cmd_states().is_down(&"MoveUp".into()));
+        input.handle_input_command(
+            &mut entities,
+            &players,
+            &mut state,
+            &mut net,
+            "MoveUp",
+            msg.clone(),
+            false,
+        );
+        assert!(input.cmd_states.is_down(&"MoveUp".into()));
         input.predict_input_command(&mut entities, &players, &msg);
-        assert!(input.cmd_states().is_down(&"MoveUp".into()));
-        assert_eq!(entities.inner.transforms.get(&uid).unwrap().local_position, Vector2::new(0.0, 2.0));
+        assert!(input.cmd_states.is_down(&"MoveUp".into()));
+        assert_eq!(
+            entities.inner.transforms.get(&uid).unwrap().local_position,
+            Vector2::new(0.0, 2.0)
+        );
         assert_eq!(
             entities.inner.physics.get(&uid).unwrap().linear_velocity,
             Vector2::new(0.0, InputSystem::MOVE_SPEED)
@@ -263,7 +280,7 @@ mod tests {
         let mut players = PlayerManager::new();
         players.startup("u1", "pedel");
         let uid = entities.create_entity(None, EntityUid::new(6));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         players.local_player_mut().unwrap().attach_entity(uid);
         let mut input = InputSystem::new();
 
@@ -298,7 +315,7 @@ mod tests {
         entities.inner.ensure_physics_map(map_owner);
 
         let uid = entities.create_entity(None, EntityUid::new(14));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         players.local_player_mut().unwrap().attach_entity(uid);
         let _ = entities.inner.apply_transform_state(
             uid,
@@ -346,7 +363,11 @@ mod tests {
             false,
         );
         assert!(entities.inner.map_contains_body(sekai::MapId::new(4), uid));
-        assert!(entities.inner.map_contains_awake_body(sekai::MapId::new(4), uid));
+        assert!(
+            entities
+                .inner
+                .map_contains_awake_body(sekai::MapId::new(4), uid)
+        );
 
         input.handle_input_command(
             &mut entities,
@@ -366,7 +387,11 @@ mod tests {
             false,
         );
         assert!(entities.inner.map_contains_body(sekai::MapId::new(4), uid));
-        assert!(!entities.inner.map_contains_awake_body(sekai::MapId::new(4), uid));
+        assert!(
+            !entities
+                .inner
+                .map_contains_awake_body(sekai::MapId::new(4), uid)
+        );
     }
 
     #[test]
@@ -379,7 +404,7 @@ mod tests {
         assert!(!entities.inner.has_map_physics_runtime(sekai::MapId::new(5)));
 
         let uid = entities.create_entity(None, EntityUid::new(15));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         players.local_player_mut().unwrap().attach_entity(uid);
         let _ = entities.inner.apply_transform_state(
             uid,
@@ -430,13 +455,17 @@ mod tests {
         assert!(entities.inner.has_map_broadphase(sekai::MapId::new(5)));
         assert!(entities.inner.has_map_physics_runtime(sekai::MapId::new(5)));
         assert!(entities.inner.map_contains_body(sekai::MapId::new(5), uid));
-        assert!(entities.inner.map_contains_awake_body(sekai::MapId::new(5), uid));
+        assert!(
+            entities
+                .inner
+                .map_contains_awake_body(sekai::MapId::new(5), uid)
+        );
     }
 
     #[test]
     fn input_system_updates_lookup_and_broadphase_immediately_after_predicted_move() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(6),
                 GridDatum {
@@ -455,7 +484,7 @@ mod tests {
         let mut players = PlayerManager::new();
         players.startup("u1", "pedel");
         let uid = entities.create_entity(None, EntityUid::new(24));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         players.local_player_mut().unwrap().attach_entity(uid);
         let grid_uid = entities.inner.grid_entity_for(GridId::new(6)).unwrap();
         let _ = entities.inner.apply_transform_state(
@@ -480,7 +509,7 @@ mod tests {
                 )),
             ),
         );
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
 
         let mut state = ClientGameStateManager::new();
         let mut net = ClientNetManager::new();
@@ -505,12 +534,16 @@ mod tests {
         );
 
         assert_eq!(
-            entities.inner.entities_at_tile(GridId::new(6), Vector2i::new(1, 0)),
+            entities
+                .inner
+                .entities_at_tile(GridId::new(6), Vector2i::new(1, 0)),
             vec![uid]
         );
         let _physics = PhysicsSystem::new();
         assert_eq!(
-            entities.inner.entities_in_map_aabb(MapId::new(6), Box2::new(1.0, -0.5, 2.5, 1.5)),
+            entities
+                .inner
+                .entities_in_map_aabb(MapId::new(6), Box2::new(1.0, -0.5, 2.5, 1.5)),
             vec![uid]
         );
     }
@@ -518,7 +551,7 @@ mod tests {
     #[test]
     fn input_system_updates_contacts_immediately_after_predicted_move() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(7),
                 GridDatum {
@@ -534,7 +567,7 @@ mod tests {
         let mut players = PlayerManager::new();
         players.startup("u1", "pedel");
         let first = entities.create_entity(None, EntityUid::new(25));
-        entities.initialize_entity(first);
+        entities.inner.initialize_entity(first);
         players.local_player_mut().unwrap().attach_entity(first);
         let _ = entities.inner.apply_transform_state(
             first,
@@ -560,7 +593,7 @@ mod tests {
         );
 
         let second = entities.create_entity(None, EntityUid::new(26));
-        entities.initialize_entity(second);
+        entities.inner.initialize_entity(second);
         let _ = entities.inner.apply_transform_state(
             second,
             sekai::TransformComponentState {
@@ -587,7 +620,7 @@ mod tests {
                 )),
             ),
         );
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
 
         let mut state = ClientGameStateManager::new();
         let mut net = ClientNetManager::new();

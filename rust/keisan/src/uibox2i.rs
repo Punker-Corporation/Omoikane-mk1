@@ -106,13 +106,23 @@ impl UIBox2i {
 
 impl From<UIBox2> for UIBox2i {
     fn from(value: UIBox2) -> Self {
-        Self::new(value.left as i32, value.top as i32, value.right as i32, value.bottom as i32)
+        Self::new(
+            value.left as i32,
+            value.top as i32,
+            value.right as i32,
+            value.bottom as i32,
+        )
     }
 }
 
 impl From<UIBox2i> for UIBox2 {
     fn from(value: UIBox2i) -> Self {
-        UIBox2::new(value.left as f32, value.top as f32, value.right as f32, value.bottom as f32)
+        UIBox2::new(
+            value.left as f32,
+            value.top as f32,
+            value.right as f32,
+            value.bottom as f32,
+        )
     }
 }
 
@@ -120,13 +130,22 @@ impl core::ops::Add<(i32, i32, i32, i32)> for UIBox2i {
     type Output = Self;
 
     fn add(self, rhs: (i32, i32, i32, i32)) -> Self::Output {
-        Self::new(self.left + rhs.0, self.top + rhs.1, self.right + rhs.2, self.bottom + rhs.3)
+        Self::new(
+            self.left + rhs.0,
+            self.top + rhs.1,
+            self.right + rhs.2,
+            self.bottom + rhs.3,
+        )
     }
 }
 
 impl fmt::Display for UIBox2i {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, {}, {})", self.left, self.top, self.right, self.bottom)
+        write!(
+            f,
+            "({}, {}, {}, {})",
+            self.left, self.top, self.right, self.bottom
+        )
     }
 }
 

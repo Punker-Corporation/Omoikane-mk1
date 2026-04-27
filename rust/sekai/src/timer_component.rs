@@ -1,8 +1,8 @@
 use crate::Component;
 use jikan::Timer;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 #[derive(Clone)]
@@ -52,7 +52,8 @@ impl TimerComponent {
             registration.timer.update(frame_time);
         }
 
-        self.timers.retain(|timer| timer.timer.is_active && !timer.cancelled.load(Ordering::SeqCst));
+        self.timers
+            .retain(|timer| timer.timer.is_active && !timer.cancelled.load(Ordering::SeqCst));
     }
 
     pub fn add_timer(&mut self, timer: Timer) -> TimerHandle {
@@ -64,15 +65,27 @@ impl TimerComponent {
         TimerHandle { cancelled }
     }
 
-    pub fn delay(&mut self, milliseconds: i32, on_fired: impl FnMut() + Send + Sync + 'static) -> TimerHandle {
+    pub fn delay(
+        &mut self,
+        milliseconds: i32,
+        on_fired: impl FnMut() + Send + Sync + 'static,
+    ) -> TimerHandle {
         self.spawn(milliseconds, on_fired)
     }
 
-    pub fn spawn(&mut self, milliseconds: i32, on_fired: impl FnMut() + Send + Sync + 'static) -> TimerHandle {
+    pub fn spawn(
+        &mut self,
+        milliseconds: i32,
+        on_fired: impl FnMut() + Send + Sync + 'static,
+    ) -> TimerHandle {
         self.add_timer(Timer::new(milliseconds, false, on_fired))
     }
 
-    pub fn spawn_repeating(&mut self, milliseconds: i32, on_fired: impl FnMut() + Send + Sync + 'static) -> TimerHandle {
+    pub fn spawn_repeating(
+        &mut self,
+        milliseconds: i32,
+        on_fired: impl FnMut() + Send + Sync + 'static,
+    ) -> TimerHandle {
         self.add_timer(Timer::new(milliseconds, true, on_fired))
     }
 }

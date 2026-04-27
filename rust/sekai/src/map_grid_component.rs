@@ -26,7 +26,12 @@ impl MapGridComponent {
         }
     }
 
-    pub fn alloc_map_grid(&mut self, owner: EntityUid, parent_map_id: crate::MapId, tile_size: u16) -> &mut MapGrid {
+    pub fn alloc_map_grid(
+        &mut self,
+        owner: EntityUid,
+        parent_map_id: crate::MapId,
+        tile_size: u16,
+    ) -> &mut MapGrid {
         let mut grid = MapGrid::new(parent_map_id, owner, self.grid_index, self.chunk_size);
         grid.tile_size = tile_size;
         self.grid = Some(grid);
@@ -79,6 +84,14 @@ mod tests {
         let grid = component.alloc_map_grid(EntityUid::new(20), MapId::new(1), 1);
         grid.set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
         assert!(component.anchor_entity(Vector2i::new(0, 0), EntityUid::new(30)));
-        assert_eq!(component.grid.as_ref().unwrap().get_anchored_entities(Vector2i::new(0, 0)).len(), 1);
+        assert_eq!(
+            component
+                .grid
+                .as_ref()
+                .unwrap()
+                .get_anchored_entities(Vector2i::new(0, 0))
+                .len(),
+            1
+        );
     }
 }

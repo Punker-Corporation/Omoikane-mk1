@@ -32,6 +32,12 @@ impl ScreenCoordinates {
 
 impl fmt::Display for ScreenCoordinates {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, W{})", self.position.x, self.position.y, self.window.raw())
+        write!(
+            f,
+            "({}, {}, W{})",
+            self.position.x,
+            self.position.y,
+            self.window.raw()
+        )
     }
 }

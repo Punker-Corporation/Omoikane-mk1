@@ -1,5 +1,5 @@
-use crate::{EntityUid, TransformComponent};
 use crate::ComponentLifeStage;
+use crate::{EntityUid, TransformComponent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityInitializedMessage {
@@ -25,6 +25,11 @@ pub struct MapPausedEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityTerminatingEvent {
+    pub entity: EntityUid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MapInitEvent {
     pub entity: EntityUid,
 }
 
@@ -88,6 +93,7 @@ pub enum EntityRuntimeEvent {
     EntityPaused(EntityPausedEvent),
     MapPaused(MapPausedEvent),
     EntityTerminating(EntityTerminatingEvent),
+    MapInit(MapInitEvent),
     ComponentLifecycle(ComponentLifecycleEvent),
     ParentChanged(EntParentChangedMessage),
     AnchorStateChanged(crate::AnchorStateChangedEvent),
@@ -121,6 +127,12 @@ impl From<MapPausedEvent> for EntityRuntimeEvent {
 impl From<EntityTerminatingEvent> for EntityRuntimeEvent {
     fn from(value: EntityTerminatingEvent) -> Self {
         Self::EntityTerminating(value)
+    }
+}
+
+impl From<MapInitEvent> for EntityRuntimeEvent {
+    fn from(value: MapInitEvent) -> Self {
+        Self::MapInit(value)
     }
 }
 

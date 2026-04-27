@@ -1,5 +1,8 @@
 use crate::{EntityManager, EntityUid};
-use butsuri::{AabbShape, BodyType, CircleShape, CollisionRay, ContactManager, ContactManifold, ContactManifoldPoint, Fixture, PhysShape, RayCastHit, Transform as PhysicsTransform};
+use butsuri::{
+    AabbShape, BodyType, CircleShape, CollisionRay, ContactManager, ContactManifold,
+    ContactManifoldPoint, Fixture, PhysShape, RayCastHit, Transform as PhysicsTransform,
+};
 use keisan::{Box2, Vector2};
 use std::collections::{BTreeSet, HashSet};
 
@@ -33,15 +36,12 @@ impl SharedPhysicsSystem {
     const SLEEP_ANGULAR_TOLERANCE: f32 = 0.01;
     const SLEEP_TIME_THRESHOLD: f32 = 0.5;
 
-    pub fn set_linear_velocity(&self, manager: &mut EntityManager, uid: EntityUid, velocity: Vector2) -> bool {
-        let Some(body) = manager.physics.get_mut(&uid) else {
-            return false;
-        };
-        body.set_linear_velocity(velocity);
-        true
-    }
-
-    pub fn step_body(&self, manager: &mut EntityManager, uid: EntityUid, frame_time: f32) -> Option<PhysicsStepState> {
+    pub fn step_body(
+        &self,
+        manager: &mut EntityManager,
+        uid: EntityUid,
+        frame_time: f32,
+    ) -> Option<PhysicsStepState> {
         let map_id = manager.transforms.get(&uid)?.map_id;
         let entity_paused = manager.is_entity_paused(uid);
         let map_paused = manager.is_map_paused(map_id);
@@ -69,7 +69,11 @@ impl SharedPhysicsSystem {
         let previous_angular_velocity = body.angular_velocity;
         let previous_force = body.force;
         let previous_torque = body.torque;
-        let effective_gravity = if body.ignore_gravity { Vector2::ZERO } else { gravity };
+        let effective_gravity = if body.ignore_gravity {
+            Vector2::ZERO
+        } else {
+            gravity
+        };
         body.linear_velocity = body.linear_velocity + (effective_gravity + body.force) * frame_time;
         if body.linear_damping > 0.0 {
             let damping = (1.0 - body.linear_damping * frame_time).max(0.0);
@@ -87,7 +91,8 @@ impl SharedPhysicsSystem {
 
         let previous_awake = body.awake;
         if body.sleeping_allowed {
-            let idle_linear = body.linear_velocity.length_squared() <= Self::SLEEP_LINEAR_TOLERANCE_SQ;
+            let idle_linear =
+                body.linear_velocity.length_squared() <= Self::SLEEP_LINEAR_TOLERANCE_SQ;
             let idle_angular = body.angular_velocity.abs() <= Self::SLEEP_ANGULAR_TOLERANCE;
             if idle_linear && idle_angular {
                 body.sleep_time += frame_time;
@@ -110,7 +115,8 @@ impl SharedPhysicsSystem {
             state_changed: previous_awake != body.awake
                 || previous_linear_velocity != body.linear_velocity
                 || previous_angular_velocity != body.angular_velocity
-                || (auto_clear_forces && (previous_force != Vector2::ZERO || previous_torque != 0.0)),
+                || (auto_clear_forces
+                    && (previous_force != Vector2::ZERO || previous_torque != 0.0)),
         };
 
         if auto_clear_forces {
@@ -126,21 +132,6 @@ impl SharedPhysicsSystem {
         let xform = manager.transforms.get(&uid)?;
         let fixtures = manager.fixtures.get(&uid)?;
         body.get_aabb(xform, fixtures, manager)
-    }
-
-    pub fn get_hard_aabb(&self, manager: &EntityManager, uid: EntityUid) -> Option<Box2> {
-        let body = manager.physics.get(&uid)?;
-        let xform = manager.transforms.get(&uid)?;
-        let fixtures = manager.fixtures.get(&uid)?;
-        body.get_hard_aabb(xform, fixtures, manager)
-    }
-
-    pub fn get_map_linear_velocity(&self, manager: &EntityManager, uid: EntityUid) -> Vector2 {
-        self.get_map_velocities(manager, uid).0
-    }
-
-    pub fn get_map_angular_velocity(&self, manager: &EntityManager, uid: EntityUid) -> f32 {
-        self.get_map_velocities(manager, uid).1
     }
 
     pub fn get_map_velocities(&self, manager: &EntityManager, uid: EntityUid) -> (Vector2, f32) {
@@ -166,23 +157,41 @@ impl SharedPhysicsSystem {
                 angular_velocity += body.angular_velocity;
                 linear_velocity = linear_velocity + body.linear_velocity;
                 angular_linear_contribution = angular_linear_contribution
-                    + Vector2::new(-body.angular_velocity * local_pos.y, body.angular_velocity * local_pos.x);
-                angular_linear_contribution =
-                    parent_xform.local_rotation.rotate_vec(angular_linear_contribution);
+                    + Vector2::new(
+                        -body.angular_velocity * local_pos.y,
+                        body.angular_velocity * local_pos.x,
+                    );
+                angular_linear_contribution = parent_xform
+                    .local_rotation
+                    .rotate_vec(angular_linear_contribution);
             }
 
-            local_pos = parent_xform.local_position + parent_xform.local_rotation.rotate_vec(local_pos);
+            local_pos =
+                parent_xform.local_position + parent_xform.local_rotation.rotate_vec(local_pos);
             parent = parent_xform.parent;
         }
 
-        (linear_velocity + angular_linear_contribution, angular_velocity)
+        (
+            linear_velocity + angular_linear_contribution,
+            angular_velocity,
+        )
     }
 
-    pub fn sync_broadphase(&self, manager: &mut EntityManager, broadphase_owner: EntityUid, bodies: &[EntityUid]) -> usize {
+    pub fn sync_broadphase(
+        &self,
+        manager: &mut EntityManager,
+        broadphase_owner: EntityUid,
+        bodies: &[EntityUid],
+    ) -> usize {
         let mut pending = Vec::new();
         let body_set = bodies.iter().copied().collect::<HashSet<_>>();
 
-        for (uid, body, xform, fixtures) in manager.entity_query3(&manager.physics, &manager.transforms, &manager.fixtures, true) {
+        for (uid, body, xform, fixtures) in manager.entity_query3(
+            &manager.physics,
+            &manager.transforms,
+            &manager.fixtures,
+            true,
+        ) {
             if !body_set.contains(&uid) || !body.can_collide {
                 continue;
             }
@@ -203,13 +212,20 @@ impl SharedPhysicsSystem {
 
         broadphase.tree = Default::default();
         for (owner_id, fixture, transform) in &pending {
-            broadphase.tree.insert(*owner_id, fixture.clone(), *transform);
+            broadphase
+                .tree
+                .insert(*owner_id, fixture.clone(), *transform);
         }
 
         pending.len()
     }
 
-    pub fn sync_contacts(&self, manager: &mut EntityManager, map_owner: EntityUid, bodies: &[EntityUid]) -> usize {
+    pub fn sync_contacts(
+        &self,
+        manager: &mut EntityManager,
+        map_owner: EntityUid,
+        bodies: &[EntityUid],
+    ) -> usize {
         let mut contact_manager = ContactManager::new();
         let previous_contacts = manager
             .physics_maps
@@ -219,7 +235,12 @@ impl SharedPhysicsSystem {
         let mut body_fixtures = Vec::new();
         let body_set = bodies.iter().copied().collect::<HashSet<_>>();
 
-        for (uid, body, transform, fixtures) in manager.entity_query3(&manager.physics, &manager.transforms, &manager.fixtures, true) {
+        for (uid, body, transform, fixtures) in manager.entity_query3(
+            &manager.physics,
+            &manager.transforms,
+            &manager.fixtures,
+            true,
+        ) {
             if !body_set.contains(&uid) || !body.can_collide {
                 continue;
             }
@@ -244,7 +265,8 @@ impl SharedPhysicsSystem {
                 if *body_type_a == BodyType::Static && *body_type_b == BodyType::Static {
                     continue;
                 }
-                if self.joint_blocks_collision(manager, *uid_a, *uid_b, *body_type_a, *body_type_b) {
+                if self.joint_blocks_collision(manager, *uid_a, *uid_b, *body_type_a, *body_type_b)
+                {
                     continue;
                 }
 
@@ -253,32 +275,41 @@ impl SharedPhysicsSystem {
                         if !Self::fixtures_can_collide(fixture_a, fixture_b) {
                             continue;
                         }
-                        if !fixture_a.compute_aabb(*transform_a).intersects(fixture_b.compute_aabb(*transform_b)) {
+                        if !fixture_a
+                            .compute_aabb(*transform_a)
+                            .intersects(fixture_b.compute_aabb(*transform_b))
+                        {
                             continue;
                         }
 
                         let fixture_a_key = format!("{}:{}", uid_a.raw(), fixture_a.id);
                         let fixture_b_key = format!("{}:{}", uid_b.raw(), fixture_b.id);
-                        let (fixture_a_key, ordered_fixture_a, ordered_transform_a, fixture_b_key, ordered_fixture_b, ordered_transform_b) =
-                            if fixture_a_key <= fixture_b_key {
-                                (
-                                    fixture_a_key,
-                                    fixture_a,
-                                    *transform_a,
-                                    fixture_b_key,
-                                    fixture_b,
-                                    *transform_b,
-                                )
-                            } else {
-                                (
-                                    fixture_b_key,
-                                    fixture_b,
-                                    *transform_b,
-                                    fixture_a_key,
-                                    fixture_a,
-                                    *transform_a,
-                                )
-                            };
+                        let (
+                            fixture_a_key,
+                            ordered_fixture_a,
+                            ordered_transform_a,
+                            fixture_b_key,
+                            ordered_fixture_b,
+                            ordered_transform_b,
+                        ) = if fixture_a_key <= fixture_b_key {
+                            (
+                                fixture_a_key,
+                                fixture_a,
+                                *transform_a,
+                                fixture_b_key,
+                                fixture_b,
+                                *transform_b,
+                            )
+                        } else {
+                            (
+                                fixture_b_key,
+                                fixture_b,
+                                *transform_b,
+                                fixture_a_key,
+                                fixture_a,
+                                *transform_a,
+                            )
+                        };
 
                         let manifold = Self::compute_contact_manifold(
                             ordered_fixture_a,
@@ -289,28 +320,42 @@ impl SharedPhysicsSystem {
                         if manifold.points.is_empty() {
                             continue;
                         }
-                        let contact_type = match (&ordered_fixture_a.shape, &ordered_fixture_b.shape) {
-                            (PhysShape::Aabb(_), PhysShape::Aabb(_)) => butsuri::ContactType::Aabb,
-                            (PhysShape::Circle(_), PhysShape::Circle(_)) => butsuri::ContactType::Circle,
-                            _ => butsuri::ContactType::Mixed,
-                        };
+                        let contact_type =
+                            match (&ordered_fixture_a.shape, &ordered_fixture_b.shape) {
+                                (PhysShape::Aabb(_), PhysShape::Aabb(_)) => {
+                                    butsuri::ContactType::Aabb
+                                }
+                                (PhysShape::Circle(_), PhysShape::Circle(_)) => {
+                                    butsuri::ContactType::Circle
+                                }
+                                _ => butsuri::ContactType::Mixed,
+                            };
 
-                        let index = if let Some(previous) =
-                            Self::find_previous_contact(&previous_contacts, &fixture_a_key, &fixture_b_key)
-                        {
+                        let index = if let Some(previous) = Self::find_previous_contact(
+                            &previous_contacts,
+                            &fixture_a_key,
+                            &fixture_b_key,
+                        ) {
                             let mut contact = previous.clone();
                             contact.fixture_a = fixture_a_key;
                             contact.fixture_b = fixture_b_key;
                             contact.contact_type = contact_type;
-                            contact.reset_friction(ordered_fixture_a.friction, ordered_fixture_b.friction);
-                            contact.reset_restitution(ordered_fixture_a.restitution, ordered_fixture_b.restitution);
+                            contact.reset_friction(
+                                ordered_fixture_a.friction,
+                                ordered_fixture_b.friction,
+                            );
+                            contact.reset_restitution(
+                                ordered_fixture_a.restitution,
+                                ordered_fixture_b.restitution,
+                            );
                             contact.manifold =
                                 Self::merge_manifold_impulses(&previous.manifold, manifold);
                             let status = contact.update_touching(true);
                             let cloned = contact.clone();
                             let index = contact_manager.insert_contact(contact);
                             if status != butsuri::ContactStatus::NoContact {
-                                if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
+                                if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner)
+                                {
                                     physics_map.queue_contact_event(status, cloned);
                                 }
                             }
@@ -329,8 +374,12 @@ impl SharedPhysicsSystem {
                             }
                             if let Some(status) = contact_manager.update_touching(index, true) {
                                 if status != butsuri::ContactStatus::NoContact {
-                                    if let Some(contact) = contact_manager.contact_mut(index).cloned() {
-                                        if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
+                                    if let Some(contact) =
+                                        contact_manager.contact_mut(index).cloned()
+                                    {
+                                        if let Some(physics_map) =
+                                            manager.physics_maps.get_mut(&map_owner)
+                                        {
                                             physics_map.queue_contact_event(status, contact);
                                         }
                                     }
@@ -366,7 +415,12 @@ impl SharedPhysicsSystem {
         count
     }
 
-    pub fn query_aabb_entities(&self, manager: &EntityManager, broadphase_owner: EntityUid, aabb: Box2) -> Vec<EntityUid> {
+    pub fn query_aabb_entities(
+        &self,
+        manager: &EntityManager,
+        broadphase_owner: EntityUid,
+        aabb: Box2,
+    ) -> Vec<EntityUid> {
         let Some(broadphase) = manager.broadphases.get(&broadphase_owner) else {
             return Vec::new();
         };
@@ -394,15 +448,21 @@ impl SharedPhysicsSystem {
             .tree
             .query_ray(ray, max_length, return_on_first_hit)
             .into_iter()
-            .filter_map(|RayCastHit { distance, hit_pos, hit }| {
-                let entry = broadphase.tree.entry(hit.fixture_index)?;
-                Some(PhysicsQueryHit {
-                    entity: EntityUid::new(hit.owner_id),
-                    fixture_id: entry.fixture.id.clone(),
-                    distance,
-                    hit_pos,
-                })
-            })
+            .filter_map(
+                |RayCastHit {
+                     distance,
+                     hit_pos,
+                     hit,
+                 }| {
+                    let entry = broadphase.tree.entry(hit.fixture_index)?;
+                    Some(PhysicsQueryHit {
+                        entity: EntityUid::new(hit.owner_id),
+                        fixture_id: entry.fixture.id.clone(),
+                        distance,
+                        hit_pos,
+                    })
+                },
+            )
             .collect()
     }
 
@@ -416,9 +476,14 @@ impl SharedPhysicsSystem {
                 && (fixture_b.collision_mask & fixture_a.collision_layer) != 0)
     }
 
-    fn merge_manifold_impulses(previous: &ContactManifold, mut current: ContactManifold) -> ContactManifold {
+    fn merge_manifold_impulses(
+        previous: &ContactManifold,
+        mut current: ContactManifold,
+    ) -> ContactManifold {
         if previous.points.len() == current.points.len() {
-            for (previous_point, current_point) in previous.points.iter().zip(current.points.iter_mut()) {
+            for (previous_point, current_point) in
+                previous.points.iter().zip(current.points.iter_mut())
+            {
                 current_point.normal_impulse = previous_point.normal_impulse;
                 current_point.tangent_impulse = previous_point.tangent_impulse;
             }
@@ -568,7 +633,10 @@ impl SharedPhysicsSystem {
                 return ContactManifold::default();
             }
             let local_normal = delta / distance;
-            (transform_aabb.rotation.mul(local_normal), transform_aabb.mul(local_closest))
+            (
+                transform_aabb.rotation.mul(local_normal),
+                transform_aabb.mul(local_closest),
+            )
         } else {
             let left = (local_center.x - bounds.left).abs();
             let right = (bounds.right - local_center.x).abs();
@@ -576,15 +644,30 @@ impl SharedPhysicsSystem {
             let top = (bounds.top - local_center.y).abs();
 
             let (local_normal, local_point) = if left <= right && left <= bottom && left <= top {
-                (Vector2::new(-1.0, 0.0), Vector2::new(bounds.left, local_center.y))
+                (
+                    Vector2::new(-1.0, 0.0),
+                    Vector2::new(bounds.left, local_center.y),
+                )
             } else if right <= bottom && right <= top {
-                (Vector2::new(1.0, 0.0), Vector2::new(bounds.right, local_center.y))
+                (
+                    Vector2::new(1.0, 0.0),
+                    Vector2::new(bounds.right, local_center.y),
+                )
             } else if bottom <= top {
-                (Vector2::new(0.0, -1.0), Vector2::new(local_center.x, bounds.bottom))
+                (
+                    Vector2::new(0.0, -1.0),
+                    Vector2::new(local_center.x, bounds.bottom),
+                )
             } else {
-                (Vector2::new(0.0, 1.0), Vector2::new(local_center.x, bounds.top))
+                (
+                    Vector2::new(0.0, 1.0),
+                    Vector2::new(local_center.x, bounds.top),
+                )
             };
-            (transform_aabb.rotation.mul(local_normal), transform_aabb.mul(local_point))
+            (
+                transform_aabb.rotation.mul(local_normal),
+                transform_aabb.mul(local_point),
+            )
         };
 
         ContactManifold {
@@ -603,14 +686,19 @@ impl SharedPhysicsSystem {
         shape_aabb: AabbShape,
         transform_aabb: PhysicsTransform,
     ) -> ContactManifold {
-        let manifold =
-            Self::compute_aabb_circle_manifold(shape_aabb, transform_aabb, shape_circle, transform_circle);
+        let manifold = Self::compute_aabb_circle_manifold(
+            shape_aabb,
+            transform_aabb,
+            shape_circle,
+            transform_circle,
+        );
         if manifold.points.is_empty() {
             return manifold;
         }
 
         let center = transform_circle.mul(shape_circle.position);
-        let world_point = center + (-manifold.normal) * shape_circle.radius.min(shape_circle.radius);
+        let world_point =
+            center + (-manifold.normal) * shape_circle.radius.min(shape_circle.radius);
         ContactManifold {
             normal: -manifold.normal,
             points: vec![ContactManifoldPoint {
@@ -675,7 +763,8 @@ impl SharedPhysicsSystem {
                     .flat_map(|component| component.joints.values()),
             )
             .any(|joint| {
-                let matches_pair = (joint.body_a_uid == uid_a.raw() && joint.body_b_uid == uid_b.raw())
+                let matches_pair = (joint.body_a_uid == uid_a.raw()
+                    && joint.body_b_uid == uid_b.raw())
                     || (joint.body_a_uid == uid_b.raw() && joint.body_b_uid == uid_a.raw());
                 matches_pair && joint.blocks_collisions(body_type_a, body_type_b)
             })
@@ -686,7 +775,9 @@ impl SharedPhysicsSystem {
 mod tests {
     use super::{PhysicsQueryHit, SharedPhysicsSystem};
     use crate::{BroadphaseComponent, EntityManager};
-    use butsuri::{AabbShape, BodyType, CircleShape, CollisionRay, Fixture, Joint, JointType, PhysShape};
+    use butsuri::{
+        AabbShape, BodyType, CircleShape, CollisionRay, Fixture, Joint, JointType, PhysShape,
+    };
     use keisan::{Box2, Vector2};
 
     fn configure_dynamic_body(manager: &mut EntityManager, uid: crate::EntityUid) {
@@ -726,17 +817,23 @@ mod tests {
 
         configure_dynamic_body(&mut manager, uid);
 
-        manager
-            .ensure_fixtures(uid)
-            .insert_fixture(Fixture::new("main", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))));
+        manager.ensure_fixtures(uid).insert_fixture(Fixture::new(
+            "main",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        ));
 
         let broadphase_uid = manager.create_entity_uninitialized(None);
-        manager.broadphases.insert(broadphase_uid, BroadphaseComponent::new());
+        manager
+            .broadphases
+            .insert(broadphase_uid, BroadphaseComponent::new());
 
         let system = SharedPhysicsSystem::new();
         let aabb = system.get_world_aabb(&manager, uid).unwrap();
         assert_eq!(aabb, Box2::new(-1.0, -1.0, 1.0, 1.0));
-        assert_eq!(system.sync_broadphase(&mut manager, broadphase_uid, &[uid]), 1);
+        assert_eq!(
+            system.sync_broadphase(&mut manager, broadphase_uid, &[uid]),
+            1
+        );
         assert_eq!(
             system.query_aabb_entities(&manager, broadphase_uid, Box2::new(-2.0, -2.0, 2.0, 2.0)),
             vec![uid]
@@ -770,8 +867,10 @@ mod tests {
             Some(true),
             None,
         ));
-        let mut first_fixture =
-            Fixture::new("first", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)));
+        let mut first_fixture = Fixture::new(
+            "first",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        );
         first_fixture.collision_layer = 1 << 0;
         let _ = manager.insert_fixture_and_reconcile(first, first_fixture);
         assert!(manager.mutate_transform_and_reconcile(first, |transform| {
@@ -787,8 +886,10 @@ mod tests {
             Some(true),
             None,
         ));
-        let mut second_fixture =
-            Fixture::new("second", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)));
+        let mut second_fixture = Fixture::new(
+            "second",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        );
         second_fixture.collision_layer = 1 << 1;
         let _ = manager.insert_fixture_and_reconcile(second, second_fixture);
         assert!(manager.mutate_transform_and_reconcile(second, |transform| {
@@ -796,10 +897,15 @@ mod tests {
         }));
 
         let broadphase_uid = manager.create_entity_uninitialized(None);
-        manager.broadphases.insert(broadphase_uid, BroadphaseComponent::new());
+        manager
+            .broadphases
+            .insert(broadphase_uid, BroadphaseComponent::new());
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_broadphase(&mut manager, broadphase_uid, &[first, second]), 2);
+        assert_eq!(
+            system.sync_broadphase(&mut manager, broadphase_uid, &[first, second]),
+            2
+        );
         let hits = system.intersect_ray(
             &manager,
             broadphase_uid,
@@ -856,10 +962,15 @@ mod tests {
         }));
 
         let broadphase_uid = manager.create_entity_uninitialized(None);
-        manager.broadphases.insert(broadphase_uid, BroadphaseComponent::new());
+        manager
+            .broadphases
+            .insert(broadphase_uid, BroadphaseComponent::new());
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_broadphase(&mut manager, broadphase_uid, &[far, near]), 2);
+        assert_eq!(
+            system.sync_broadphase(&mut manager, broadphase_uid, &[far, near]),
+            2
+        );
         let hits = system.intersect_ray(
             &manager,
             broadphase_uid,
@@ -886,14 +997,22 @@ mod tests {
         ));
         let _ = manager.insert_fixture_and_reconcile(
             uid,
-            Fixture::new("circle", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0))),
+            Fixture::new(
+                "circle",
+                PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0)),
+            ),
         );
 
         let broadphase_uid = manager.create_entity_uninitialized(None);
-        manager.broadphases.insert(broadphase_uid, BroadphaseComponent::new());
+        manager
+            .broadphases
+            .insert(broadphase_uid, BroadphaseComponent::new());
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_broadphase(&mut manager, broadphase_uid, &[uid]), 1);
+        assert_eq!(
+            system.sync_broadphase(&mut manager, broadphase_uid, &[uid]),
+            1
+        );
         let hits = system.intersect_ray(
             &manager,
             broadphase_uid,
@@ -946,7 +1065,10 @@ mod tests {
         );
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let contacts = manager.owner_contacts_snapshot(map_owner);
         assert_eq!(contacts.len(), 1);
         assert_eq!(contacts[0].fixture_a, format!("{}:main", first.raw()));
@@ -957,7 +1079,10 @@ mod tests {
         joint.id = "rope".to_string();
         joint.collide_connected = false;
         assert!(manager.add_joint_between(joint));
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 0);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            0
+        );
         assert_eq!(manager.owner_contact_count(map_owner), 0);
     }
 
@@ -1006,7 +1131,10 @@ mod tests {
         }));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let contacts = manager.owner_contacts_snapshot(map_owner);
         let contact = &contacts[0];
         assert_eq!(contact.contact_type, butsuri::ContactType::Aabb);
@@ -1027,7 +1155,10 @@ mod tests {
         configure_dynamic_body(&mut manager, first);
         let _ = manager.insert_fixture_and_reconcile(
             first,
-            Fixture::new("first", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0))),
+            Fixture::new(
+                "first",
+                PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0)),
+            ),
         );
 
         let second = manager.create_entity_uninitialized(None);
@@ -1035,12 +1166,18 @@ mod tests {
         configure_dynamic_body(&mut manager, second);
         let _ = manager.insert_fixture_and_reconcile(
             second,
-            Fixture::new("second", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0))),
+            Fixture::new(
+                "second",
+                PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0)),
+            ),
         );
         set_position(&mut manager, second, Vector2::new(1.5, 0.0));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let contacts = manager.owner_contacts_snapshot(map_owner);
         let contact = &contacts[0];
         assert_eq!(contact.contact_type, butsuri::ContactType::Circle);
@@ -1072,12 +1209,18 @@ mod tests {
         configure_dynamic_body(&mut manager, second);
         let _ = manager.insert_fixture_and_reconcile(
             second,
-            Fixture::new("circle", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0))),
+            Fixture::new(
+                "circle",
+                PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0)),
+            ),
         );
         set_position(&mut manager, second, Vector2::new(1.5, 0.0));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let contacts = manager.owner_contacts_snapshot(map_owner);
         let contact = &contacts[0];
         assert_eq!(contact.contact_type, butsuri::ContactType::Mixed);
@@ -1108,12 +1251,18 @@ mod tests {
         configure_dynamic_body(&mut manager, second);
         let _ = manager.insert_fixture_and_reconcile(
             second,
-            Fixture::new("circle", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 0.5))),
+            Fixture::new(
+                "circle",
+                PhysShape::Circle(CircleShape::new(Vector2::ZERO, 0.5)),
+            ),
         );
         set_position(&mut manager, second, Vector2::new(1.4, 1.4));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 0);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            0
+        );
         assert_eq!(manager.owner_contact_count(map_owner), 0);
     }
 
@@ -1141,12 +1290,18 @@ mod tests {
         configure_dynamic_body(&mut manager, second);
         let _ = manager.insert_fixture_and_reconcile(
             second,
-            Fixture::new("circle", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 0.5))),
+            Fixture::new(
+                "circle",
+                PhysShape::Circle(CircleShape::new(Vector2::ZERO, 0.5)),
+            ),
         );
         set_position(&mut manager, second, Vector2::new(1.2, 0.0));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let contacts = manager.owner_contacts_snapshot(map_owner);
         let contact = &contacts[0];
         assert_eq!(contact.contact_type, butsuri::ContactType::Mixed);
@@ -1189,7 +1344,10 @@ mod tests {
         }));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 0);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            0
+        );
         assert_eq!(manager.owner_contact_count(map_owner), 0);
     }
 
@@ -1224,7 +1382,10 @@ mod tests {
         set_position(&mut manager, second, Vector2::new(1.5, 0.0));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         {
             let physics_map = manager.physics_maps.get_mut(&map_owner).unwrap();
             let contact = physics_map.contact_mut(0).unwrap();
@@ -1232,7 +1393,10 @@ mod tests {
             contact.manifold.points[0].tangent_impulse = 1.25;
         }
 
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let contacts = manager.owner_contacts_snapshot(map_owner);
         let contact = &contacts[0];
         assert!(contact.is_touching);
@@ -1271,13 +1435,19 @@ mod tests {
         set_position(&mut manager, second, Vector2::new(1.5, 0.0));
 
         let system = SharedPhysicsSystem::new();
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 1);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            1
+        );
         let events = manager.drain_owner_contact_events(map_owner);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].status, butsuri::ContactStatus::StartTouching);
 
         manager.physics.get_mut(&second).unwrap().can_collide = false;
-        assert_eq!(system.sync_contacts(&mut manager, map_owner, &[first, second]), 0);
+        assert_eq!(
+            system.sync_contacts(&mut manager, map_owner, &[first, second]),
+            0
+        );
         let events = manager.drain_owner_contact_events(map_owner);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].status, butsuri::ContactStatus::EndTouching);
@@ -1440,7 +1610,9 @@ mod tests {
             None,
             None,
         ));
-        mutate_body(&mut manager, uid, |body| body.linear_velocity = Vector2::new(2.0, 0.0));
+        mutate_body(&mut manager, uid, |body| {
+            body.linear_velocity = Vector2::new(2.0, 0.0)
+        });
 
         let system = SharedPhysicsSystem::new();
         assert!(manager.set_entity_paused(uid, true));
@@ -1472,13 +1644,7 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(manager.configure_physics_body(
-            parent,
-            Some(BodyType::Dynamic),
-            None,
-            None,
-            None,
-        ));
+        assert!(manager.configure_physics_body(parent, Some(BodyType::Dynamic), None, None, None,));
         mutate_body(&mut manager, parent, |body| {
             body.linear_velocity = Vector2::new(2.0, 0.0);
             body.angular_velocity = 1.0;
@@ -1498,13 +1664,7 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(manager.configure_physics_body(
-            child,
-            Some(BodyType::Dynamic),
-            None,
-            None,
-            None,
-        ));
+        assert!(manager.configure_physics_body(child, Some(BodyType::Dynamic), None, None, None,));
         mutate_body(&mut manager, child, |body| {
             body.linear_velocity = Vector2::new(1.0, 0.0);
             body.angular_velocity = 2.0;
@@ -1515,10 +1675,10 @@ mod tests {
         assert_eq!(angular, 3.0);
         assert!((linear.x - 2.0).abs() < 0.0001);
         assert!(linear.y.abs() < 0.0001);
-        let linear_only = system.get_map_linear_velocity(&manager, child);
+        let linear_only = system.get_map_velocities(&manager, child).0;
         assert!((linear_only.x - linear.x).abs() < 0.0001);
         assert!((linear_only.y - linear.y).abs() < 0.0001);
-        assert_eq!(system.get_map_angular_velocity(&manager, child), angular);
+        assert_eq!(system.get_map_velocities(&manager, child).1, angular);
     }
 
     #[test]

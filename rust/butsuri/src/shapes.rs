@@ -16,7 +16,10 @@ pub struct AabbShape {
 
 impl AabbShape {
     pub fn new(local_bounds: Box2, radius: f32) -> Self {
-        Self { local_bounds, radius }
+        Self {
+            local_bounds,
+            radius,
+        }
     }
 
     pub fn compute_aabb(self, transform: Transform) -> Box2 {
@@ -28,12 +31,17 @@ impl AabbShape {
         ];
         points
             .into_iter()
-            .fold(Box2::from_corners(points[0], points[0]), |acc, point| acc.extend_to_contain(point))
+            .fold(Box2::from_corners(points[0], points[0]), |acc, point| {
+                acc.extend_to_contain(point)
+            })
             .enlarged(self.radius)
     }
 
     pub fn ray_cast(self, transform: Transform, ray: Ray) -> Option<(f32, Vector2)> {
-        let local_ray = Ray::new(transform.mul_t(ray.position), transform.rotation.mul_t(ray.direction));
+        let local_ray = Ray::new(
+            transform.mul_t(ray.position),
+            transform.rotation.mul_t(ray.direction),
+        );
         let local_bounds = self.local_bounds.enlarged(self.radius);
         let (distance, local_hit) = local_ray.intersects(local_bounds)?;
         Some((distance, transform.mul(local_hit)))
@@ -127,7 +135,10 @@ mod tests {
         let aabb = PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.1));
         let circle = PhysShape::Circle(CircleShape::new(Vector2::new(2.0, 0.0), 1.0));
         assert_eq!(aabb.compute_aabb(transform), Box2::new(3.9, 3.9, 6.1, 6.1));
-        assert_eq!(circle.compute_aabb(transform), Box2::new(6.0, 4.0, 8.0, 6.0));
+        assert_eq!(
+            circle.compute_aabb(transform),
+            Box2::new(6.0, 4.0, 8.0, 6.0)
+        );
     }
 
     #[test]
@@ -143,11 +154,13 @@ mod tests {
         assert!((rotated_hit.1.x + core::f32::consts::SQRT_2).abs() < 0.0001);
 
         let circle = PhysShape::Circle(CircleShape::new(Vector2::ZERO, 1.0));
-        assert!(circle
-            .ray_cast(
-                Transform::new(Vector2::ZERO, 0.0),
-                Ray::new(Vector2::new(-2.0, 1.1), Vector2::UNIT_X),
-            )
-            .is_none());
+        assert!(
+            circle
+                .ray_cast(
+                    Transform::new(Vector2::ZERO, 0.0),
+                    Ray::new(Vector2::new(-2.0, 1.1), Vector2::UNIT_X),
+                )
+                .is_none()
+        );
     }
 }

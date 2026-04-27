@@ -1,9 +1,9 @@
-use sekai::{
-    EntityManager, EntityUid, GameStateMapData, NetworkComponentMessage, RobustSerializer,
-    SerializedEntityState, TransformComponentState,
-};
 use daikoku::{EntityMessageType, MsgEntity};
 use keisan::{Angle, Vector2};
+use sekai::{
+    EntityManager, EntityUid, NetworkComponentMessage, RobustSerializer, SerializedEntityState,
+    TransformComponentState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PendingTransformLerp {
@@ -43,34 +43,19 @@ impl ClientEntityManager {
         uid
     }
 
-    pub fn create_entity_with_transform(
-        &mut self,
-        prototype: Option<&str>,
-        uid: EntityUid,
-        state: TransformComponentState,
-    ) -> EntityUid {
-        self.inner
-            .alloc_entity_external_with_transform(uid, prototype, state);
-        uid
-    }
-
-    pub fn entity_exists(&self, uid: EntityUid) -> bool {
-        self.inner.entity_exists(uid)
-    }
-
-    pub fn map_entity_for(&self, map_id: sekai::MapId) -> Option<EntityUid> {
-        self.inner.map_entity_for(map_id)
-    }
-
     pub fn ensure_map_entity(&mut self, map_id: sekai::MapId) -> EntityUid {
-        if let Some(uid) = self.map_entity_for(map_id) {
+        if let Some(uid) = self.inner.map_entity_for(map_id) {
             return uid;
         }
 
         self.inner.create_entity_uninitialized_as_map(None, map_id)
     }
 
-    pub fn handle_entity_network_message(&mut self, cur_server_tick: jikan::GameTick, message: MsgEntity) {
+    pub fn handle_entity_network_message(
+        &mut self,
+        cur_server_tick: jikan::GameTick,
+        message: MsgEntity,
+    ) {
         if message.source_tick <= cur_server_tick {
             self.dispatch_msg_entity(message);
         } else {
@@ -107,15 +92,6 @@ impl ClientEntityManager {
         }
     }
 
-    pub fn delete_entity(&mut self, uid: EntityUid) {
-        self.inner.queue_delete_entity(uid);
-        self.inner.flush_queued_deletions();
-    }
-
-    pub fn initialize_entity(&mut self, uid: EntityUid) {
-        let _ = self.inner.initialize_entity(uid);
-    }
-
     pub fn take_pending_transform_lerps(&mut self) -> Vec<PendingTransformLerp> {
         std::mem::take(&mut self.pending_transform_lerps)
     }
@@ -126,18 +102,18 @@ impl ClientEntityManager {
         state: &SerializedEntityState,
     ) -> Option<EntityUid> {
         let pending_transform_lerps = &mut self.pending_transform_lerps;
-        self.inner.apply_serialized_entity_state_with(serializer, state, |manager, uid, transform_state| {
-            Self::apply_transform_component_state_with_pending_lerp(
-                pending_transform_lerps,
-                manager,
-                uid,
-                transform_state,
-            );
-        })
-    }
-
-    pub fn apply_map_data(&mut self, map_data: &GameStateMapData) {
-        self.inner.apply_game_state_map_data(map_data);
+        self.inner.apply_serialized_entity_state_with(
+            serializer,
+            state,
+            |manager, uid, transform_state| {
+                Self::apply_transform_component_state_with_pending_lerp(
+                    pending_transform_lerps,
+                    manager,
+                    uid,
+                    transform_state,
+                );
+            },
+        )
     }
 
     pub fn apply_game_state(
@@ -146,77 +122,18 @@ impl ClientEntityManager {
         state: &sekai::GameState,
     ) -> Vec<EntityUid> {
         let pending_transform_lerps = &mut self.pending_transform_lerps;
-        self.inner.apply_game_state_delta_with(serializer, state, |manager, uid, transform_state| {
-            Self::apply_transform_component_state_with_pending_lerp(
-                pending_transform_lerps,
-                manager,
-                uid,
-                transform_state,
-            );
-        })
-    }
-
-    pub fn rebuild_runtime_state(&mut self) {
-        self.inner.rebuild_runtime_state();
-    }
-
-    pub fn sync_map_physics_runtime(&mut self, map_id: sekai::MapId) {
-        self.sync_map_physics_runtime_many([map_id]);
-    }
-
-    pub fn sync_map_physics_runtime_many<I>(&mut self, map_ids: I)
-    where
-        I: IntoIterator<Item = sekai::MapId>,
-    {
-        let unique = map_ids
-            .into_iter()
-            .filter(|map_id| *map_id != sekai::MapId::NULLSPACE)
-            .filter(|map_id| self.map_entity_for(*map_id).is_some())
-            .collect::<std::collections::HashSet<_>>();
-        self.inner.refresh_map_physics_runtime_many(unique);
-    }
-
-    pub fn refresh_entity_spatial_runtime(&mut self, uid: EntityUid, previous_map: sekai::MapId) {
-        self.inner.reconcile_transform_runtime(uid, Some(previous_map));
-    }
-
-    pub fn mutate_predicted_physics<F>(&mut self, uid: EntityUid, mutate: F) -> bool
-    where
-        F: FnOnce(&mut sekai::PhysicsComponent),
-    {
-        self.inner.mutate_physics_and_reconcile(uid, mutate)
-    }
-
-    pub fn configure_predicted_physics(
-        &mut self,
-        uid: EntityUid,
-        body_type: Option<sekai::BodyType>,
-        awake: Option<bool>,
-        can_collide: Option<bool>,
-        predict: Option<bool>,
-    ) -> bool {
-        self.inner
-            .configure_physics_body(uid, body_type, awake, can_collide, predict)
-    }
-
-    pub fn set_local_transform(
-        &mut self,
-        uid: EntityUid,
-        local_position: Vector2,
-        local_rotation: Angle,
-    ) -> bool {
-        self.inner
-            .set_local_transform_immediate(uid, local_position, local_rotation)
-    }
-
-    pub fn offset_local_transform(
-        &mut self,
-        uid: EntityUid,
-        delta: Vector2,
-        angular_delta: Angle,
-    ) -> bool {
-        self.inner
-            .offset_local_transform_immediate(uid, delta, angular_delta)
+        self.inner.apply_game_state_delta_with(
+            serializer,
+            state,
+            |manager, uid, transform_state| {
+                Self::apply_transform_component_state_with_pending_lerp(
+                    pending_transform_lerps,
+                    manager,
+                    uid,
+                    transform_state,
+                );
+            },
+        )
     }
 
     #[cfg(test)]
@@ -229,16 +146,19 @@ impl ClientEntityManager {
         uid: EntityUid,
         transform_state: &TransformComponentState,
     ) -> Option<PendingTransformLerp> {
-        manager.transforms.get(&uid).map(|transform| PendingTransformLerp {
-            uid,
-            source: transform.local_position,
-            destination: transform_state.local_position,
-            source_angle: transform.local_rotation,
-            destination_angle: transform_state.rotation,
-            parent: transform_state.parent_id,
-            source_anchored: transform.anchored,
-            destination_anchored: transform_state.anchored,
-        })
+        manager
+            .transforms
+            .get(&uid)
+            .map(|transform| PendingTransformLerp {
+                uid,
+                source: transform.local_position,
+                destination: transform_state.local_position,
+                source_angle: transform.local_rotation,
+                destination_angle: transform_state.rotation,
+                parent: transform_state.parent_id,
+                source_anchored: transform.anchored,
+                destination_anchored: transform_state.anchored,
+            })
     }
 
     fn apply_transform_component_state_with_pending_lerp(
@@ -255,7 +175,11 @@ impl ClientEntityManager {
     }
 
     #[cfg(test)]
-    fn apply_transform_component_state(&mut self, uid: EntityUid, transform_state: TransformComponentState) {
+    fn apply_transform_component_state(
+        &mut self,
+        uid: EntityUid,
+        transform_state: TransformComponentState,
+    ) {
         Self::apply_transform_component_state_with_pending_lerp(
             &mut self.pending_transform_lerps,
             &mut self.inner,
@@ -274,16 +198,19 @@ impl ClientEntityManager {
     ) {
         match net_id {
             EntityManager::TRANSFORM_NET_ID => {
-                if let Ok(state) =
-                    serializer.deserialize_component_state::<TransformComponentState>(component_state)
+                if let Ok(state) = serializer
+                    .deserialize_component_state::<TransformComponentState>(component_state)
                 {
                     self.apply_transform_component_state(uid, state);
                 }
             }
             _ => {
-                let _ = self
-                    .inner
-                    .apply_serialized_component_by_net_id(serializer, uid, net_id, component_state);
+                let _ = self.inner.apply_serialized_component_by_net_id(
+                    serializer,
+                    uid,
+                    net_id,
+                    component_state,
+                );
             }
         }
     }
@@ -291,13 +218,14 @@ impl ClientEntityManager {
     fn dispatch_msg_entity(&mut self, message: MsgEntity) {
         match message.message_type {
             EntityMessageType::ComponentMessage => {
-                self.received_component_messages.push(NetworkComponentMessage::new(
-                    (),
-                    message.entity_uid,
-                    message.net_id,
-                    message.component_message.unwrap_or_default(),
-                    None::<()>,
-                ));
+                self.received_component_messages
+                    .push(NetworkComponentMessage::new(
+                        (),
+                        message.entity_uid,
+                        message.net_id,
+                        message.component_message.unwrap_or_default(),
+                        None::<()>,
+                    ));
             }
             EntityMessageType::SystemMessage => {
                 if let Some(system_message) = message.system_message {
@@ -320,16 +248,17 @@ mod tests {
     use super::{ClientEntityManager, PendingTransformLerp};
     use butsuri::{AabbShape, Fixture, Joint, JointType, PhysShape};
     use daikoku::{EntityMessageType, MsgEntity};
-    use std::collections::HashMap;
-    use sekai::{
-        ChunkDatum, EntityUid, GameStateMapData, GridDatum, GridId, MapComponentState, MapCoordinates,
-        MapGridComponentState, MapId, MetaDataComponentState, RobustSerializer, SerializedComponentChange,
-        SerializedEntityState, Tile, TileRenderFlag, AppearanceComponentState, AppearanceValue,
-        FixturesComponentState, JointComponentState, EntityLookupComponentState,
-        EntityLookupEntry, BroadphaseComponentState, CollisionWakeComponentState, PhysicsComponentState, SharedPhysicsMapComponentState,
-        TransformComponentState, CollideOnAnchorComponentState,
-    };
     use keisan::{Angle, Box2, Vector2, Vector2i};
+    use sekai::{
+        AppearanceComponentState, AppearanceValue, BroadphaseComponentState, ChunkDatum,
+        CollideOnAnchorComponentState, CollisionWakeComponentState, EntityLookupComponentState,
+        EntityLookupEntry, EntityUid, FixturesComponentState, GameStateMapData, GridDatum, GridId,
+        JointComponentState, MapComponentState, MapCoordinates, MapGridComponentState, MapId,
+        MetaDataComponentState, PhysicsComponentState, RobustSerializer, SerializedComponentChange,
+        SerializedEntityState, SharedPhysicsMapComponentState, Tile, TileRenderFlag,
+        TransformComponentState,
+    };
+    use std::collections::HashMap;
 
     #[test]
     fn client_entity_manager_creates_and_applies_serialized_entities() {
@@ -353,9 +282,15 @@ mod tests {
             )],
         };
         entities.apply_serialized_entity_state(&mut serializer, &state);
-        assert!(entities.entity_exists(EntityUid::new(5)));
+        assert!(entities.inner.entity_exists(EntityUid::new(5)));
         assert_eq!(
-            entities.inner.metadata.get(&EntityUid::new(5)).unwrap().prototype_id.as_deref(),
+            entities
+                .inner
+                .metadata
+                .get(&EntityUid::new(5))
+                .unwrap()
+                .prototype_id
+                .as_deref(),
             Some("mob")
         );
     }
@@ -363,7 +298,7 @@ mod tests {
     #[test]
     fn client_entity_manager_applies_map_data_to_grids() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(3),
                 GridDatum {
@@ -432,7 +367,10 @@ mod tests {
                         .serialize_component_state(&AppearanceComponentState {
                             data: HashMap::from([
                                 (String::from("mode"), AppearanceValue::UInt(3)),
-                                (String::from("name"), AppearanceValue::Text(String::from("shimmer"))),
+                                (
+                                    String::from("name"),
+                                    AppearanceValue::Text(String::from("shimmer")),
+                                ),
                             ]),
                         })
                         .unwrap(),
@@ -442,14 +380,17 @@ mod tests {
         entities.apply_serialized_entity_state(&mut serializer, &state);
         let appearance = entities.inner.appearances.get(&EntityUid::new(11)).unwrap();
         assert_eq!(appearance.get_data::<u32>("mode"), Some(3));
-        assert_eq!(appearance.get_data::<String>("name").as_deref(), Some("shimmer"));
+        assert_eq!(
+            appearance.get_data::<String>("name").as_deref(),
+            Some("shimmer")
+        );
     }
 
     #[test]
     fn client_entity_manager_applies_deleted_component_changes() {
         let mut entities = ClientEntityManager::new();
         let uid = entities.create_entity(None, EntityUid::new(18));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         assert!(entities.inner.set_appearance_data(uid, "mode", 3u32));
         let state = SerializedEntityState {
             uid,
@@ -477,7 +418,7 @@ mod tests {
             },
         );
 
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(44),
                 GridDatum {
@@ -531,12 +472,7 @@ mod tests {
                 chunk_size: 8,
             })
             .unwrap();
-        entities.apply_component_state(
-            &mut serializer,
-            uid,
-            4,
-            &grid_state,
-        );
+        entities.apply_component_state(&mut serializer, uid, 4, &grid_state);
         let transform_state = serializer
             .serialize_component_state(&TransformComponentState {
                 local_position: Vector2::new(6.0, -2.0),
@@ -548,12 +484,7 @@ mod tests {
                 anchored: false,
             })
             .unwrap();
-        entities.apply_component_state(
-            &mut serializer,
-            uid,
-            2,
-            &transform_state,
-        );
+        entities.apply_component_state(&mut serializer, uid, 2, &transform_state);
 
         let runtime = entities.inner.map_grids.get(&uid).unwrap();
         assert_eq!(runtime.parent_map_id, MapId::new(11));
@@ -579,7 +510,14 @@ mod tests {
             .unwrap();
         entities.apply_component_state(&mut serializer, map_uid, 3, &map_state);
         assert!(entities.inner.transforms.contains_key(&map_uid));
-        assert!(entities.inner.map_components.get(&map_uid).unwrap().map_paused);
+        assert!(
+            entities
+                .inner
+                .map_components
+                .get(&map_uid)
+                .unwrap()
+                .map_paused
+        );
 
         entities.create_entity(None, grid_uid);
         let grid_state = serializer
@@ -603,8 +541,8 @@ mod tests {
                 anchored: false,
             })
             .unwrap();
-        let map_transform_state = serializer.serialize_component_state(
-            &TransformComponentState {
+        let map_transform_state = serializer
+            .serialize_component_state(&TransformComponentState {
                 local_position: Vector2::ZERO,
                 rotation: Angle::ZERO,
                 parent_id: EntityUid::INVALID,
@@ -612,11 +550,11 @@ mod tests {
                 grid_id: GridId::INVALID,
                 no_local_rotation: false,
                 anchored: false,
-            }
-        ).unwrap();
+            })
+            .unwrap();
         entities.apply_component_state(&mut serializer, map_uid, 2, &map_transform_state);
         entities.apply_component_state(&mut serializer, grid_uid, 2, &transform_state);
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
 
         let grid_transform = entities.inner.transforms.get(&grid_uid).unwrap();
         assert_eq!(grid_transform.parent, map_uid);
@@ -632,11 +570,16 @@ mod tests {
         let mut entities = ClientEntityManager::new();
         let map_uid = entities.ensure_map_entity(MapId::new(1));
         let grid_uid = entities.ensure_grid_entity(GridId::new(4));
-        entities.inner.map_grid_components.get_mut(&grid_uid).unwrap().chunk_size = 8;
         entities
             .inner
-            .map_grids
-            .insert(grid_uid, sekai::MapGrid::new(MapId::new(1), grid_uid, GridId::new(4), 8));
+            .map_grid_components
+            .get_mut(&grid_uid)
+            .unwrap()
+            .chunk_size = 8;
+        entities.inner.map_grids.insert(
+            grid_uid,
+            sekai::MapGrid::new(MapId::new(1), grid_uid, GridId::new(4), 8),
+        );
         let _ = entities.inner.set_parent(grid_uid, map_uid);
         entities
             .inner
@@ -646,7 +589,7 @@ mod tests {
             .set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
 
         let child = entities.create_entity(None, EntityUid::new(181));
-        entities.initialize_entity(child);
+        entities.inner.initialize_entity(child);
         let _ = entities.inner.apply_transform_state(
             child,
             TransformComponentState {
@@ -659,7 +602,7 @@ mod tests {
                 anchored: false,
             },
         );
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
 
         let mut serializer = RobustSerializer::new();
         let deleted_grid = SerializedEntityState {
@@ -686,11 +629,16 @@ mod tests {
         entities.inner.ensure_physics_map(map_uid);
 
         let grid_uid = entities.ensure_grid_entity(GridId::new(12));
-        entities.inner.map_grid_components.get_mut(&grid_uid).unwrap().chunk_size = 8;
         entities
             .inner
-            .map_grids
-            .insert(grid_uid, sekai::MapGrid::new(MapId::new(1), grid_uid, GridId::new(12), 8));
+            .map_grid_components
+            .get_mut(&grid_uid)
+            .unwrap()
+            .chunk_size = 8;
+        entities.inner.map_grids.insert(
+            grid_uid,
+            sekai::MapGrid::new(MapId::new(1), grid_uid, GridId::new(12), 8),
+        );
         let _ = entities.inner.set_parent(grid_uid, map_uid);
 
         let deleted_map = SerializedEntityState {
@@ -706,7 +654,15 @@ mod tests {
         let grid_transform = entities.inner.transforms.get(&grid_uid).unwrap();
         assert_eq!(grid_transform.parent, EntityUid::INVALID);
         assert_eq!(grid_transform.map_id, MapId::NULLSPACE);
-        assert_eq!(entities.inner.map_grids.get(&grid_uid).unwrap().parent_map_id, MapId::NULLSPACE);
+        assert_eq!(
+            entities
+                .inner
+                .map_grids
+                .get(&grid_uid)
+                .unwrap()
+                .parent_map_id,
+            MapId::NULLSPACE
+        );
     }
 
     #[test]
@@ -717,7 +673,7 @@ mod tests {
         entities.inner.ensure_physics_map(map_uid);
 
         let first = entities.create_entity(None, EntityUid::new(210));
-        entities.initialize_entity(first);
+        entities.inner.initialize_entity(first);
         let _ = entities.inner.apply_transform_state(
             first,
             TransformComponentState {
@@ -743,7 +699,7 @@ mod tests {
         );
 
         let second = entities.create_entity(None, EntityUid::new(211));
-        entities.initialize_entity(second);
+        entities.inner.initialize_entity(second);
         let _ = entities.inner.apply_transform_state(
             second,
             TransformComponentState {
@@ -768,7 +724,7 @@ mod tests {
             ),
         );
 
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
         assert_eq!(entities.inner.map_contact_count(MapId::new(2)), 1);
 
         let mut serializer = RobustSerializer::new();
@@ -781,7 +737,9 @@ mod tests {
         );
         assert_eq!(entities.inner.map_contact_count(MapId::new(2)), 0);
         assert_eq!(
-            entities.inner.query_aabb_entities(map_uid, Box2::new(-1.0, -1.0, 1.0, 1.0)),
+            entities
+                .inner
+                .query_aabb_entities(map_uid, Box2::new(-1.0, -1.0, 1.0, 1.0)),
             vec![second]
         );
 
@@ -808,7 +766,7 @@ mod tests {
         entities.inner.ensure_physics_map(map_uid);
 
         let first = entities.create_entity(None, EntityUid::new(212));
-        entities.initialize_entity(first);
+        entities.inner.initialize_entity(first);
         let _ = entities.inner.apply_transform_state(
             first,
             TransformComponentState {
@@ -834,7 +792,7 @@ mod tests {
         );
 
         let second = entities.create_entity(None, EntityUid::new(213));
-        entities.initialize_entity(second);
+        entities.inner.initialize_entity(second);
         let _ = entities.inner.apply_transform_state(
             second,
             TransformComponentState {
@@ -859,11 +817,12 @@ mod tests {
             ),
         );
 
-        let mut joint = butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
+        let mut joint =
+            butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
         joint.id = "rope".to_string();
         joint.collide_connected = false;
         assert!(entities.inner.add_joint_between(joint));
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
         assert_eq!(entities.inner.map_contact_count(MapId::new(3)), 0);
 
         let mut serializer = RobustSerializer::new();
@@ -876,7 +835,15 @@ mod tests {
         );
 
         assert!(!entities.inner.joint_components.contains_key(&first));
-        assert_eq!(entities.inner.joint_components.get(&second).unwrap().joint_count(), 0);
+        assert_eq!(
+            entities
+                .inner
+                .joint_components
+                .get(&second)
+                .unwrap()
+                .joint_count(),
+            0
+        );
         assert_eq!(entities.inner.map_contact_count(MapId::new(3)), 1);
     }
 
@@ -888,7 +855,7 @@ mod tests {
         entities.inner.ensure_physics_map(map_uid);
 
         let first = entities.create_entity(None, EntityUid::new(214));
-        entities.initialize_entity(first);
+        entities.inner.initialize_entity(first);
         let _ = entities.inner.apply_transform_state(
             first,
             TransformComponentState {
@@ -914,7 +881,7 @@ mod tests {
         );
 
         let second = entities.create_entity(None, EntityUid::new(215));
-        entities.initialize_entity(second);
+        entities.inner.initialize_entity(second);
         let _ = entities.inner.apply_transform_state(
             second,
             TransformComponentState {
@@ -939,11 +906,12 @@ mod tests {
             ),
         );
 
-        let mut joint = butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
+        let mut joint =
+            butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
         joint.id = "rope".to_string();
         joint.collide_connected = false;
         assert!(entities.inner.add_joint_between(joint));
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
         assert_eq!(entities.inner.map_contact_count(MapId::new(5)), 0);
 
         let mut serializer = RobustSerializer::new();
@@ -960,13 +928,21 @@ mod tests {
 
         assert!(!entities.inner.physics.contains_key(&first));
         assert!(!entities.inner.joint_components.contains_key(&first));
-        assert_eq!(entities.inner.joint_components.get(&second).unwrap().joint_count(), 0);
+        assert_eq!(
+            entities
+                .inner
+                .joint_components
+                .get(&second)
+                .unwrap()
+                .joint_count(),
+            0
+        );
     }
 
     #[test]
     fn client_entity_manager_applies_deleted_grids_from_map_data() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(4),
                 GridDatum {
@@ -981,7 +957,7 @@ mod tests {
 
         assert!(entities.inner.grid_exists(GridId::new(4)));
 
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: HashMap::new(),
             deleted_grids: vec![GridId::new(4)],
         });
@@ -992,7 +968,7 @@ mod tests {
     #[test]
     fn client_entity_manager_grid_lookup_helpers_track_map_data_lifecycle() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(13),
                 GridDatum {
@@ -1005,12 +981,15 @@ mod tests {
             deleted_grids: Vec::new(),
         });
 
-        let map_uid = entities.map_entity_for(MapId::new(6)).unwrap();
+        let map_uid = entities.inner.map_entity_for(MapId::new(6)).unwrap();
         let grid_uid = entities.inner.grid_entity_for(GridId::new(13)).unwrap();
-        assert_eq!(entities.inner.transforms.get(&grid_uid).unwrap().parent, map_uid);
+        assert_eq!(
+            entities.inner.transforms.get(&grid_uid).unwrap().parent,
+            map_uid
+        );
         assert!(entities.inner.grid_exists(GridId::new(13)));
 
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: HashMap::new(),
             deleted_grids: vec![GridId::new(13)],
         });
@@ -1022,7 +1001,7 @@ mod tests {
     #[test]
     fn client_entity_manager_applies_incremental_chunk_updates_and_deletions() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(4),
                 GridDatum {
@@ -1044,7 +1023,7 @@ mod tests {
             deleted_grids: Vec::new(),
         });
 
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(4),
                 GridDatum {
@@ -1075,22 +1054,27 @@ mod tests {
     fn client_entity_manager_can_find_map_entity_by_map_id() {
         let mut entities = ClientEntityManager::new();
         let uid = entities.create_entity(None, EntityUid::new(90));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         entities.inner.map_components.entry(uid).or_insert_with(|| {
             let mut component = sekai::MapComponent::new();
             component.base.owner = uid;
             component.world_map = MapId::new(7);
             component
         });
-        assert_eq!(entities.map_entity_for(MapId::new(7)), Some(uid));
+        assert_eq!(entities.inner.map_entity_for(MapId::new(7)), Some(uid));
     }
 
     #[test]
     fn client_entity_manager_queues_pending_transform_lerps_from_snapshots() {
         let mut entities = ClientEntityManager::new();
         let uid = entities.create_entity(None, EntityUid::new(15));
-        entities.initialize_entity(uid);
-        entities.inner.transforms.get_mut(&uid).unwrap().local_position = Vector2::new(1.0, 0.0);
+        entities.inner.initialize_entity(uid);
+        entities
+            .inner
+            .transforms
+            .get_mut(&uid)
+            .unwrap()
+            .local_position = Vector2::new(1.0, 0.0);
         let mut serializer = RobustSerializer::new();
         let state = SerializedEntityState {
             uid,
@@ -1177,7 +1161,16 @@ mod tests {
         assert_eq!(transform.local_position, Vector2::new(2.0, 3.0));
         assert_eq!(transform.local_rotation, Angle::from_degrees(20.0));
         assert_eq!(transform.map_id, MapId::new(12));
-        assert_eq!(entities.inner.metadata.get(&EntityUid::new(115)).unwrap().prototype_id.as_deref(), Some("mob"));
+        assert_eq!(
+            entities
+                .inner
+                .metadata
+                .get(&EntityUid::new(115))
+                .unwrap()
+                .prototype_id
+                .as_deref(),
+            Some("mob")
+        );
     }
 
     #[test]
@@ -1198,7 +1191,10 @@ mod tests {
                             .serialize_component_state(&FixturesComponentState {
                                 fixtures: vec![Fixture::new(
                                     "main",
-                                    PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+                                    PhysShape::Aabb(AabbShape::new(
+                                        Box2::new(-1.0, -1.0, 1.0, 1.0),
+                                        0.0,
+                                    )),
                                 )],
                             })
                             .unwrap(),
@@ -1210,15 +1206,33 @@ mod tests {
                     false,
                     Some(
                         serializer
-                            .serialize_component_state(&JointComponentState { joints: vec![joint] })
+                            .serialize_component_state(&JointComponentState {
+                                joints: vec![joint],
+                            })
                             .unwrap(),
                     ),
                 ),
             ],
         };
         entities.apply_serialized_entity_state(&mut serializer, &state);
-        assert_eq!(entities.inner.fixtures.get(&EntityUid::new(12)).unwrap().fixture_count(), 1);
-        assert_eq!(entities.inner.joint_components.get(&EntityUid::new(12)).unwrap().joint_count(), 1);
+        assert_eq!(
+            entities
+                .inner
+                .fixtures
+                .get(&EntityUid::new(12))
+                .unwrap()
+                .fixture_count(),
+            1
+        );
+        assert_eq!(
+            entities
+                .inner
+                .joint_components
+                .get(&EntityUid::new(12))
+                .unwrap()
+                .joint_count(),
+            1
+        );
     }
 
     #[test]
@@ -1321,7 +1335,10 @@ mod tests {
                                     owner_id: 13,
                                     fixture: Fixture::new(
                                         "main",
-                                        PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+                                        PhysShape::Aabb(AabbShape::new(
+                                            Box2::new(-1.0, -1.0, 1.0, 1.0),
+                                            0.0,
+                                        )),
                                     ),
                                     transform: butsuri::Transform::new(Vector2::new(3.0, 0.0), 0.0),
                                 }],
@@ -1347,7 +1364,16 @@ mod tests {
             ],
         };
         entities.apply_serialized_entity_state(&mut serializer, &state);
-        assert_eq!(entities.inner.entity_lookups.get(&EntityUid::new(13)).unwrap().entities.len(), 1);
+        assert_eq!(
+            entities
+                .inner
+                .entity_lookups
+                .get(&EntityUid::new(13))
+                .unwrap()
+                .entities
+                .len(),
+            1
+        );
         assert_eq!(
             entities
                 .inner
@@ -1360,9 +1386,20 @@ mod tests {
             1
         );
         assert!(entities.inner.has_physics_runtime_owner(EntityUid::new(13)));
-        assert_eq!(entities.inner.owner_auto_clear_forces(EntityUid::new(13)), Some(true));
-        assert!(entities.inner.owner_contains_body(EntityUid::new(13), EntityUid::new(13)));
-        assert!(entities.inner.owner_contains_awake_body(EntityUid::new(13), EntityUid::new(13)));
+        assert_eq!(
+            entities.inner.owner_auto_clear_forces(EntityUid::new(13)),
+            Some(true)
+        );
+        assert!(
+            entities
+                .inner
+                .owner_contains_body(EntityUid::new(13), EntityUid::new(13))
+        );
+        assert!(
+            entities
+                .inner
+                .owner_contains_awake_body(EntityUid::new(13), EntityUid::new(13))
+        );
     }
 
     #[test]
@@ -1383,7 +1420,11 @@ mod tests {
             )],
         };
         entities.apply_serialized_entity_state(&mut serializer, &state);
-        let collision_wake = entities.inner.collision_wakes.get(&EntityUid::new(131)).unwrap();
+        let collision_wake = entities
+            .inner
+            .collision_wakes
+            .get(&EntityUid::new(131))
+            .unwrap();
         assert!(!collision_wake.enabled);
     }
 
@@ -1405,14 +1446,18 @@ mod tests {
             )],
         };
         entities.apply_serialized_entity_state(&mut serializer, &state);
-        let collide_on_anchor = entities.inner.collide_on_anchors.get(&EntityUid::new(132)).unwrap();
+        let collide_on_anchor = entities
+            .inner
+            .collide_on_anchors
+            .get(&EntityUid::new(132))
+            .unwrap();
         assert!(collide_on_anchor.enable);
     }
 
     #[test]
     fn client_entity_manager_creates_map_owner_and_parents_grids_from_map_data() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(11),
                 GridDatum {
@@ -1425,7 +1470,7 @@ mod tests {
             deleted_grids: Vec::new(),
         });
 
-        let map_uid = entities.map_entity_for(MapId::new(7)).unwrap();
+        let map_uid = entities.inner.map_entity_for(MapId::new(7)).unwrap();
         let grid_uid = entities.inner.grid_entity_for(GridId::new(11)).unwrap();
         let transform = entities.inner.transforms.get(&grid_uid).unwrap();
         assert_eq!(transform.parent, map_uid);
@@ -1436,7 +1481,7 @@ mod tests {
     #[test]
     fn client_entity_manager_rebuilds_lookup_and_physics_runtime_after_grid_motion() {
         let mut entities = ClientEntityManager::new();
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(11),
                 GridDatum {
@@ -1452,11 +1497,11 @@ mod tests {
             deleted_grids: Vec::new(),
         });
 
-        let map_uid = entities.map_entity_for(MapId::new(7)).unwrap();
+        let map_uid = entities.inner.map_entity_for(MapId::new(7)).unwrap();
         let grid_uid = entities.inner.grid_entity_for(GridId::new(11)).unwrap();
 
         let uid = entities.create_entity(None, EntityUid::new(250));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         let _ = entities.inner.apply_transform_state(
             uid,
             TransformComponentState {
@@ -1482,15 +1527,17 @@ mod tests {
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ));
 
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
         assert_eq!(
-            entities
-                .inner
-                .entities_in_grid_aabb(GridId::new(11), Box2::new(-1.0, -1.0, 1.0, 1.0), false),
+            entities.inner.entities_in_grid_aabb(
+                GridId::new(11),
+                Box2::new(-1.0, -1.0, 1.0, 1.0),
+                false
+            ),
             vec![uid]
         );
 
-        entities.apply_map_data(&GameStateMapData {
+        entities.inner.apply_game_state_map_data(&GameStateMapData {
             grid_data: std::iter::once((
                 GridId::new(11),
                 GridDatum {
@@ -1502,12 +1549,14 @@ mod tests {
             .collect(),
             deleted_grids: Vec::new(),
         });
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
 
         assert_eq!(
-            entities
-                .inner
-                .entities_in_grid_aabb(GridId::new(11), Box2::new(9.0, -1.0, 11.0, 1.0), false),
+            entities.inner.entities_in_grid_aabb(
+                GridId::new(11),
+                Box2::new(9.0, -1.0, 11.0, 1.0),
+                false
+            ),
             vec![uid]
         );
         assert_eq!(
@@ -1526,7 +1575,7 @@ mod tests {
         assert!(!entities.inner.has_map_physics_runtime(MapId::new(4)));
 
         let uid = entities.create_entity(None, EntityUid::new(320));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         let _ = entities.inner.apply_transform_state(
             uid,
             TransformComponentState {
@@ -1551,12 +1600,16 @@ mod tests {
             ),
         );
 
-        entities.sync_map_physics_runtime(MapId::new(8));
+        entities
+            .inner
+            .refresh_map_physics_runtime_many([MapId::new(8)]);
 
         assert!(entities.inner.has_map_broadphase(MapId::new(8)));
         assert!(entities.inner.has_map_physics_runtime(MapId::new(8)));
         assert_eq!(
-            entities.inner.query_aabb_entities(map_uid, Box2::new(-1.0, -1.0, 1.0, 1.0)),
+            entities
+                .inner
+                .query_aabb_entities(map_uid, Box2::new(-1.0, -1.0, 1.0, 1.0)),
             vec![uid]
         );
         assert!(entities.inner.map_contains_body(MapId::new(8), uid));
@@ -1568,7 +1621,12 @@ mod tests {
         let mut entities = ClientEntityManager::new();
         let map_uid = entities.ensure_map_entity(MapId::new(3));
         let grid_uid = entities.ensure_grid_entity(GridId::new(21));
-        entities.inner.map_grid_components.get_mut(&grid_uid).unwrap().chunk_size = 8;
+        entities
+            .inner
+            .map_grid_components
+            .get_mut(&grid_uid)
+            .unwrap()
+            .chunk_size = 8;
         entities.inner.map_grids.insert(
             grid_uid,
             sekai::MapGrid::new(MapId::new(3), grid_uid, GridId::new(21), 8),
@@ -1576,7 +1634,7 @@ mod tests {
         let _ = entities.inner.set_parent(grid_uid, map_uid);
 
         let uid = entities.create_entity(None, EntityUid::new(301));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         let _ = entities.inner.apply_transform_state(
             uid,
             TransformComponentState {
@@ -1591,7 +1649,7 @@ mod tests {
         );
         entities.inner.transforms.get_mut(&uid).unwrap().map_id = MapId::NULLSPACE;
 
-        entities.rebuild_runtime_state();
+        entities.inner.rebuild_runtime_state();
         let transform = entities.inner.transforms.get(&uid).unwrap();
         assert_eq!(transform.map_id, MapId::new(3));
         assert_eq!(transform.grid_id, GridId::new(21));

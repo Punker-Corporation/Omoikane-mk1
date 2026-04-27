@@ -18,7 +18,12 @@ impl TileRef {
         tile: Tile::EMPTY,
     };
 
-    pub const fn new(map_index: MapId, grid_index: GridId, grid_indices: Vector2i, tile: Tile) -> Self {
+    pub const fn new(
+        map_index: MapId,
+        grid_index: GridId,
+        grid_indices: Vector2i,
+        tile: Tile,
+    ) -> Self {
         Self {
             map_index,
             grid_index,
@@ -27,7 +32,13 @@ impl TileRef {
         }
     }
 
-    pub fn new_xy(map_index: MapId, grid_index: GridId, x_index: i32, y_index: i32, tile: Tile) -> Self {
+    pub fn new_xy(
+        map_index: MapId,
+        grid_index: GridId,
+        x_index: i32,
+        y_index: i32,
+        tile: Tile,
+    ) -> Self {
         Self::new(map_index, grid_index, Vector2i::new(x_index, y_index), tile)
     }
 

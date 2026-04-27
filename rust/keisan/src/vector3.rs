@@ -101,7 +101,10 @@ impl Vector3 {
     }
 
     pub fn interpolate_cubic(pre_a: Self, a: Self, b: Self, post_b: Self, t: f32) -> Self {
-        a + (b - pre_a + (pre_a * 2.0 - a * 5.0 + b * 4.0 - post_b + ((a - b) * 3.0 + post_b - pre_a) * t) * t) * t * 0.5
+        a + (b - pre_a
+            + (pre_a * 2.0 - a * 5.0 + b * 4.0 - post_b + ((a - b) * 3.0 + post_b - pre_a) * t) * t)
+            * t
+            * 0.5
     }
 
     pub fn calculate_angle(first: Self, second: Self) -> f32 {
@@ -259,7 +262,10 @@ mod tests {
         let b = Vector3::UNIT_Y;
         assert_eq!(Vector3::dot(a, b), 0.0);
         assert_eq!(Vector3::cross(a, b), Vector3::UNIT_Z);
-        assert_eq!(Vector3::lerp(Vector3::ZERO, Vector3::ONE, 0.25), Vector3::splat(0.25));
+        assert_eq!(
+            Vector3::lerp(Vector3::ZERO, Vector3::ONE, 0.25),
+            Vector3::splat(0.25)
+        );
     }
 
     #[test]
@@ -268,6 +274,10 @@ mod tests {
         let from_v4 = Vector3::from(Vector4::new(2.0, 3.0, 4.0, 5.0));
         assert_eq!(from_v2, Vector3::new(2.0, 3.0, 0.0));
         assert_eq!(from_v4, Vector3::new(2.0, 3.0, 4.0));
-        assert!(Vector3::new(0.0, 3.0, 4.0).normalized().approx_eq(Vector3::new(0.0, 0.6, 0.8)));
+        assert!(
+            Vector3::new(0.0, 3.0, 4.0)
+                .normalized()
+                .approx_eq(Vector3::new(0.0, 0.6, 0.8))
+        );
     }
 }

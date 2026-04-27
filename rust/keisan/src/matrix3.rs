@@ -30,7 +30,17 @@ impl Matrix3 {
         r2c1: f32,
         r2c2: f32,
     ) -> Self {
-        Self { r0c0, r0c1, r0c2, r1c0, r1c1, r1c2, r2c0, r2c1, r2c2 }
+        Self {
+            r0c0,
+            r0c1,
+            r0c2,
+            r1c0,
+            r1c1,
+            r1c2,
+            r2c0,
+            r2c1,
+            r2c2,
+        }
     }
 
     pub fn from_affine_basis(x: Vector2, y: Vector2, origin: Vector2) -> Self {
@@ -48,9 +58,8 @@ impl Matrix3 {
 
     pub fn transpose(self) -> Self {
         Self::new(
-            self.r0c0, self.r1c0, self.r2c0,
-            self.r0c1, self.r1c1, self.r2c1,
-            self.r0c2, self.r1c2, self.r2c2,
+            self.r0c0, self.r1c0, self.r2c0, self.r0c1, self.r1c1, self.r2c1, self.r0c2, self.r1c2,
+            self.r2c2,
         )
     }
 
@@ -107,7 +116,13 @@ impl Matrix3 {
         Self::create_scale(scale.x, scale.y)
     }
 
-    pub fn create_transform(pos_x: f32, pos_y: f32, angle: f32, scale_x: f32, scale_y: f32) -> Self {
+    pub fn create_transform(
+        pos_x: f32,
+        pos_y: f32,
+        angle: f32,
+        scale_x: f32,
+        scale_y: f32,
+    ) -> Self {
         let (sin, cos) = angle.sin_cos();
         Self {
             r0c0: cos * scale_x,
@@ -122,7 +137,13 @@ impl Matrix3 {
         }
     }
 
-    pub fn create_inverse_transform(pos_x: f32, pos_y: f32, angle: f32, scale_x: f32, scale_y: f32) -> Self {
+    pub fn create_inverse_transform(
+        pos_x: f32,
+        pos_y: f32,
+        angle: f32,
+        scale_x: f32,
+        scale_y: f32,
+    ) -> Self {
         let (sin, cos) = angle.sin_cos();
         Self {
             r0c0: cos / scale_x,
@@ -229,7 +250,15 @@ impl ApproxEq for Matrix3 {
     }
 
     fn approx_eq_with_tolerance(&self, other: Self, tolerance: f64) -> bool {
-        (0..3).all(|row| (0..3).all(|column| MathHelper::close_to_f64(self[(row, column)] as f64, other[(row, column)] as f64, tolerance)))
+        (0..3).all(|row| {
+            (0..3).all(|column| {
+                MathHelper::close_to_f64(
+                    self[(row, column)] as f64,
+                    other[(row, column)] as f64,
+                    tolerance,
+                )
+            })
+        })
     }
 }
 
@@ -238,9 +267,15 @@ impl fmt::Debug for Matrix3 {
         write!(
             f,
             "|{}, {}, {}|\n|{}, {}, {}|\n|{}, {}, {}|\n",
-            self.r0c0, self.r0c1, self.r0c2,
-            self.r1c0, self.r1c1, self.r1c2,
-            self.r2c0, self.r2c1, self.r2c2
+            self.r0c0,
+            self.r0c1,
+            self.r0c2,
+            self.r1c0,
+            self.r1c1,
+            self.r1c2,
+            self.r2c0,
+            self.r2c1,
+            self.r2c2
         )
     }
 }
@@ -275,6 +310,9 @@ mod tests {
         let inverted = translated.inverted();
         let origin = inverted * (translated * Vector2::new(2.0, 3.0));
         assert!(origin.approx_eq(Vector2::new(2.0, 3.0)));
-        assert_eq!(Matrix3::IDENTITY * Vector3::new(1.0, 2.0, 3.0), Vector3::new(1.0, 2.0, 3.0));
+        assert_eq!(
+            Matrix3::IDENTITY * Vector3::new(1.0, 2.0, 3.0),
+            Vector3::new(1.0, 2.0, 3.0)
+        );
     }
 }

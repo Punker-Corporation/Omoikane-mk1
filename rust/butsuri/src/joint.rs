@@ -54,7 +54,10 @@ pub struct Joint {
 
 impl Joint {
     pub fn new(body_a_uid: i32, body_b_uid: i32, joint_type: JointType) -> Self {
-        assert!(body_a_uid != body_b_uid, "joint cannot connect the same body twice");
+        assert!(
+            body_a_uid != body_b_uid,
+            "joint cannot connect the same body twice"
+        );
         Self {
             id: String::new(),
             enabled: true,
@@ -98,7 +101,10 @@ impl Joint {
     }
 
     pub fn blocks_collisions(&self, body_a: BodyType, body_b: BodyType) -> bool {
-        self.enabled && !self.collide_connected && body_a != BodyType::Static && body_b != BodyType::Static
+        self.enabled
+            && !self.collide_connected
+            && body_a != BodyType::Static
+            && body_b != BodyType::Static
     }
 }
 

@@ -61,7 +61,8 @@ impl MathHelper {
         a + 0.5
             * t
             * (b - pre_a
-                + t * (2.0 * pre_a - 5.0 * a + 4.0 * b - post_b + t * (3.0 * (a - b) + post_b - pre_a)))
+                + t * (2.0 * pre_a - 5.0 * a + 4.0 * b - post_b
+                    + t * (3.0 * (a - b) + post_b - pre_a)))
     }
 
     pub fn degrees_to_radians(value: f32) -> f32 {

@@ -12,7 +12,10 @@ impl Quaternion {
     pub const IDENTITY: Self = Self::new(0.0, 0.0, 0.0, 1.0);
 
     pub const fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
-        Self { xyz: Vector3::new(x, y, z), w }
+        Self {
+            xyz: Vector3::new(x, y, z),
+            w,
+        }
     }
 
     pub const fn from_vector(vector: Vector3, w: f32) -> Self {
@@ -63,7 +66,11 @@ impl Quaternion {
     }
 
     pub fn to_axis_angle(self) -> Vector4 {
-        let q = if self.w.abs() > 1.0 { self.normalized() } else { self };
+        let q = if self.w.abs() > 1.0 {
+            self.normalized()
+        } else {
+            self
+        };
         let angle = 2.0 * q.w.acos();
         let den = (1.0 - q.w * q.w).sqrt();
         if den > 0.0001 {
@@ -89,7 +96,11 @@ impl Quaternion {
 
     pub fn slerp(q1: Self, mut q2: Self, blend: f32) -> Self {
         if q1.length_squared() == 0.0 {
-            return if q2.length_squared() == 0.0 { Self::IDENTITY } else { q2 };
+            return if q2.length_squared() == 0.0 {
+                Self::IDENTITY
+            } else {
+                q2
+            };
         }
 
         if q2.length_squared() == 0.0 {
@@ -110,12 +121,18 @@ impl Quaternion {
             let half_angle = cos_half_angle.acos();
             let sin_half_angle = half_angle.sin();
             let inv = 1.0 / sin_half_angle;
-            (((half_angle * (1.0 - blend)).sin()) * inv, ((half_angle * blend).sin()) * inv)
+            (
+                ((half_angle * (1.0 - blend)).sin()) * inv,
+                ((half_angle * blend).sin()) * inv,
+            )
         } else {
             (1.0 - blend, blend)
         };
 
-        let result = Self::from_vector(q1.xyz * blend_a + q2.xyz * blend_b, blend_a * q1.w + blend_b * q2.w);
+        let result = Self::from_vector(
+            q1.xyz * blend_a + q2.xyz * blend_b,
+            blend_a * q1.w + blend_b * q2.w,
+        );
         if result.length_squared() > 0.0 {
             result.normalized()
         } else {
@@ -164,18 +181,33 @@ impl Quaternion {
         if m00 >= m11 && m00 >= m22 {
             let num7 = (1.0 + m00 - m11 - m22).sqrt();
             let num4 = 0.5 / num7;
-            return Self::new(0.5 * num7, (m01 + m10) * num4, (m02 + m20) * num4, (m12 - m21) * num4);
+            return Self::new(
+                0.5 * num7,
+                (m01 + m10) * num4,
+                (m02 + m20) * num4,
+                (m12 - m21) * num4,
+            );
         }
 
         if m11 > m22 {
             let num6 = (1.0 + m11 - m00 - m22).sqrt();
             let num3 = 0.5 / num6;
-            return Self::new((m10 + m01) * num3, 0.5 * num6, (m21 + m12) * num3, (m20 - m02) * num3);
+            return Self::new(
+                (m10 + m01) * num3,
+                0.5 * num6,
+                (m21 + m12) * num3,
+                (m20 - m02) * num3,
+            );
         }
 
         let num5 = (1.0 + m22 - m00 - m11).sqrt();
         let num2 = 0.5 / num5;
-        Self::new((m20 + m02) * num2, (m21 + m12) * num2, 0.5 * num5, (m01 - m10) * num2)
+        Self::new(
+            (m20 + m02) * num2,
+            (m21 + m12) * num2,
+            0.5 * num5,
+            (m01 - m10) * num2,
+        )
     }
 
     pub fn to_euler_rad(rotation: Self) -> Vector3 {
@@ -187,30 +219,64 @@ impl Quaternion {
         let test = rotation.x() * rotation.w - rotation.y() * rotation.z();
 
         if test > 0.4995 * unit {
-            return normalize_angles(Vector3::new(core::f32::consts::FRAC_PI_2, 2.0 * rotation.y().atan2(rotation.x()), 0.0) * (180.0 / core::f32::consts::PI));
+            return normalize_angles(
+                Vector3::new(
+                    core::f32::consts::FRAC_PI_2,
+                    2.0 * rotation.y().atan2(rotation.x()),
+                    0.0,
+                ) * (180.0 / core::f32::consts::PI),
+            );
         }
 
         if test < -0.4995 * unit {
-            return normalize_angles(Vector3::new(-core::f32::consts::FRAC_PI_2, -2.0 * rotation.y().atan2(rotation.x()), 0.0) * (180.0 / core::f32::consts::PI));
+            return normalize_angles(
+                Vector3::new(
+                    -core::f32::consts::FRAC_PI_2,
+                    -2.0 * rotation.y().atan2(rotation.x()),
+                    0.0,
+                ) * (180.0 / core::f32::consts::PI),
+            );
         }
 
         let q = Self::new(rotation.w, rotation.z(), rotation.x(), rotation.y());
-        let yaw = (2.0 * q.x() * q.w + 2.0 * q.y() * q.z()).atan2(1.0 - 2.0 * (q.z() * q.z() + q.w * q.w));
+        let yaw = (2.0 * q.x() * q.w + 2.0 * q.y() * q.z())
+            .atan2(1.0 - 2.0 * (q.z() * q.z() + q.w * q.w));
         let pitch = (2.0 * (q.x() * q.z() - q.w * q.y())).asin();
-        let roll = (2.0 * q.x() * q.y() + 2.0 * q.z() * q.w).atan2(1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()));
+        let roll = (2.0 * q.x() * q.y() + 2.0 * q.z() * q.w)
+            .atan2(1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()));
         normalize_angles(Vector3::new(pitch, yaw, roll) * (180.0 / core::f32::consts::PI))
     }
 
     pub fn from_matrix3(matrix: Matrix3) -> Self {
         let scale = (matrix.determinant() as f64).powf(1.0 / 3.0);
-        let mut w = ((0.0f64).max(scale + matrix[(0, 0)] as f64 + matrix[(1, 1)] as f64 + matrix[(2, 2)] as f64).sqrt() / 2.0) as f32;
-        let mut x = ((0.0f64).max(scale + matrix[(0, 0)] as f64 - matrix[(1, 1)] as f64 - matrix[(2, 2)] as f64).sqrt() / 2.0) as f32;
-        let mut y = ((0.0f64).max(scale - matrix[(0, 0)] as f64 + matrix[(1, 1)] as f64 - matrix[(2, 2)] as f64).sqrt() / 2.0) as f32;
-        let mut z = ((0.0f64).max(scale - matrix[(0, 0)] as f64 - matrix[(1, 1)] as f64 + matrix[(2, 2)] as f64).sqrt() / 2.0) as f32;
-        if matrix[(2, 1)] - matrix[(1, 2)] < 0.0 { x = -x; }
-        if matrix[(0, 2)] - matrix[(2, 0)] < 0.0 { y = -y; }
-        if matrix[(1, 0)] - matrix[(0, 1)] < 0.0 { z = -z; }
-        if w.is_nan() { w = 1.0; }
+        let mut w = ((0.0f64)
+            .max(scale + matrix[(0, 0)] as f64 + matrix[(1, 1)] as f64 + matrix[(2, 2)] as f64)
+            .sqrt()
+            / 2.0) as f32;
+        let mut x = ((0.0f64)
+            .max(scale + matrix[(0, 0)] as f64 - matrix[(1, 1)] as f64 - matrix[(2, 2)] as f64)
+            .sqrt()
+            / 2.0) as f32;
+        let mut y = ((0.0f64)
+            .max(scale - matrix[(0, 0)] as f64 + matrix[(1, 1)] as f64 - matrix[(2, 2)] as f64)
+            .sqrt()
+            / 2.0) as f32;
+        let mut z = ((0.0f64)
+            .max(scale - matrix[(0, 0)] as f64 - matrix[(1, 1)] as f64 + matrix[(2, 2)] as f64)
+            .sqrt()
+            / 2.0) as f32;
+        if matrix[(2, 1)] - matrix[(1, 2)] < 0.0 {
+            x = -x;
+        }
+        if matrix[(0, 2)] - matrix[(2, 0)] < 0.0 {
+            y = -y;
+        }
+        if matrix[(1, 0)] - matrix[(0, 1)] < 0.0 {
+            z = -z;
+        }
+        if w.is_nan() {
+            w = 1.0;
+        }
         Self::new(x, y, z, w)
     }
 }
@@ -220,7 +286,11 @@ fn normalize_angle(angle: f32) -> f32 {
 }
 
 fn normalize_angles(angles: Vector3) -> Vector3 {
-    Vector3::new(normalize_angle(angles.x), normalize_angle(angles.y), normalize_angle(angles.z))
+    Vector3::new(
+        normalize_angle(angles.x),
+        normalize_angle(angles.y),
+        normalize_angle(angles.z),
+    )
 }
 
 impl Add for Quaternion {
@@ -279,8 +349,16 @@ mod tests {
     fn axis_angle_roundtrip_stays_close() {
         let q = Quaternion::from_axis_angle(Vector3::UNIT_Z, core::f32::consts::FRAC_PI_2);
         let axis_angle = q.to_axis_angle();
-        assert!(axis_angle.xyz().approx_eq_with_tolerance(Vector3::UNIT_Z, 0.0001));
-        assert!(MathHelper::close_to(axis_angle.w, core::f32::consts::FRAC_PI_2, 0.0001));
+        assert!(
+            axis_angle
+                .xyz()
+                .approx_eq_with_tolerance(Vector3::UNIT_Z, 0.0001)
+        );
+        assert!(MathHelper::close_to(
+            axis_angle.w,
+            core::f32::consts::FRAC_PI_2,
+            0.0001
+        ));
     }
 
     #[test]

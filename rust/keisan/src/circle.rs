@@ -40,7 +40,11 @@ impl Circle {
 
 impl fmt::Display for Circle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Circle ({}, {}), {} r", self.position.x, self.position.y, self.radius)
+        write!(
+            f,
+            "Circle ({}, {}), {} r",
+            self.position.x, self.position.y, self.radius
+        )
     }
 }
 

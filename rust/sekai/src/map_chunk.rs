@@ -64,7 +64,12 @@ impl MapChunk {
         self.tiles[self.offset(x_index, y_index)]
     }
 
-    pub fn set_tile(&mut self, x_index: u16, y_index: u16, tile: Tile) -> Option<TileModifiedEvent> {
+    pub fn set_tile(
+        &mut self,
+        x_index: u16,
+        y_index: u16,
+        tile: Tile,
+    ) -> Option<TileModifiedEvent> {
         let offset = self.offset(x_index, y_index);
         let old_tile = self.tiles[offset];
         if old_tile == tile {
@@ -91,11 +96,10 @@ impl MapChunk {
     }
 
     pub fn grid_tile_to_chunk_tile(&self, grid_tile: Vector2i) -> Vector2i {
-        let modulus = |value: i32| ((value % self.chunk_size as i32) + self.chunk_size as i32) % self.chunk_size as i32;
-        Vector2i::new(
-            modulus(grid_tile.x),
-            modulus(grid_tile.y),
-        )
+        let modulus = |value: i32| {
+            ((value % self.chunk_size as i32) + self.chunk_size as i32) % self.chunk_size as i32
+        };
+        Vector2i::new(modulus(grid_tile.x), modulus(grid_tile.y))
     }
 
     pub fn chunk_tile_to_grid_tile(&self, chunk_tile: Vector2i) -> Vector2i {
@@ -135,7 +139,10 @@ mod tests {
         let event = chunk.set_tile(1, 2, tile).unwrap();
         assert_eq!(event.tile_indices, Vector2i::new(1, 2));
         assert_eq!(chunk.filled_tiles, 1);
-        assert_eq!(chunk.grid_tile_to_chunk_tile(Vector2i::new(5, -6)), Vector2i::new(1, 2));
+        assert_eq!(
+            chunk.grid_tile_to_chunk_tile(Vector2i::new(5, -6)),
+            Vector2i::new(1, 2)
+        );
         chunk.add_to_snap_grid_cell(1, 2, EntityUid::new(7));
         assert_eq!(chunk.get_snap_grid_cell(1, 2), &[EntityUid::new(7)]);
         chunk.remove_from_snap_grid_cell(1, 2, EntityUid::new(7));

@@ -1,14 +1,13 @@
 use crate::{
-    AppearanceComponent, BroadphaseComponent, Component, ComponentFactory, EntityDeletedMessage,
-    CollideOnAnchorComponent, CollisionWakeComponent, EntityInitializedMessage,
-    EntitySystemManager, EntityTerminatingEvent, EntityUid,
-    EntityLookupComponent, FixturesComponent, GameState, GameStateMapData, IgnorePauseComponent, JointComponent,
-    map_grid::MapGridLike,
-    MapComponent, MapCoordinates, MapGrid, MapGridComponent, MapId, MetaDataComponent,
-    MapComponentState, MapGridComponentState, PhysicsComponent, RobustSerializer,
-    PhysicsQueryHit, SerializableComponentState, SerializedComponentChange, SerializedEntityState,
+    AppearanceComponent, BroadphaseComponent, CollideOnAnchorComponent, CollisionWakeComponent,
+    Component, ComponentFactory, EntityDeletedMessage, EntityInitializedMessage,
+    EntityLookupComponent, EntitySystemManager, EntityTerminatingEvent, EntityUid,
+    FixturesComponent, GameState, GameStateMapData, IgnorePauseComponent, JointComponent,
+    MapComponent, MapComponentState, MapCoordinates, MapGrid, MapGridComponent,
+    MapGridComponentState, MapId, MetaDataComponent, PhysicsComponent, PhysicsQueryHit,
+    RobustSerializer, SerializableComponentState, SerializedComponentChange, SerializedEntityState,
     SharedPhysicsMapComponent, Tile, TileRef, TimerComponent, TransformComponent,
-    TransformComponentState, TransformResolver, WorldTransform,
+    TransformComponentState, TransformResolver, WorldTransform, map_grid::MapGridLike,
 };
 use butsuri::CollisionRay;
 use jikan::GameTick;
@@ -24,8 +23,18 @@ pub struct EntityStringRepresentation {
 }
 
 impl EntityStringRepresentation {
-    pub fn new(uid: EntityUid, deleted: bool, name: Option<String>, prototype: Option<String>) -> Self {
-        Self { uid, deleted, name, prototype }
+    pub fn new(
+        uid: EntityUid,
+        deleted: bool,
+        name: Option<String>,
+        prototype: Option<String>,
+    ) -> Self {
+        Self {
+            uid,
+            deleted,
+            name,
+            prototype,
+        }
     }
 }
 
@@ -91,15 +100,15 @@ impl EntityManager {
         Self::COLLIDE_ON_ANCHOR_NET_ID,
     ];
     const INIT_AND_START_COMPONENT_ORDER: [&'static str; 15] = [
-        "AppearanceComponent",
         "TransformComponent",
+        "Physics",
+        "AppearanceComponent",
         "EntityLookupComponent",
         "JointComponent",
         "IgnorePauseComponent",
         "CollisionWakeComponent",
         "CollideOnAnchorComponent",
         "TimerComponent",
-        "Physics",
         "FixturesComponent",
         "BroadphaseComponent",
         "SharedPhysicsMapComponent",
@@ -125,21 +134,21 @@ impl EntityManager {
         "SharedPhysicsMapComponent",
     ];
     const DELETE_COMPONENT_ORDER: [&'static str; 15] = [
-        "MetaDataComponent",
-        "TransformComponent",
-        "MapComponent",
-        "AppearanceComponent",
-        "EntityLookupComponent",
-        "JointComponent",
-        "IgnorePauseComponent",
-        "CollisionWakeComponent",
-        "CollideOnAnchorComponent",
-        "TimerComponent",
-        "Physics",
-        "FixturesComponent",
-        "BroadphaseComponent",
-        "SharedPhysicsMapComponent",
         "MapGridComponent",
+        "MapComponent",
+        "SharedPhysicsMapComponent",
+        "BroadphaseComponent",
+        "FixturesComponent",
+        "TimerComponent",
+        "CollideOnAnchorComponent",
+        "CollisionWakeComponent",
+        "IgnorePauseComponent",
+        "JointComponent",
+        "EntityLookupComponent",
+        "AppearanceComponent",
+        "Physics",
+        "TransformComponent",
+        "MetaDataComponent",
     ];
 
     fn shared_physics() -> crate::SharedPhysicsSystem {
@@ -226,7 +235,11 @@ impl EntityManager {
         uid
     }
 
-    pub fn create_entity_uninitialized_at_map(&mut self, prototype_name: Option<&str>, coordinates: MapCoordinates) -> EntityUid {
+    pub fn create_entity_uninitialized_at_map(
+        &mut self,
+        prototype_name: Option<&str>,
+        coordinates: MapCoordinates,
+    ) -> EntityUid {
         self.create_entity_uninitialized_with_transform(
             prototype_name,
             TransformComponentState {
@@ -241,8 +254,15 @@ impl EntityManager {
         )
     }
 
-    pub fn create_entity_uninitialized_as_map(&mut self, prototype_name: Option<&str>, map_id: MapId) -> EntityUid {
-        let uid = self.create_entity_uninitialized_with_transform(prototype_name, Self::map_transform_state(map_id));
+    pub fn create_entity_uninitialized_as_map(
+        &mut self,
+        prototype_name: Option<&str>,
+        map_id: MapId,
+    ) -> EntityUid {
+        let uid = self.create_entity_uninitialized_with_transform(
+            prototype_name,
+            Self::map_transform_state(map_id),
+        );
         let _ = self.apply_map_component_state(
             uid,
             MapComponentState {
@@ -291,6 +311,7 @@ impl EntityManager {
         let message = EntityInitializedMessage { entity };
         self.queue_entity_event(message);
         self.start_existing_components_for_entity(entity);
+        self.run_map_init_if_current_map_initialized(entity);
         message
     }
 
@@ -329,7 +350,10 @@ impl EntityManager {
         }
         meta.entity_paused = paused;
         meta.dirty(self.current_tick);
-        let mut event = crate::EntityPausedEvent { entity: uid, paused };
+        let mut event = crate::EntityPausedEvent {
+            entity: uid,
+            paused,
+        };
         self.raise_component_event(uid, "MetaDataComponent", &mut event);
         self.entity_runtime_events.push_back(event.into());
         true
@@ -362,6 +386,33 @@ impl EntityManager {
         true
     }
 
+    pub fn run_map_init(&mut self, uid: EntityUid) -> bool {
+        let Some(meta) = self.metadata.get(&uid) else {
+            return false;
+        };
+        if !meta.entity_initialized()
+            || meta.entity_life_stage == crate::EntityLifeStage::MapInitialized
+            || meta.entity_life_stage as i32 >= crate::EntityLifeStage::Terminating as i32
+        {
+            return false;
+        }
+
+        if let Some(meta) = self.metadata.get_mut(&uid) {
+            meta.entity_life_stage = crate::EntityLifeStage::MapInitialized;
+            meta.dirty(self.current_tick);
+        }
+        self.queue_entity_event(crate::MapInitEvent { entity: uid });
+        true
+    }
+
+    fn run_map_init_if_current_map_initialized(&mut self, uid: EntityUid) -> bool {
+        let map_id = self.map_id_for(uid);
+        if map_id == MapId::NULLSPACE || !self.is_map_initialized(map_id) {
+            return false;
+        }
+        self.run_map_init(uid)
+    }
+
     pub fn set_map_pre_init(&mut self, uid: EntityUid, pre_init: bool) -> bool {
         let previous_paused = self
             .map_components
@@ -385,6 +436,9 @@ impl EntityManager {
                 entity: uid,
                 paused: current_paused,
             });
+        }
+        if !pre_init {
+            self.run_map_init_recursive(uid);
         }
         true
     }
@@ -410,21 +464,37 @@ impl EntityManager {
             .unwrap_or(map_id == MapId::NULLSPACE)
     }
 
-    pub fn delete_entity(&mut self, uid: EntityUid) -> Option<(EntityTerminatingEvent, EntityDeletedMessage)> {
+    pub fn delete_entity(
+        &mut self,
+        uid: EntityUid,
+    ) -> Option<(EntityTerminatingEvent, EntityDeletedMessage)> {
         let meta = self.metadata.get(&uid)?;
-        if meta.entity_deleted() {
+        if meta.entity_deleted() || meta.entity_life_stage == crate::EntityLifeStage::Terminating {
             return None;
+        }
+
+        if let Some(meta) = self.metadata.get_mut(&uid) {
+            meta.entity_life_stage = crate::EntityLifeStage::Terminating;
+            meta.dirty(self.current_tick);
+        }
+        let terminate = EntityTerminatingEvent { entity: uid };
+        self.queue_entity_event(terminate);
+
+        let children = self.children_of(uid);
+        for child in children {
+            let _ = self.delete_entity(child);
         }
 
         let _ = self.remove_joint_component(uid);
         self.clear_transform_runtime_state(uid);
 
-        let terminate = EntityTerminatingEvent { entity: uid };
-        self.queue_entity_event(terminate);
-        if let Some(meta) = self.metadata.get_mut(&uid) {
-            meta.entity_life_stage = crate::EntityLifeStage::Deleted;
-        }
         for component_name in Self::DELETE_COMPONENT_ORDER {
+            if component_name == "MetaDataComponent" {
+                if let Some(meta) = self.metadata.get_mut(&uid) {
+                    meta.entity_life_stage = crate::EntityLifeStage::Deleted;
+                    meta.dirty(self.current_tick);
+                }
+            }
             self.remove_component_storage_with_lifecycle(uid, component_name);
         }
         self.map_grids.remove(&uid);
@@ -638,6 +708,7 @@ impl EntityManager {
         self.sync_entity_pause_from_current_map(uid);
         let _ = self.sync_map_grid_runtime(uid);
         self.refresh_entity_lookup_subtree(uid);
+        let _ = self.run_map_init_if_current_map_initialized(uid);
 
         let current_map = self
             .transforms
@@ -736,12 +807,18 @@ impl EntityManager {
         uid: EntityUid,
         state: TransformComponentState,
     ) -> Option<crate::MoveEvent> {
-        let old_position = self.transforms.get(&uid).map(|transform| transform.coordinates())?;
+        let old_position = self
+            .transforms
+            .get(&uid)
+            .map(|transform| transform.coordinates())?;
         if !self.apply_transform_state(uid, state) {
             return None;
         }
         let _ = self.touch_transform_runtime(uid);
-        let new_position = self.transforms.get(&uid).map(|transform| transform.coordinates())?;
+        let new_position = self
+            .transforms
+            .get(&uid)
+            .map(|transform| transform.coordinates())?;
         Some(crate::MoveEvent {
             sender: uid,
             old_position,
@@ -749,7 +826,11 @@ impl EntityManager {
         })
     }
 
-    pub fn set_anchored_with_move_event(&mut self, uid: EntityUid, anchored: bool) -> Option<crate::MoveEvent> {
+    pub fn set_anchored_with_move_event(
+        &mut self,
+        uid: EntityUid,
+        anchored: bool,
+    ) -> Option<crate::MoveEvent> {
         let old_position = self
             .transforms
             .get(&uid)
@@ -759,7 +840,10 @@ impl EntityManager {
             return None;
         }
         let _ = self.touch_transform_runtime(uid);
-        let new_position = self.transforms.get(&uid).map(|transform| transform.coordinates())?;
+        let new_position = self
+            .transforms
+            .get(&uid)
+            .map(|transform| transform.coordinates())?;
         Some(crate::MoveEvent {
             sender: uid,
             old_position,
@@ -886,7 +970,10 @@ impl EntityManager {
     pub fn try_find_grid_at(&self, map_id: MapId, world_pos: Vector2) -> Option<crate::GridId> {
         self.map_grids
             .values()
-            .find(|grid| grid.parent_map_id == map_id && grid.collides_with_grid(grid.world_to_tile(world_pos)))
+            .find(|grid| {
+                grid.parent_map_id == map_id
+                    && grid.collides_with_grid(grid.world_to_tile(world_pos))
+            })
             .map(|grid| grid.index)
     }
 
@@ -912,8 +999,13 @@ impl EntityManager {
                 continue;
             }
 
-            let chunk_hit = grid.get_map_chunks_intersecting(world_aabb).next().is_some();
-            if chunk_hit || (grid.chunk_count() == 0 && world_aabb.contains(grid.world_position, true)) {
+            let chunk_hit = grid
+                .get_map_chunks_intersecting(world_aabb)
+                .next()
+                .is_some();
+            if chunk_hit
+                || (grid.chunk_count() == 0 && world_aabb.contains(grid.world_position, true))
+            {
                 grids.push(grid.index);
             }
         }
@@ -923,10 +1015,16 @@ impl EntityManager {
 
     pub fn tile_ref(&self, grid_id: crate::GridId, tile_indices: Vector2i) -> Option<TileRef> {
         let uid = self.grid_entity_for(grid_id)?;
-        self.map_grids.get(&uid).map(|grid| grid.get_tile_ref(tile_indices))
+        self.map_grids
+            .get(&uid)
+            .map(|grid| grid.get_tile_ref(tile_indices))
     }
 
-    pub fn tile_world_bounds(&self, grid_id: crate::GridId, tile_indices: Vector2i) -> Option<Box2> {
+    pub fn tile_world_bounds(
+        &self,
+        grid_id: crate::GridId,
+        tile_indices: Vector2i,
+    ) -> Option<Box2> {
         let tile_ref = self.tile_ref(grid_id, tile_indices)?;
         let grid = self
             .map_grids
@@ -937,7 +1035,11 @@ impl EntityManager {
         Some(Box2::centered_around(center, size))
     }
 
-    pub fn entities_at_tile(&self, grid_id: crate::GridId, tile_indices: Vector2i) -> Vec<EntityUid> {
+    pub fn entities_at_tile(
+        &self,
+        grid_id: crate::GridId,
+        tile_indices: Vector2i,
+    ) -> Vec<EntityUid> {
         let Some(grid_uid) = self.grid_entity_for(grid_id) else {
             return Vec::new();
         };
@@ -1022,8 +1124,8 @@ impl EntityManager {
                         let mut anchored = Vec::new();
                         for x in 0..chunk.chunk_size() {
                             for y in 0..chunk.chunk_size() {
-                                let grid_tile =
-                                    chunk.chunk_tile_to_grid_tile(Vector2i::new(x as i32, y as i32));
+                                let grid_tile = chunk
+                                    .chunk_tile_to_grid_tile(Vector2i::new(x as i32, y as i32));
                                 let bounds = self.lookup_local_bounds(grid_tile, grid.tile_size);
                                 let world = Box2::from_corners(
                                     grid.local_to_world(bounds.bottom_left()),
@@ -1070,19 +1172,25 @@ impl EntityManager {
     }
 
     pub fn world_position(&self, entity: EntityUid) -> Option<Vector2> {
-        self.world_transform(entity).map(|world| world.world_position)
+        self.world_transform(entity)
+            .map(|world| world.world_position)
     }
 
     pub fn local_position(&self, entity: EntityUid) -> Option<Vector2> {
-        self.transforms.get(&entity).map(|transform| transform.local_position)
+        self.transforms
+            .get(&entity)
+            .map(|transform| transform.local_position)
     }
 
     pub fn local_rotation(&self, entity: EntityUid) -> Option<keisan::Angle> {
-        self.transforms.get(&entity).map(|transform| transform.local_rotation)
+        self.transforms
+            .get(&entity)
+            .map(|transform| transform.local_rotation)
     }
 
     pub fn world_rotation(&self, entity: EntityUid) -> Option<keisan::Angle> {
-        self.world_transform(entity).map(|world| world.world_rotation)
+        self.world_transform(entity)
+            .map(|world| world.world_rotation)
     }
 
     pub fn world_matrix(&self, entity: EntityUid) -> Option<keisan::Matrix3> {
@@ -1090,10 +1198,14 @@ impl EntityManager {
     }
 
     pub fn inv_world_matrix(&self, entity: EntityUid) -> Option<keisan::Matrix3> {
-        self.world_transform(entity).map(|world| world.inv_world_matrix)
+        self.world_transform(entity)
+            .map(|world| world.inv_world_matrix)
     }
 
-    pub fn mover_coordinates_for_transform(&self, xform: &crate::TransformComponent) -> crate::EntityCoordinates {
+    pub fn mover_coordinates_for_transform(
+        &self,
+        xform: &crate::TransformComponent,
+    ) -> crate::EntityCoordinates {
         if let Some(grid) = xform
             .grid_id
             .is_valid()
@@ -1124,7 +1236,11 @@ impl EntityManager {
         Some(self.mover_coordinates_for_transform(xform))
     }
 
-    pub fn query_aabb_entities(&self, broadphase_owner: EntityUid, world_aabb: Box2) -> Vec<EntityUid> {
+    pub fn query_aabb_entities(
+        &self,
+        broadphase_owner: EntityUid,
+        world_aabb: Box2,
+    ) -> Vec<EntityUid> {
         Self::shared_physics().query_aabb_entities(self, broadphase_owner, world_aabb)
     }
 
@@ -1133,22 +1249,30 @@ impl EntityManager {
     }
 
     pub fn map_linear_velocity(&self, uid: EntityUid) -> Vector2 {
-        Self::shared_physics().get_map_linear_velocity(self, uid)
+        self.map_velocities(uid).0
     }
 
     pub fn map_angular_velocity(&self, uid: EntityUid) -> f32 {
-        Self::shared_physics().get_map_angular_velocity(self, uid)
+        self.map_velocities(uid).1
     }
 
     pub fn map_velocities(&self, uid: EntityUid) -> (Vector2, f32) {
         Self::shared_physics().get_map_velocities(self, uid)
     }
 
-    pub fn step_physics_body(&mut self, uid: EntityUid, frame_time: f32) -> Option<crate::shared_physics_system::PhysicsStepState> {
+    pub fn step_physics_body(
+        &mut self,
+        uid: EntityUid,
+        frame_time: f32,
+    ) -> Option<crate::shared_physics_system::PhysicsStepState> {
         Self::shared_physics().step_body(self, uid, frame_time)
     }
 
-    pub fn refresh_broadphase_runtime(&mut self, broadphase_owner: EntityUid, bodies: &[EntityUid]) -> usize {
+    pub fn refresh_broadphase_runtime(
+        &mut self,
+        broadphase_owner: EntityUid,
+        bodies: &[EntityUid],
+    ) -> usize {
         Self::shared_physics().sync_broadphase(self, broadphase_owner, bodies)
     }
 
@@ -1163,7 +1287,13 @@ impl EntityManager {
         max_length: f32,
         return_on_first_hit: bool,
     ) -> Vec<PhysicsQueryHit> {
-        Self::shared_physics().intersect_ray(self, broadphase_owner, ray, max_length, return_on_first_hit)
+        Self::shared_physics().intersect_ray(
+            self,
+            broadphase_owner,
+            ray,
+            max_length,
+            return_on_first_hit,
+        )
     }
 
     pub fn entities_in_map_aabb(&self, map_id: MapId, world_aabb: Box2) -> Vec<EntityUid> {
@@ -1243,7 +1373,10 @@ impl EntityManager {
             .is_some_and(|map| map.contacts().iter().any(|contact| contact.is_touching))
     }
 
-    pub fn drain_owner_contact_events(&mut self, owner: EntityUid) -> Vec<crate::PhysicsContactEvent> {
+    pub fn drain_owner_contact_events(
+        &mut self,
+        owner: EntityUid,
+    ) -> Vec<crate::PhysicsContactEvent> {
         self.physics_maps
             .get_mut(&owner)
             .map(|map| map.drain_contact_events())
@@ -1287,7 +1420,9 @@ impl EntityManager {
     }
 
     pub fn owner_auto_clear_forces(&self, owner: EntityUid) -> Option<bool> {
-        self.physics_maps.get(&owner).map(|map| map.auto_clear_forces)
+        self.physics_maps
+            .get(&owner)
+            .map(|map| map.auto_clear_forces)
     }
 
     pub fn map_physics_runtime_last_modified(&self, map_id: MapId) -> Option<jikan::GameTick> {
@@ -1434,7 +1569,10 @@ impl EntityManager {
         self.entity_uids(include_paused)
             .into_iter()
             .filter(|uid| {
-                if include_map_entities && self.is_map_entity(*uid) && self.map_id_for(*uid) == map_id {
+                if include_map_entities
+                    && self.is_map_entity(*uid)
+                    && self.map_id_for(*uid) == map_id
+                {
                     return true;
                 }
 
@@ -1449,7 +1587,10 @@ impl EntityManager {
     }
 
     pub fn deleted(&self, uid: EntityUid) -> bool {
-        self.metadata.get(&uid).map(|m| m.entity_deleted()).unwrap_or(true)
+        self.metadata
+            .get(&uid)
+            .map(|m| m.entity_deleted())
+            .unwrap_or(true)
     }
 
     pub fn children_of(&self, uid: EntityUid) -> Vec<EntityUid> {
@@ -1476,7 +1617,10 @@ impl EntityManager {
     ) -> Vec<(EntityUid, &'a T)> {
         storage
             .iter()
-            .filter_map(|(uid, component)| self.include_entity_in_query(*uid, include_paused).then_some((*uid, component)))
+            .filter_map(|(uid, component)| {
+                self.include_entity_in_query(*uid, include_paused)
+                    .then_some((*uid, component))
+            })
             .collect()
     }
 
@@ -1541,7 +1685,10 @@ impl EntityManager {
     ) -> Vec<&'a T> {
         storage
             .iter()
-            .filter_map(|(uid, component)| self.include_entity_in_query(*uid, include_paused).then_some(component))
+            .filter_map(|(uid, component)| {
+                self.include_entity_in_query(*uid, include_paused)
+                    .then_some(component)
+            })
             .collect()
     }
 
@@ -1556,12 +1703,18 @@ impl EntityManager {
     }
 
     pub fn physics_bodies_in_map(&self, map_id: MapId, include_paused: bool) -> Vec<EntityUid> {
-        self.entity_query3(&self.physics, &self.transforms, &self.fixtures, include_paused)
-            .into_iter()
-            .filter_map(|(uid, body, transform, fixtures)| {
-                (body.can_collide && transform.map_id == map_id && !fixtures.fixtures.is_empty()).then_some(uid)
-            })
-            .collect()
+        self.entity_query3(
+            &self.physics,
+            &self.transforms,
+            &self.fixtures,
+            include_paused,
+        )
+        .into_iter()
+        .filter_map(|(uid, body, transform, fixtures)| {
+            (body.can_collide && transform.map_id == map_id && !fixtures.fixtures.is_empty())
+                .then_some(uid)
+        })
+        .collect()
     }
 
     pub fn physics_body_entities(&self, include_paused: bool) -> Vec<EntityUid> {
@@ -1637,14 +1790,22 @@ impl EntityManager {
             .iter()
             .find(|change| change.net_id == Self::METADATA_NET_ID)
             .and_then(|change| change.state.as_ref())
-            .and_then(|component| serializer.deserialize_component_state::<crate::MetaDataComponentState>(component).ok())
+            .and_then(|component| {
+                serializer
+                    .deserialize_component_state::<crate::MetaDataComponentState>(component)
+                    .ok()
+            })
             .and_then(|meta| meta.prototype_id);
         let initial_transform = state
             .component_changes
             .iter()
             .find(|change| change.net_id == Self::TRANSFORM_NET_ID && !change.deleted)
             .and_then(|change| change.state.as_ref())
-            .and_then(|component| serializer.deserialize_component_state::<TransformComponentState>(component).ok());
+            .and_then(|component| {
+                serializer
+                    .deserialize_component_state::<TransformComponentState>(component)
+                    .ok()
+            });
 
         if let Some(transform) = initial_transform {
             self.alloc_entity_external_with_transform(state.uid, prototype.as_deref(), transform);
@@ -1672,7 +1833,13 @@ impl EntityManager {
                     Self::METADATA_NET_ID,
                     Self::component_created_since(&meta.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::MetaDataComponentState>(&meta.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::MetaDataComponentState>(
+                                &meta.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::TRANSFORM_NET_ID => {
@@ -1684,7 +1851,13 @@ impl EntityManager {
                     Self::TRANSFORM_NET_ID,
                     Self::component_created_since(&xform.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<TransformComponentState>(&xform.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<TransformComponentState>(
+                                &xform.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::MAP_NET_ID => {
@@ -1696,7 +1869,13 @@ impl EntityManager {
                     Self::MAP_NET_ID,
                     Self::component_created_since(&map.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<MapComponentState>(&map.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<MapComponentState>(
+                                &map.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::MAP_GRID_NET_ID => {
@@ -1708,7 +1887,13 @@ impl EntityManager {
                     Self::MAP_GRID_NET_ID,
                     Self::component_created_since(&grid.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<MapGridComponentState>(&grid.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<MapGridComponentState>(
+                                &grid.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::PHYSICS_NET_ID => {
@@ -1720,7 +1905,13 @@ impl EntityManager {
                     Self::PHYSICS_NET_ID,
                     Self::component_created_since(&physics.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::PhysicsComponentState>(&physics.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::PhysicsComponentState>(
+                                &physics.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::APPEARANCE_NET_ID => {
@@ -1732,7 +1923,13 @@ impl EntityManager {
                     Self::APPEARANCE_NET_ID,
                     Self::component_created_since(&appearance.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::AppearanceComponentState>(&appearance.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::AppearanceComponentState>(
+                                &appearance.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::FIXTURES_NET_ID => {
@@ -1744,7 +1941,13 @@ impl EntityManager {
                     Self::FIXTURES_NET_ID,
                     Self::component_created_since(&fixtures.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::FixturesComponentState>(&fixtures.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::FixturesComponentState>(
+                                &fixtures.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::JOINTS_NET_ID => {
@@ -1756,7 +1959,13 @@ impl EntityManager {
                     Self::JOINTS_NET_ID,
                     Self::component_created_since(&joints.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::JointComponentState>(&joints.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::JointComponentState>(
+                                &joints.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::LOOKUP_NET_ID => {
@@ -1768,7 +1977,13 @@ impl EntityManager {
                     Self::LOOKUP_NET_ID,
                     Self::component_created_since(&lookup.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::EntityLookupComponentState>(&lookup.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::EntityLookupComponentState>(
+                                &lookup.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::BROADPHASE_NET_ID => {
@@ -1780,7 +1995,13 @@ impl EntityManager {
                     Self::BROADPHASE_NET_ID,
                     Self::component_created_since(&broadphase.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::BroadphaseComponentState>(&broadphase.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::BroadphaseComponentState>(
+                                &broadphase.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::PHYSICS_MAP_NET_ID => {
@@ -1792,7 +2013,13 @@ impl EntityManager {
                     Self::PHYSICS_MAP_NET_ID,
                     Self::component_created_since(&physics_map.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::SharedPhysicsMapComponentState>(&physics_map.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::SharedPhysicsMapComponentState>(
+                                &physics_map.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::COLLISION_WAKE_NET_ID => {
@@ -1804,7 +2031,13 @@ impl EntityManager {
                     Self::COLLISION_WAKE_NET_ID,
                     Self::component_created_since(&collision_wake.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::CollisionWakeComponentState>(&collision_wake.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::CollisionWakeComponentState>(
+                                &collision_wake.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             Self::COLLIDE_ON_ANCHOR_NET_ID => {
@@ -1816,7 +2049,13 @@ impl EntityManager {
                     Self::COLLIDE_ON_ANCHOR_NET_ID,
                     Self::component_created_since(&collide_on_anchor.base, from_tick),
                     false,
-                    Some(serializer.serialize_component_state::<crate::CollideOnAnchorComponentState>(&collide_on_anchor.get_component_state()).ok()?),
+                    Some(
+                        serializer
+                            .serialize_component_state::<crate::CollideOnAnchorComponentState>(
+                                &collide_on_anchor.get_component_state(),
+                            )
+                            .ok()?,
+                    ),
                 ))
             }
             _ => None,
@@ -1890,7 +2129,10 @@ impl EntityManager {
         let mut changes = self.build_serialized_component_changes_since(serializer, uid, from_tick);
         self.append_deleted_component_changes(uid, &mut changes, deleted_net_ids);
 
-        Some(SerializedEntityState { uid, component_changes: changes })
+        Some(SerializedEntityState {
+            uid,
+            component_changes: changes,
+        })
     }
 
     pub fn build_serialized_entity_state_with_deleted_callback<F>(
@@ -1958,7 +2200,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.appearances.entry(uid).or_insert_with(|| {
             let mut component = AppearanceComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -1967,7 +2214,12 @@ impl EntityManager {
         self.appearances.get_mut(&uid).unwrap()
     }
 
-    pub fn set_appearance_data<T>(&mut self, uid: EntityUid, key: impl Into<String>, value: T) -> bool
+    pub fn set_appearance_data<T>(
+        &mut self,
+        uid: EntityUid,
+        key: impl Into<String>,
+        value: T,
+    ) -> bool
     where
         T: crate::IntoAppearanceValue,
     {
@@ -1983,7 +2235,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.metadata.entry(uid).or_insert_with(|| {
             let mut component = MetaDataComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -1997,7 +2254,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.transforms.entry(uid).or_insert_with(|| {
             let mut component = TransformComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2011,7 +2273,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.entity_lookups.entry(uid).or_insert_with(|| {
             let mut component = EntityLookupComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2025,7 +2292,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.joint_components.entry(uid).or_insert_with(|| {
             let mut component = JointComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2041,6 +2313,31 @@ impl EntityManager {
         if self.entity_exists(uid) {
             self.dirty_entity(uid);
         }
+    }
+
+    fn set_physics_awake_from_runtime(&mut self, uid: EntityUid, awake: bool) -> bool {
+        let Some(body) = self.physics.get_mut(&uid) else {
+            return false;
+        };
+        let previous = body.awake;
+        body.set_awake(awake);
+        if body.awake == previous {
+            return false;
+        }
+        body.base.last_modified_tick = self.current_tick;
+        if self.entity_exists(uid) {
+            self.dirty_entity(uid);
+        }
+        self.queue_entity_physics_runtime(
+            uid,
+            if awake {
+                crate::PhysicsRuntimeEvent::Wake(crate::PhysicsWakeMessage { body: uid })
+            } else {
+                crate::PhysicsRuntimeEvent::Sleep(crate::PhysicsSleepMessage { body: uid })
+            },
+        );
+        self.reconcile_entity_physics_runtime(uid);
+        true
     }
 
     pub fn add_joint_between(&mut self, joint: butsuri::Joint) -> bool {
@@ -2064,6 +2361,8 @@ impl EntityManager {
                     joint_id: id,
                 }),
             );
+            let _ = self.set_physics_awake_from_runtime(body_a, true);
+            let _ = self.set_physics_awake_from_runtime(body_b, true);
             return true;
         }
 
@@ -2117,7 +2416,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.ignore_pauses.entry(uid).or_insert_with(|| {
             let mut component = IgnorePauseComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2132,7 +2436,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.collision_wakes.entry(uid).or_insert_with(|| {
             let mut component = CollisionWakeComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2200,7 +2509,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.collide_on_anchors.entry(uid).or_insert_with(|| {
             let mut component = CollideOnAnchorComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2263,7 +2577,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.map_components.entry(uid).or_insert_with(|| {
             let mut component = MapComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component.world_map = map_id;
             component
         });
@@ -2281,7 +2600,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.map_grid_components.entry(uid).or_insert_with(|| {
             let mut component = MapGridComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2295,7 +2619,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.timers.entry(uid).or_insert_with(|| {
             let mut component = TimerComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2319,7 +2648,8 @@ impl EntityManager {
         milliseconds: i32,
         on_fired: impl FnMut() + Send + Sync + 'static,
     ) -> crate::timer_component::TimerHandle {
-        self.ensure_timer(uid).spawn_repeating(milliseconds, on_fired)
+        self.ensure_timer(uid)
+            .spawn_repeating(milliseconds, on_fired)
     }
 
     pub fn update_timer_runtime(&mut self, frame_time: f32) {
@@ -2356,7 +2686,12 @@ impl EntityManager {
         if created {
             let component = self.physics.entry(uid).or_insert_with(|| {
                 let mut component = PhysicsComponent::new();
-                Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+                Self::initialize_new_component_base(
+                    &mut component.base,
+                    uid,
+                    self.current_tick,
+                    start_running,
+                );
                 component
             });
             let _ = component;
@@ -2364,7 +2699,12 @@ impl EntityManager {
         }
         self.physics.entry(uid).or_insert_with(|| {
             let mut component = PhysicsComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         })
     }
@@ -2374,7 +2714,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.fixtures.entry(uid).or_insert_with(|| {
             let mut component = FixturesComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2409,7 +2754,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.broadphases.entry(uid).or_insert_with(|| {
             let mut component = BroadphaseComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2423,7 +2773,12 @@ impl EntityManager {
         let start_running = self.entity_initialized_for_component_lifecycle(uid);
         self.physics_maps.entry(uid).or_insert_with(|| {
             let mut component = SharedPhysicsMapComponent::new();
-            Self::initialize_new_component_base(&mut component.base, uid, self.current_tick, start_running);
+            Self::initialize_new_component_base(
+                &mut component.base,
+                uid,
+                self.current_tick,
+                start_running,
+            );
             component
         });
         if created {
@@ -2490,10 +2845,15 @@ impl EntityManager {
                 paused: current_paused,
             });
         }
+        let _ = self.run_map_init_if_current_map_initialized(uid);
         true
     }
 
-    pub fn apply_map_grid_component_state(&mut self, uid: EntityUid, state: MapGridComponentState) -> bool {
+    pub fn apply_map_grid_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: MapGridComponentState,
+    ) -> bool {
         self.ensure_transform(uid);
         let grid = self.ensure_map_grid(uid);
         grid.handle_map_grid_state(state);
@@ -2511,21 +2871,34 @@ impl EntityManager {
         true
     }
 
-    pub fn apply_transform_component_state(&mut self, uid: EntityUid, state: TransformComponentState) -> bool {
+    pub fn apply_transform_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: TransformComponentState,
+    ) -> bool {
         self.ensure_transform(uid);
         self.apply_transform_state(uid, state)
     }
 
-    pub fn apply_physics_component_state(&mut self, uid: EntityUid, state: crate::PhysicsComponentState) -> bool {
+    pub fn apply_physics_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: crate::PhysicsComponentState,
+    ) -> bool {
         let previous = self
             .physics
             .get(&uid)
             .map(|body| (body.awake, body.can_collide));
         let physics = self.ensure_physics(uid);
         physics.handle_component_state(state);
-        let current = self.physics.get(&uid).map(|body| (body.awake, body.can_collide));
-        if let (Some((previous_awake, previous_can_collide)), Some((current_awake, current_can_collide))) =
-            (previous, current)
+        let current = self
+            .physics
+            .get(&uid)
+            .map(|body| (body.awake, body.can_collide));
+        if let (
+            Some((previous_awake, previous_can_collide)),
+            Some((current_awake, current_can_collide)),
+        ) = (previous, current)
         {
             if previous_awake != current_awake {
                 self.queue_entity_physics_runtime(
@@ -2551,13 +2924,21 @@ impl EntityManager {
         true
     }
 
-    pub fn apply_appearance_component_state(&mut self, uid: EntityUid, state: crate::AppearanceComponentState) -> bool {
+    pub fn apply_appearance_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: crate::AppearanceComponentState,
+    ) -> bool {
         let appearance = self.ensure_appearance(uid);
         appearance.handle_component_state(state);
         self.mark_appearance_dirty(uid)
     }
 
-    pub fn apply_fixtures_component_state(&mut self, uid: EntityUid, state: crate::FixturesComponentState) -> bool {
+    pub fn apply_fixtures_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: crate::FixturesComponentState,
+    ) -> bool {
         let current_tick = self.current_tick;
         let fixtures = self.ensure_fixtures(uid);
         fixtures.handle_component_state(state);
@@ -2567,7 +2948,11 @@ impl EntityManager {
         true
     }
 
-    pub fn apply_joint_component_state(&mut self, uid: EntityUid, state: crate::JointComponentState) -> bool {
+    pub fn apply_joint_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: crate::JointComponentState,
+    ) -> bool {
         let previous_joints = self
             .joint_components
             .get(&uid)
@@ -2638,13 +3023,21 @@ impl EntityManager {
         true
     }
 
-    pub fn apply_lookup_component_state(&mut self, uid: EntityUid, state: crate::EntityLookupComponentState) -> bool {
+    pub fn apply_lookup_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: crate::EntityLookupComponentState,
+    ) -> bool {
         let lookup = self.ensure_lookup(uid);
         lookup.handle_component_state(state);
         true
     }
 
-    pub fn apply_broadphase_component_state(&mut self, uid: EntityUid, state: crate::BroadphaseComponentState) -> bool {
+    pub fn apply_broadphase_component_state(
+        &mut self,
+        uid: EntityUid,
+        state: crate::BroadphaseComponentState,
+    ) -> bool {
         let broadphase = self.ensure_broadphase(uid);
         broadphase.handle_component_state(state);
         true
@@ -2671,7 +3064,9 @@ impl EntityManager {
             Self::METADATA_NET_ID => serializer
                 .deserialize_component_state::<crate::MetaDataComponentState>(component_state)
                 .ok()
-                .is_some_and(|state| self.apply_metadata_component_state(uid, state, self.current_tick)),
+                .is_some_and(|state| {
+                    self.apply_metadata_component_state(uid, state, self.current_tick)
+                }),
             Self::TRANSFORM_NET_ID => serializer
                 .deserialize_component_state::<TransformComponentState>(component_state)
                 .ok()
@@ -2709,7 +3104,9 @@ impl EntityManager {
                 .ok()
                 .is_some_and(|state| self.apply_broadphase_component_state(uid, state)),
             Self::PHYSICS_MAP_NET_ID => serializer
-                .deserialize_component_state::<crate::SharedPhysicsMapComponentState>(component_state)
+                .deserialize_component_state::<crate::SharedPhysicsMapComponentState>(
+                    component_state,
+                )
                 .ok()
                 .is_some_and(|state| self.apply_physics_map_component_state(uid, state)),
             Self::COLLISION_WAKE_NET_ID => serializer
@@ -2717,7 +3114,9 @@ impl EntityManager {
                 .ok()
                 .is_some_and(|state| self.apply_collision_wake_component_state(uid, state)),
             Self::COLLIDE_ON_ANCHOR_NET_ID => serializer
-                .deserialize_component_state::<crate::CollideOnAnchorComponentState>(component_state)
+                .deserialize_component_state::<crate::CollideOnAnchorComponentState>(
+                    component_state,
+                )
                 .ok()
                 .is_some_and(|state| self.apply_collide_on_anchor_component_state(uid, state)),
             _ => false,
@@ -2747,8 +3146,8 @@ impl EntityManager {
             };
 
             if change.net_id == Self::TRANSFORM_NET_ID {
-                if let Ok(transform_state) =
-                    serializer.deserialize_component_state::<TransformComponentState>(component_state)
+                if let Ok(transform_state) = serializer
+                    .deserialize_component_state::<TransformComponentState>(component_state)
                 {
                     apply_transform(self, state.uid, transform_state);
                 }
@@ -2775,10 +3174,13 @@ impl EntityManager {
     where
         F: FnMut(&mut Self, EntityUid, TransformComponentState),
     {
-        let (uid, created) =
-            self.apply_serialized_entity_state_delta_with(serializer, state, |manager, uid, transform_state| {
+        let (uid, created) = self.apply_serialized_entity_state_delta_with(
+            serializer,
+            state,
+            |manager, uid, transform_state| {
                 apply_transform(manager, uid, transform_state);
-            })?;
+            },
+        )?;
 
         if created {
             let _ = self.initialize_entity(uid);
@@ -2792,9 +3194,13 @@ impl EntityManager {
         serializer: &mut RobustSerializer,
         state: &SerializedEntityState,
     ) -> Option<EntityUid> {
-        self.apply_serialized_entity_state_with(serializer, state, |manager, uid, transform_state| {
-            let _ = manager.apply_transform_component_state(uid, transform_state);
-        })
+        self.apply_serialized_entity_state_with(
+            serializer,
+            state,
+            |manager, uid, transform_state| {
+                let _ = manager.apply_transform_component_state(uid, transform_state);
+            },
+        )
     }
 
     pub fn apply_serialized_entity_states_with<F>(
@@ -2808,11 +3214,13 @@ impl EntityManager {
     {
         let mut created_entities = Vec::new();
         for state in states {
-            if let Some((uid, created)) =
-                self.apply_serialized_entity_state_delta_with(serializer, state, |manager, uid, transform_state| {
+            if let Some((uid, created)) = self.apply_serialized_entity_state_delta_with(
+                serializer,
+                state,
+                |manager, uid, transform_state| {
                     apply_transform(manager, uid, transform_state);
-                })
-            {
+                },
+            ) {
                 if created {
                     created_entities.push(uid);
                 }
@@ -2846,10 +3254,13 @@ impl EntityManager {
     where
         F: FnMut(&mut Self, EntityUid, TransformComponentState),
     {
-        let created_entities =
-            self.apply_serialized_entity_states_with(serializer, &state.entity_states, |manager, uid, transform_state| {
+        let created_entities = self.apply_serialized_entity_states_with(
+            serializer,
+            &state.entity_states,
+            |manager, uid, transform_state| {
                 apply_transform(manager, uid, transform_state);
-            });
+            },
+        );
 
         if let Some(map_data) = &state.map_data {
             self.apply_game_state_map_data(map_data);
@@ -2963,9 +3374,14 @@ impl EntityManager {
         }
 
         for (grid_id, datum) in &map_data.grid_data {
-            let map_entity = self
-                .map_entity_for(datum.coordinates.map_id)
-                .unwrap_or_else(|| self.create_entity_uninitialized_as_map(None, datum.coordinates.map_id));
+            let map_entity = if let Some(uid) = self.map_entity_for(datum.coordinates.map_id) {
+                uid
+            } else {
+                let uid = self.create_entity_uninitialized_as_map(None, datum.coordinates.map_id);
+                let _ = self.initialize_entity(uid);
+                uid
+            };
+            let grid_created = self.grid_entity_for(*grid_id).is_none();
             let uid = self.ensure_grid_entity_shell(*grid_id);
             let chunk_size = self
                 .map_grid_components
@@ -2981,6 +3397,9 @@ impl EntityManager {
                 datum.coordinates.position,
                 datum.angle,
             );
+            if grid_created {
+                let _ = self.initialize_entity(uid);
+            }
 
             for chunk in &datum.chunk_data {
                 if let Some(tile_data) = &chunk.tile_data {
@@ -2993,7 +3412,11 @@ impl EntityManager {
     }
 
     pub fn remove_map_component(&mut self, uid: EntityUid) -> bool {
-        let Some(map_id) = self.map_components.get(&uid).map(|component| component.world_map) else {
+        let Some(map_id) = self
+            .map_components
+            .get(&uid)
+            .map(|component| component.world_map)
+        else {
             return false;
         };
 
@@ -3038,7 +3461,11 @@ impl EntityManager {
                 self.dirty_entity(other);
             }
 
-            if let Some(map_id) = self.transforms.get(&other).map(|transform| transform.map_id) {
+            if let Some(map_id) = self
+                .transforms
+                .get(&other)
+                .map(|transform| transform.map_id)
+            {
                 affected_maps.insert(map_id);
             }
         }
@@ -3174,7 +3601,11 @@ impl EntityManager {
         true
     }
 
-    pub fn apply_transform_state(&mut self, uid: EntityUid, state: TransformComponentState) -> bool {
+    pub fn apply_transform_state(
+        &mut self,
+        uid: EntityUid,
+        state: TransformComponentState,
+    ) -> bool {
         let Some((old_parent, old_anchored, previous_map)) = self
             .transforms
             .get(&uid)
@@ -3183,8 +3614,11 @@ impl EntityManager {
             return false;
         };
 
-        let previous_map_velocities =
-            self.capture_preserved_map_velocities_for_parent_change(uid, old_parent, state.parent_id);
+        let previous_map_velocities = self.capture_preserved_map_velocities_for_parent_change(
+            uid,
+            old_parent,
+            state.parent_id,
+        );
 
         self.rewire_transform_parent(uid, old_parent, state.parent_id);
 
@@ -3200,7 +3634,12 @@ impl EntityManager {
         true
     }
 
-    pub fn set_spatial_metadata(&mut self, uid: EntityUid, map_id: MapId, grid_id: crate::GridId) -> bool {
+    pub fn set_spatial_metadata(
+        &mut self,
+        uid: EntityUid,
+        map_id: MapId,
+        grid_id: crate::GridId,
+    ) -> bool {
         let Some(transform) = self.transforms.get_mut(&uid) else {
             return false;
         };
@@ -3228,7 +3667,9 @@ impl EntityManager {
             } else {
                 local_rotation
             };
-            if transform.local_position == local_position && transform.local_rotation == applied_rotation {
+            if transform.local_position == local_position
+                && transform.local_rotation == applied_rotation
+            {
                 return None;
             }
 
@@ -3253,10 +3694,12 @@ impl EntityManager {
         delta: Vector2,
         angular_delta: keisan::Angle,
     ) -> Option<crate::MoveEvent> {
-        let (position, rotation) = self
-            .transforms
-            .get(&uid)
-            .map(|transform| (transform.local_position + delta, transform.local_rotation + angular_delta))?;
+        let (position, rotation) = self.transforms.get(&uid).map(|transform| {
+            (
+                transform.local_position + delta,
+                transform.local_rotation + angular_delta,
+            )
+        })?;
         self.set_local_transform(uid, position, rotation)
     }
 
@@ -3276,7 +3719,9 @@ impl EntityManager {
     }
 
     fn capture_map_velocities(&self, uid: EntityUid) -> Option<(Vector2, f32)> {
-        self.physics.contains_key(&uid).then(|| self.map_velocities(uid))
+        self.physics
+            .contains_key(&uid)
+            .then(|| self.map_velocities(uid))
     }
 
     fn capture_preserved_map_velocities_for_parent_change(
@@ -3290,7 +3735,11 @@ impl EntityManager {
             .flatten()
     }
 
-    fn restore_preserved_map_velocities(&mut self, uid: EntityUid, previous: Option<(Vector2, f32)>) {
+    fn restore_preserved_map_velocities(
+        &mut self,
+        uid: EntityUid,
+        previous: Option<(Vector2, f32)>,
+    ) {
         let Some(previous) = previous else {
             return;
         };
@@ -3304,7 +3753,12 @@ impl EntityManager {
         body.set_angular_velocity(body.angular_velocity + previous.1 - current.1);
     }
 
-    fn rewire_transform_parent(&mut self, uid: EntityUid, old_parent: EntityUid, new_parent: EntityUid) {
+    fn rewire_transform_parent(
+        &mut self,
+        uid: EntityUid,
+        old_parent: EntityUid,
+        new_parent: EntityUid,
+    ) {
         if old_parent == new_parent {
             return;
         }
@@ -3322,7 +3776,12 @@ impl EntityManager {
         }
     }
 
-    fn queue_parent_changed_if_needed(&mut self, uid: EntityUid, old_parent: EntityUid, new_parent: EntityUid) {
+    fn queue_parent_changed_if_needed(
+        &mut self,
+        uid: EntityUid,
+        old_parent: EntityUid,
+        new_parent: EntityUid,
+    ) {
         if old_parent == new_parent {
             return;
         }
@@ -3334,7 +3793,12 @@ impl EntityManager {
         self.raise_transform_runtime_event(uid, &mut event);
     }
 
-    fn queue_anchor_changed_if_needed(&mut self, uid: EntityUid, old_anchored: bool, new_anchored: bool) {
+    fn queue_anchor_changed_if_needed(
+        &mut self,
+        uid: EntityUid,
+        old_anchored: bool,
+        new_anchored: bool,
+    ) {
         if old_anchored == new_anchored {
             return;
         }
@@ -3381,6 +3845,18 @@ impl EntityManager {
         }
     }
 
+    fn run_map_init_recursive(&mut self, uid: EntityUid) {
+        let _ = self.run_map_init(uid);
+        let children = self
+            .transforms
+            .get(&uid)
+            .map(|transform| transform.children.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for child in children {
+            self.run_map_init_recursive(child);
+        }
+    }
+
     fn propagate_transform_spatial_metadata(
         &mut self,
         uid: EntityUid,
@@ -3390,7 +3866,13 @@ impl EntityManager {
         let (parent_valid, current_map, current_grid) = self
             .transforms
             .get(&uid)
-            .map(|transform| (transform.parent.is_valid(), transform.map_id, transform.grid_id))
+            .map(|transform| {
+                (
+                    transform.parent.is_valid(),
+                    transform.map_id,
+                    transform.grid_id,
+                )
+            })
             .unwrap_or((false, MapId::NULLSPACE, crate::GridId::INVALID));
         let mut map_id = if current_map != MapId::NULLSPACE {
             current_map
@@ -3466,8 +3948,15 @@ impl EntityManager {
                     .iter()
                     .copied()
                     .filter_map(|child| {
-                        self.world_transform(child)
-                            .map(|world| (child, world.map_id, world.grid_id, world.world_position, world.world_rotation))
+                        self.world_transform(child).map(|world| {
+                            (
+                                child,
+                                world.map_id,
+                                world.grid_id,
+                                world.world_position,
+                                world.world_rotation,
+                            )
+                        })
                     })
                     .collect::<Vec<_>>()
             })
@@ -3475,7 +3964,9 @@ impl EntityManager {
     }
 
     fn detach_children_preserving_world_state(&mut self, uid: EntityUid) {
-        for (child, map_id, grid_id, world_position, world_rotation) in self.collect_child_world_states(uid) {
+        for (child, map_id, grid_id, world_position, world_rotation) in
+            self.collect_child_world_states(uid)
+        {
             self.detach_child_transform(child, map_id, grid_id, world_position, world_rotation);
         }
     }
@@ -3621,7 +4112,11 @@ impl EntityManager {
             if let Some(map_id) = self.transforms.get(&uid).map(|transform| transform.map_id) {
                 affected_maps.insert(map_id);
             } else {
-                affected_maps.extend(self.map_components.values().map(|component| component.world_map));
+                affected_maps.extend(
+                    self.map_components
+                        .values()
+                        .map(|component| component.world_map),
+                );
             }
         }
 
@@ -3640,8 +4135,16 @@ impl EntityManager {
         match event {
             crate::PhysicsRuntimeEvent::Wake(crate::PhysicsWakeMessage { body })
             | crate::PhysicsRuntimeEvent::Sleep(crate::PhysicsSleepMessage { body }) => vec![*body],
-            crate::PhysicsRuntimeEvent::JointAdded(crate::JointAddedEvent { body_a, body_b, .. })
-            | crate::PhysicsRuntimeEvent::JointRemoved(crate::JointRemovedEvent { body_a, body_b, .. }) => {
+            crate::PhysicsRuntimeEvent::JointAdded(crate::JointAddedEvent {
+                body_a,
+                body_b,
+                ..
+            })
+            | crate::PhysicsRuntimeEvent::JointRemoved(crate::JointRemovedEvent {
+                body_a,
+                body_b,
+                ..
+            }) => {
                 vec![*body_a, *body_b]
             }
             crate::PhysicsRuntimeEvent::CollisionChange(_) => Vec::new(),
@@ -3668,7 +4171,11 @@ impl EntityManager {
             .filter_map(|(uid, transform)| (!transform.parent.is_valid()).then_some(*uid))
             .collect::<Vec<_>>();
         for root in roots {
-            self.propagate_transform_spatial_metadata(root, MapId::NULLSPACE, crate::GridId::INVALID);
+            self.propagate_transform_spatial_metadata(
+                root,
+                MapId::NULLSPACE,
+                crate::GridId::INVALID,
+            );
         }
     }
 
@@ -3699,7 +4206,8 @@ impl EntityManager {
         for uid in collision_wake_entities {
             let _ = self.refresh_collision_wake(uid);
         }
-        let collide_on_anchor_entities = self.collide_on_anchors.keys().copied().collect::<Vec<_>>();
+        let collide_on_anchor_entities =
+            self.collide_on_anchors.keys().copied().collect::<Vec<_>>();
         for uid in collide_on_anchor_entities {
             let _ = self.refresh_collide_on_anchor(uid);
         }
@@ -3718,7 +4226,11 @@ impl EntityManager {
         self.rebuild_map_physics_runtime();
     }
 
-    pub fn queue_map_runtime_event(&mut self, map_id: MapId, event: crate::PhysicsRuntimeEvent) -> bool {
+    pub fn queue_map_runtime_event(
+        &mut self,
+        map_id: MapId,
+        event: crate::PhysicsRuntimeEvent,
+    ) -> bool {
         if map_id == MapId::NULLSPACE {
             return false;
         }
@@ -3731,7 +4243,11 @@ impl EntityManager {
         true
     }
 
-    pub fn queue_entity_runtime_event(&mut self, uid: EntityUid, event: crate::PhysicsRuntimeEvent) -> bool {
+    pub fn queue_entity_runtime_event(
+        &mut self,
+        uid: EntityUid,
+        event: crate::PhysicsRuntimeEvent,
+    ) -> bool {
         let component_names = self.entity_component_names(uid);
         self.raise_concrete_physics_runtime_event(uid, &component_names, &event);
         let reconcile_targets = Self::physics_runtime_reconcile_targets(&event);
@@ -3800,12 +4316,8 @@ impl EntityManager {
         self.appearance_dirty_components.drain().collect()
     }
 
-    pub fn raise_component_event<T>(
-        &mut self,
-        uid: EntityUid,
-        component_name: &str,
-        event: &mut T,
-    ) where
+    pub fn raise_component_event<T>(&mut self, uid: EntityUid, component_name: &str, event: &mut T)
+    where
         T: std::any::Any + Send + 'static,
     {
         self.entity_sys_manager
@@ -3869,7 +4381,14 @@ impl EntityManager {
             crate::EntityRuntimeEvent::EntityDeleted(ev) => {
                 self.appearance_dirty_components.remove(&ev.entity);
             }
-            crate::EntityRuntimeEvent::ComponentLifecycle(ev) if ev.component == "AppearanceComponent" => {
+            crate::EntityRuntimeEvent::MapInit(ev) => {
+                if self.appearances.contains_key(&ev.entity) {
+                    let _ = self.mark_appearance_dirty(ev.entity);
+                }
+            }
+            crate::EntityRuntimeEvent::ComponentLifecycle(ev)
+                if ev.component == "AppearanceComponent" =>
+            {
                 match ev.stage {
                     crate::ComponentLifeStage::Added
                     | crate::ComponentLifeStage::Initialized
@@ -3904,6 +4423,7 @@ impl EntityManager {
             crate::EntityRuntimeEvent::EntityPaused(ev) => Some(ev.entity),
             crate::EntityRuntimeEvent::MapPaused(ev) => Some(ev.entity),
             crate::EntityRuntimeEvent::EntityTerminating(ev) => Some(ev.entity),
+            crate::EntityRuntimeEvent::MapInit(ev) => Some(ev.entity),
             crate::EntityRuntimeEvent::ComponentLifecycle(ev) => Some(ev.owner),
             crate::EntityRuntimeEvent::ParentChanged(ev) => Some(ev.entity),
             crate::EntityRuntimeEvent::AnchorStateChanged(ev) => Some(ev.entity),
@@ -3935,6 +4455,10 @@ impl EntityManager {
                     .raise_local_event(uid, component_names, ev, true);
             }
             crate::EntityRuntimeEvent::EntityTerminating(ev) => {
+                self.entity_sys_manager
+                    .raise_local_event(uid, component_names, ev, true);
+            }
+            crate::EntityRuntimeEvent::MapInit(ev) => {
                 self.entity_sys_manager
                     .raise_local_event(uid, component_names, ev, true);
             }
@@ -4036,7 +4560,12 @@ impl EntityManager {
             .unwrap_or(false)
     }
 
-    fn queue_new_component_lifecycle(&mut self, owner: EntityUid, component_name: &str, start_running: bool) {
+    fn queue_new_component_lifecycle(
+        &mut self,
+        owner: EntityUid,
+        component_name: &str,
+        start_running: bool,
+    ) {
         let (initialize, running) = self.entity_component_lifecycle_state(owner);
         let Some(event_name) = self.component_base_name(owner, component_name) else {
             return;
@@ -4059,7 +4588,11 @@ impl EntityManager {
             if let Some(base) = self.component_base_mut(owner, component_name) {
                 base.initialize();
             }
-            self.queue_component_stage(owner, component_name, crate::ComponentLifeStage::Initialized);
+            self.queue_component_stage(
+                owner,
+                component_name,
+                crate::ComponentLifeStage::Initialized,
+            );
             self.process_initialized_component_runtime(owner, &event_name);
         }
 
@@ -4076,7 +4609,12 @@ impl EntityManager {
         }
     }
 
-    fn queue_component_stage(&mut self, owner: EntityUid, component: &str, stage: crate::ComponentLifeStage) {
+    fn queue_component_stage(
+        &mut self,
+        owner: EntityUid,
+        component: &str,
+        stage: crate::ComponentLifeStage,
+    ) {
         self.queue_entity_event(crate::ComponentLifecycleEvent {
             owner,
             component: component.to_string(),
@@ -4091,7 +4629,11 @@ impl EntityManager {
                 self.refresh_entity_physics_runtime(owner);
             }
             "SharedPhysicsMapComponent" => {
-                if let Some(map_id) = self.map_components.get(&owner).map(|component| component.world_map) {
+                if let Some(map_id) = self
+                    .map_components
+                    .get(&owner)
+                    .map(|component| component.world_map)
+                {
                     self.refresh_map_physics_runtime_many(std::iter::once(map_id));
                 }
             }
@@ -4156,22 +4698,56 @@ impl EntityManager {
         }
     }
 
-    fn remove_component_storage_with_lifecycle(&mut self, uid: EntityUid, component_name: &str) -> bool {
+    fn remove_component_storage_with_lifecycle(
+        &mut self,
+        uid: EntityUid,
+        component_name: &str,
+    ) -> bool {
         let removed = match component_name {
-            "AppearanceComponent" => self.appearances.remove(&uid).map(|component| component.base),
+            "AppearanceComponent" => self
+                .appearances
+                .remove(&uid)
+                .map(|component| component.base),
             "TransformComponent" => self.transforms.remove(&uid).map(|component| component.base),
-            "EntityLookupComponent" => self.entity_lookups.remove(&uid).map(|component| component.base),
-            "JointComponent" => self.joint_components.remove(&uid).map(|component| component.base),
-            "IgnorePauseComponent" => self.ignore_pauses.remove(&uid).map(|component| component.base),
-            "CollisionWakeComponent" => self.collision_wakes.remove(&uid).map(|component| component.base),
-            "CollideOnAnchorComponent" => self.collide_on_anchors.remove(&uid).map(|component| component.base),
+            "EntityLookupComponent" => self
+                .entity_lookups
+                .remove(&uid)
+                .map(|component| component.base),
+            "JointComponent" => self
+                .joint_components
+                .remove(&uid)
+                .map(|component| component.base),
+            "IgnorePauseComponent" => self
+                .ignore_pauses
+                .remove(&uid)
+                .map(|component| component.base),
+            "CollisionWakeComponent" => self
+                .collision_wakes
+                .remove(&uid)
+                .map(|component| component.base),
+            "CollideOnAnchorComponent" => self
+                .collide_on_anchors
+                .remove(&uid)
+                .map(|component| component.base),
             "TimerComponent" => self.timers.remove(&uid).map(|component| component.base),
             "Physics" => self.physics.remove(&uid).map(|component| component.base),
             "FixturesComponent" => self.fixtures.remove(&uid).map(|component| component.base),
-            "BroadphaseComponent" => self.broadphases.remove(&uid).map(|component| component.base),
-            "SharedPhysicsMapComponent" => self.physics_maps.remove(&uid).map(|component| component.base),
-            "MapComponent" => self.map_components.remove(&uid).map(|component| component.base),
-            "MapGridComponent" => self.map_grid_components.remove(&uid).map(|component| component.base),
+            "BroadphaseComponent" => self
+                .broadphases
+                .remove(&uid)
+                .map(|component| component.base),
+            "SharedPhysicsMapComponent" => self
+                .physics_maps
+                .remove(&uid)
+                .map(|component| component.base),
+            "MapComponent" => self
+                .map_components
+                .remove(&uid)
+                .map(|component| component.base),
+            "MapGridComponent" => self
+                .map_grid_components
+                .remove(&uid)
+                .map(|component| component.base),
             "MetaDataComponent" => self.metadata.remove(&uid).map(|component| component.base),
             _ => None,
         };
@@ -4212,8 +4788,12 @@ impl EntityManager {
             "EntityLookupComponent" => self.entity_lookups.get(&uid).map(|c| &c.base),
             "JointComponent" => self.joint_components.get(&uid).map(|c| &c.base),
             "IgnorePauseComponent" => self.ignore_pauses.get(&uid).map(|c| &c.base),
-            "CollisionWakeComponent" | "CollisionWake" => self.collision_wakes.get(&uid).map(|c| &c.base),
-            "CollideOnAnchorComponent" | "CollideOnAnchor" => self.collide_on_anchors.get(&uid).map(|c| &c.base),
+            "CollisionWakeComponent" | "CollisionWake" => {
+                self.collision_wakes.get(&uid).map(|c| &c.base)
+            }
+            "CollideOnAnchorComponent" | "CollideOnAnchor" => {
+                self.collide_on_anchors.get(&uid).map(|c| &c.base)
+            }
             "TimerComponent" => self.timers.get(&uid).map(|c| &c.base),
             "Physics" => self.physics.get(&uid).map(|c| &c.base),
             "FixturesComponent" | "Fixtures" => self.fixtures.get(&uid).map(|c| &c.base),
@@ -4231,14 +4811,22 @@ impl EntityManager {
             .map(|base| base.name.clone())
     }
 
-    fn component_base_mut(&mut self, uid: EntityUid, component_name: &str) -> Option<&mut Component> {
+    fn component_base_mut(
+        &mut self,
+        uid: EntityUid,
+        component_name: &str,
+    ) -> Option<&mut Component> {
         match component_name {
-            "AppearanceComponent" | "Appearance" => self.appearances.get_mut(&uid).map(|c| &mut c.base),
+            "AppearanceComponent" | "Appearance" => {
+                self.appearances.get_mut(&uid).map(|c| &mut c.base)
+            }
             "TransformComponent" => self.transforms.get_mut(&uid).map(|c| &mut c.base),
             "EntityLookupComponent" => self.entity_lookups.get_mut(&uid).map(|c| &mut c.base),
             "JointComponent" => self.joint_components.get_mut(&uid).map(|c| &mut c.base),
             "IgnorePauseComponent" => self.ignore_pauses.get_mut(&uid).map(|c| &mut c.base),
-            "CollisionWakeComponent" | "CollisionWake" => self.collision_wakes.get_mut(&uid).map(|c| &mut c.base),
+            "CollisionWakeComponent" | "CollisionWake" => {
+                self.collision_wakes.get_mut(&uid).map(|c| &mut c.base)
+            }
             "CollideOnAnchorComponent" | "CollideOnAnchor" => {
                 self.collide_on_anchors.get_mut(&uid).map(|c| &mut c.base)
             }
@@ -4325,10 +4913,9 @@ impl EntityManager {
                 physics_map.awake_bodies = awake_set;
             }
             let _ = self.refresh_contact_runtime(owner, &bodies);
-            let changed = self
-                .physics_maps
-                .get(&owner)
-                .is_some_and(|component| component.bodies != previous_bodies || component.awake_bodies != previous_awake);
+            let changed = self.physics_maps.get(&owner).is_some_and(|component| {
+                component.bodies != previous_bodies || component.awake_bodies != previous_awake
+            });
             if changed {
                 if let Some(component) = self.physics_maps.get_mut(&owner) {
                     component.base.last_modified_tick = self.current_tick;
@@ -4425,25 +5012,28 @@ impl TransformResolver for EntityManager {
 #[cfg(test)]
 mod tests {
     use super::EntityManager;
-    use butsuri::{AabbShape, Fixture, PhysShape};
-    use crate::{
-        AnchorStateChangedEvent, ChunkDatum, EntParentChangedMessage, EntityRuntimeEvent,
-        GameState, GameStateMapData, GridDatum, MapComponentState, MapCoordinates,
-        MapGridComponentState, MetaDataComponentState, PhysicsInitializedEvent,
-        PhysicsRuntimeEvent, SerializedComponentChange, SerializedEntityState, Tile,
-        TileRenderFlag, TransformComponentState, ComponentLifeStage, ComponentLifecycleEvent,
-        EntityInitializedMessage, EntityDeletedMessage, EntityTerminatingEvent, EntityPausedEvent,
-        EntitySystem, EntitySystemInfo, EntitySystemSubscriptions,
-    };
     use crate::transform_component::TransformResolver;
+    use crate::{
+        AnchorStateChangedEvent, ChunkDatum, ComponentLifeStage, ComponentLifecycleEvent,
+        EntParentChangedMessage, EntityDeletedMessage, EntityInitializedMessage, EntityPausedEvent,
+        EntityRuntimeEvent, EntitySystem, EntitySystemInfo, EntitySystemSubscriptions,
+        EntityTerminatingEvent, GameState, GameStateMapData, GridDatum, MapComponentState,
+        MapCoordinates, MapGridComponentState, MetaDataComponentState, PhysicsInitializedEvent,
+        PhysicsRuntimeEvent, SerializedComponentChange, SerializedEntityState, Tile,
+        TileRenderFlag, TransformComponentState,
+    };
     use crate::{EntityUid, GridId, MapId};
+    use butsuri::{AabbShape, Fixture, PhysShape};
     use keisan::{Angle, ApproxEq, Box2, Vector2, Vector2i};
     use std::sync::{Arc, Mutex};
 
     #[test]
     fn entity_manager_allocates_initializes_and_deletes() {
         let mut manager = EntityManager::new();
-        let uid = manager.create_entity_uninitialized_at_map(Some("test"), MapCoordinates::new(Vector2::new(1.0, 2.0), MapId::new(7)));
+        let uid = manager.create_entity_uninitialized_at_map(
+            Some("test"),
+            MapCoordinates::new(Vector2::new(1.0, 2.0), MapId::new(7)),
+        );
         assert!(manager.entity_exists(uid));
         let transform = manager.transforms.get(&uid).unwrap();
         assert_eq!(transform.local_position, Vector2::new(1.0, 2.0));
@@ -4480,9 +5070,11 @@ mod tests {
         assert_eq!(transform.local_position, Vector2::new(3.0, 4.0));
         assert_eq!(transform.local_rotation, Angle::from_degrees(30.0));
         assert_eq!(event.sender, uid);
-        assert!(manager
-            .set_local_transform(uid, Vector2::new(3.0, 4.0), Angle::from_degrees(180.0))
-            .is_none());
+        assert!(
+            manager
+                .set_local_transform(uid, Vector2::new(3.0, 4.0), Angle::from_degrees(180.0))
+                .is_none()
+        );
     }
 
     #[test]
@@ -4574,7 +5166,10 @@ mod tests {
 
         let map_transform = manager.transforms.get(&map).unwrap();
         assert_eq!(map_transform.map_id, MapId::new(14));
-        assert_eq!(manager.map_components.get(&map).unwrap().world_map, MapId::new(14));
+        assert_eq!(
+            manager.map_components.get(&map).unwrap().world_map,
+            MapId::new(14)
+        );
 
         let grid_transform = manager.transforms.get(&grid).unwrap();
         assert_eq!(grid_transform.parent, map);
@@ -4585,7 +5180,10 @@ mod tests {
         assert_eq!(grid_runtime.parent_map_id, MapId::new(14));
         assert_eq!(grid_runtime.index, GridId::new(41));
         assert_eq!(grid_runtime.chunk_size, 8);
-        assert_eq!(grid_runtime.world_position, manager.world_transform(grid).unwrap().world_position);
+        assert_eq!(
+            grid_runtime.world_position,
+            manager.world_transform(grid).unwrap().world_position
+        );
     }
 
     #[test]
@@ -4715,7 +5313,10 @@ mod tests {
         let grid = manager.map_grids.get(&uid).unwrap();
         assert_eq!(grid.index, GridId::new(77));
         assert_eq!(grid.chunk_size, 4);
-        assert_eq!(grid.world_rotation, manager.world_transform(uid).unwrap().world_rotation);
+        assert_eq!(
+            grid.world_rotation,
+            manager.world_transform(uid).unwrap().world_rotation
+        );
     }
 
     #[test]
@@ -4785,7 +5386,10 @@ mod tests {
         let grid_runtime = manager.map_grids.get(&grid).unwrap();
         assert_eq!(grid_runtime.parent_map_id, MapId::new(31));
         assert_eq!(grid_runtime.index, GridId::new(90));
-        assert_eq!(grid_runtime.world_position, manager.world_transform(grid).unwrap().world_position);
+        assert_eq!(
+            grid_runtime.world_position,
+            manager.world_transform(grid).unwrap().world_position
+        );
 
         assert!(manager.entity_lookups.contains_key(&grid));
     }
@@ -4803,7 +5407,10 @@ mod tests {
             },
         ));
         assert!(manager.transforms.contains_key(&map));
-        assert_eq!(manager.transforms.get(&map).unwrap().map_id, MapId::NULLSPACE);
+        assert_eq!(
+            manager.transforms.get(&map).unwrap().map_id,
+            MapId::NULLSPACE
+        );
 
         let grid = manager.create_entity_uninitialized(None);
         assert!(manager.apply_map_grid_component_state(
@@ -4814,7 +5421,10 @@ mod tests {
             },
         ));
         assert!(manager.transforms.contains_key(&grid));
-        assert_eq!(manager.transforms.get(&grid).unwrap().grid_id, GridId::INVALID);
+        assert_eq!(
+            manager.transforms.get(&grid).unwrap().grid_id,
+            GridId::INVALID
+        );
         assert!(manager.map_grids.contains_key(&grid));
     }
 
@@ -4938,14 +5548,21 @@ mod tests {
         );
         manager.refresh_entity_lookup(child);
 
-        assert_eq!(manager.entities_at_tile(GridId::new(232), Vector2i::new(0, 0)), vec![child]);
+        assert_eq!(
+            manager.entities_at_tile(GridId::new(232), Vector2i::new(0, 0)),
+            vec![child]
+        );
         assert!(manager.remove_map_grid_component(grid));
         assert!(!manager.map_grids.contains_key(&grid));
         assert_eq!(
             manager.transforms.get(&grid).unwrap().grid_id,
             GridId::INVALID
         );
-        assert!(manager.entities_at_tile(GridId::new(232), Vector2i::new(0, 0)).is_empty());
+        assert!(
+            manager
+                .entities_at_tile(GridId::new(232), Vector2i::new(0, 0))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -5029,7 +5646,10 @@ mod tests {
             Some(uid)
         );
         assert!(manager.entity_exists(uid));
-        assert_eq!(manager.metadata.get(&uid).unwrap().prototype_id.as_deref(), Some("grid"));
+        assert_eq!(
+            manager.metadata.get(&uid).unwrap().prototype_id.as_deref(),
+            Some("grid")
+        );
         let transform = manager.transforms.get(&uid).unwrap();
         assert_eq!(transform.local_position, Vector2::new(3.0, 4.0));
         assert_eq!(transform.map_id, MapId::new(12));
@@ -5096,25 +5716,34 @@ mod tests {
         manager.apply_serialized_entity_state(&mut serializer, &state);
 
         assert!(manager.entity_exists(uid));
-        assert_eq!(manager.metadata.get(&uid).unwrap().prototype_id.as_deref(), Some("mob"));
+        assert_eq!(
+            manager.metadata.get(&uid).unwrap().prototype_id.as_deref(),
+            Some("mob")
+        );
         let transform = manager.transforms.get(&uid).unwrap();
         assert_eq!(transform.local_position, Vector2::new(5.0, -1.0));
         assert_eq!(transform.local_rotation, Angle::from_degrees(25.0));
         assert_eq!(transform.map_id, MapId::new(18));
-        assert_eq!(manager.appearances.get(&uid).unwrap().get_data::<u32>("mode"), Some(2));
+        assert_eq!(
+            manager
+                .appearances
+                .get(&uid)
+                .unwrap()
+                .get_data::<u32>("mode"),
+            Some(2)
+        );
         assert_eq!(
             manager.metadata.get(&uid).unwrap().entity_life_stage,
             crate::EntityLifeStage::Initialized
         );
-        assert!(manager
-            .drain_entity_runtime_events()
-            .contains(&EntityRuntimeEvent::EntityInitialized(EntityInitializedMessage {
-                entity: uid,
-            })));
+        assert!(manager.drain_entity_runtime_events().contains(
+            &EntityRuntimeEvent::EntityInitialized(EntityInitializedMessage { entity: uid })
+        ));
     }
 
     #[test]
-    fn entity_manager_apply_serialized_entity_states_with_leaves_created_entities_for_caller_init() {
+    fn entity_manager_apply_serialized_entity_states_with_leaves_created_entities_for_caller_init()
+    {
         let mut manager = EntityManager::new();
         let mut serializer = crate::RobustSerializer::new();
         let uid = EntityUid::new(79);
@@ -5170,10 +5799,9 @@ mod tests {
             manager.metadata.get(&uid).unwrap().entity_life_stage,
             crate::EntityLifeStage::PreInit
         );
-        assert!(!manager
-            .drain_entity_runtime_events()
-            .iter()
-            .any(|event| matches!(event, EntityRuntimeEvent::EntityInitialized(ev) if ev.entity == uid)));
+        assert!(!manager.drain_entity_runtime_events().iter().any(
+            |event| matches!(event, EntityRuntimeEvent::EntityInitialized(ev) if ev.entity == uid)
+        ));
     }
 
     #[test]
@@ -5194,9 +5822,11 @@ mod tests {
             )
             .unwrap();
 
-        assert!(state.component_changes.iter().any(|change| {
-            change.net_id == EntityManager::APPEARANCE_NET_ID && change.deleted
-        }));
+        assert!(
+            state.component_changes.iter().any(|change| {
+                change.net_id == EntityManager::APPEARANCE_NET_ID && change.deleted
+            })
+        );
     }
 
     #[test]
@@ -5251,10 +5881,12 @@ mod tests {
             )
             .unwrap();
 
-        assert!(state
-            .component_changes
-            .iter()
-            .any(|change| change.net_id == EntityManager::APPEARANCE_NET_ID && change.deleted));
+        assert!(
+            state
+                .component_changes
+                .iter()
+                .any(|change| change.net_id == EntityManager::APPEARANCE_NET_ID && change.deleted)
+        );
     }
 
     #[test]
@@ -5266,7 +5898,11 @@ mod tests {
         assert!(manager.set_appearance_data(uid, "mode", 1u8));
         assert_eq!(manager.get_appearance_state(uid).unwrap().data.len(), 1);
         assert_eq!(
-            manager.appearances.get(&uid).unwrap().get_data::<u8>("mode"),
+            manager
+                .appearances
+                .get(&uid)
+                .unwrap()
+                .get_data::<u8>("mode"),
             Some(1)
         );
         assert_eq!(manager.drain_appearance_dirty(), vec![uid]);
@@ -5319,7 +5955,25 @@ mod tests {
         let map_uid = manager.map_entity_for(MapId::new(9)).unwrap();
         let grid_uid = manager.grid_entity_for(GridId::new(31)).unwrap();
         assert_eq!(manager.transforms.get(&grid_uid).unwrap().parent, map_uid);
-        assert_eq!(manager.map_grids.get(&grid_uid).unwrap().parent_map_id, MapId::new(9));
+        assert_eq!(
+            manager.metadata.get(&map_uid).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        assert_eq!(
+            manager.metadata.get(&grid_uid).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        let events = manager.drain_entity_runtime_events();
+        assert!(events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+            entity: map_uid,
+        })));
+        assert!(events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+            entity: grid_uid,
+        })));
+        assert_eq!(
+            manager.map_grids.get(&grid_uid).unwrap().parent_map_id,
+            MapId::new(9)
+        );
         assert_eq!(
             manager
                 .map_grids
@@ -5344,12 +5998,14 @@ mod tests {
             deleted_grids: Vec::new(),
         });
 
-        assert!(manager
-            .map_grids
-            .get(&grid_uid)
-            .unwrap()
-            .try_get_chunk(Vector2i::new(0, 0))
-            .is_none());
+        assert!(
+            manager
+                .map_grids
+                .get(&grid_uid)
+                .unwrap()
+                .try_get_chunk(Vector2i::new(0, 0))
+                .is_none()
+        );
     }
 
     #[test]
@@ -5435,18 +6091,29 @@ mod tests {
             payload_size: 0,
         };
 
-        let created = manager.apply_game_state_delta_with(&mut serializer, &state, |entity_manager, uid, transform_state| {
-            let _ = entity_manager.apply_transform_component_state(uid, transform_state);
-        });
+        let created = manager.apply_game_state_delta_with(
+            &mut serializer,
+            &state,
+            |entity_manager, uid, transform_state| {
+                let _ = entity_manager.apply_transform_component_state(uid, transform_state);
+            },
+        );
 
         assert_eq!(created, vec![EntityUid::new(91)]);
         assert_eq!(
-            manager.metadata.get(&EntityUid::new(91)).unwrap().entity_life_stage,
-            crate::EntityLifeStage::Initialized
+            manager
+                .metadata
+                .get(&EntityUid::new(91))
+                .unwrap()
+                .entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
         );
         assert!(!manager.entity_exists(deleted_uid));
         let grid_uid = manager.grid_entity_for(GridId::new(51)).unwrap();
-        assert_eq!(manager.transforms.get(&grid_uid).unwrap().map_id, MapId::new(33));
+        assert_eq!(
+            manager.transforms.get(&grid_uid).unwrap().map_id,
+            MapId::new(33)
+        );
         assert_eq!(
             manager
                 .map_grids
@@ -5478,28 +6145,41 @@ mod tests {
             .unwrap()
             .set_tile(Vector2i::new(0, 0), Tile::new(6, TileRenderFlag(0), 0));
 
-        assert_eq!(manager.grid_world_position(GridId::new(12)), Some(Vector2::new(1.0, 2.0)));
-        assert!(manager
-            .grid_world_bounds(GridId::new(12))
-            .unwrap()
-            .contains(Vector2::new(1.0, 2.0), true));
+        assert_eq!(
+            manager.grid_world_position(GridId::new(12)),
+            Some(Vector2::new(1.0, 2.0))
+        );
+        assert!(
+            manager
+                .grid_world_bounds(GridId::new(12))
+                .unwrap()
+                .contains(Vector2::new(1.0, 2.0), true)
+        );
         assert_eq!(
             manager.try_find_grid_at(MapId::new(40), Vector2::new(1.5, 2.5)),
             Some(GridId::new(12))
         );
         assert_eq!(
-            manager.tile_ref(GridId::new(12), Vector2i::new(0, 0)).unwrap().tile.type_id,
+            manager
+                .tile_ref(GridId::new(12), Vector2i::new(0, 0))
+                .unwrap()
+                .tile
+                .type_id,
             6
         );
     }
 
     #[test]
-    fn entity_manager_tracks_transform_parent_links_and_preserves_child_world_space_on_delete() {
+    fn entity_manager_delete_parent_recursively_deletes_children() {
         let mut manager = EntityManager::new();
         let parent = manager.create_entity_uninitialized(None);
         let child = manager.create_entity_uninitialized(None);
         manager.transforms.get_mut(&parent).unwrap().local_position = Vector2::new(5.0, 0.0);
-        manager.transforms.get_mut(&parent).unwrap().rebuild_for_manager();
+        manager
+            .transforms
+            .get_mut(&parent)
+            .unwrap()
+            .rebuild_for_manager();
         manager.apply_transform_state(
             child,
             TransformComponentState {
@@ -5513,19 +6193,28 @@ mod tests {
             },
         );
 
-        assert!(manager.transforms.get(&parent).unwrap().children.contains(&child));
-        assert_eq!(manager.world_transform(child).unwrap().world_position, Vector2::new(6.0, 2.0));
+        assert!(
+            manager
+                .transforms
+                .get(&parent)
+                .unwrap()
+                .children
+                .contains(&child)
+        );
+        assert_eq!(
+            manager.world_transform(child).unwrap().world_position,
+            Vector2::new(6.0, 2.0)
+        );
 
         manager.queue_delete_entity(parent);
         manager.flush_queued_deletions();
 
-        let child_transform = manager.transforms.get(&child).unwrap();
-        assert_eq!(child_transform.parent, crate::EntityUid::INVALID);
-        assert_eq!(child_transform.local_position, Vector2::new(6.0, 2.0));
+        assert!(!manager.entity_exists(parent));
+        assert!(!manager.entity_exists(child));
     }
 
     #[test]
-    fn entity_manager_delete_parent_preserves_child_map_velocities() {
+    fn entity_manager_delete_parent_recursively_deletes_child_physics() {
         let mut manager = EntityManager::new();
         let parent = manager.create_entity_uninitialized(None);
         manager.apply_transform_state(
@@ -5563,18 +6252,13 @@ mod tests {
         child_body.linear_velocity = Vector2::new(-0.5, 1.5);
         child_body.angular_velocity = 1.2;
 
-        let old_linear = manager.map_linear_velocity(child);
-        let old_angular = manager.map_angular_velocity(child);
-
         manager.queue_delete_entity(parent);
         manager.flush_queued_deletions();
 
-        let child_transform = manager.transforms.get(&child).unwrap();
-        assert_eq!(child_transform.parent, EntityUid::INVALID);
-        let new_linear = manager.map_linear_velocity(child);
-        let new_angular = manager.map_angular_velocity(child);
-        assert!(new_linear.approx_eq_with_tolerance(old_linear, 0.0001));
-        assert!((new_angular - old_angular).abs() <= 0.0001);
+        assert!(!manager.entity_exists(parent));
+        assert!(!manager.entity_exists(child));
+        assert!(!manager.physics.contains_key(&parent));
+        assert!(!manager.physics.contains_key(&child));
     }
 
     #[test]
@@ -5795,7 +6479,11 @@ mod tests {
 
         manager.queue_delete_entity(anchored);
         manager.flush_queued_deletions();
-        assert!(manager.entities_at_tile(GridId::new(3), Vector2i::new(0, 0)).is_empty());
+        assert!(
+            manager
+                .entities_at_tile(GridId::new(3), Vector2i::new(0, 0))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -6085,7 +6773,9 @@ mod tests {
         assert!(manager.remove_fixtures_component(uid));
         assert!(!manager.fixtures.contains_key(&uid));
         assert!(
-            manager.query_aabb_entities(map, Box2::new(-1.0, -1.0, 1.0, 1.0)).is_empty()
+            manager
+                .query_aabb_entities(map, Box2::new(-1.0, -1.0, 1.0, 1.0))
+                .is_empty()
         );
         assert_eq!(
             manager.entities_in_lookup_aabb(map, Box2::new(-1.0, -1.0, 1.0, 1.0), false),
@@ -6158,7 +6848,8 @@ mod tests {
             ),
         );
 
-        let mut joint = butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
+        let mut joint =
+            butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
         joint.id = "rope".to_string();
         joint.collide_connected = false;
         assert!(manager.add_joint_between(joint));
@@ -6169,11 +6860,11 @@ mod tests {
 
         assert!(manager.remove_joint_component(first));
         assert!(!manager.joint_components.contains_key(&first));
-        assert_eq!(manager.joint_components.get(&second).unwrap().joint_count(), 0);
         assert_eq!(
-            manager.owner_contact_count(map),
-            1
+            manager.joint_components.get(&second).unwrap().joint_count(),
+            0
         );
+        assert_eq!(manager.owner_contact_count(map), 1);
     }
 
     #[test]
@@ -6241,7 +6932,8 @@ mod tests {
             ),
         );
 
-        let mut joint = butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
+        let mut joint =
+            butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
         joint.id = "rope".to_string();
         joint.collide_connected = false;
         assert!(manager.add_joint_between(joint));
@@ -6251,7 +6943,10 @@ mod tests {
 
         assert!(manager.remove_physics_component(first));
         assert!(!manager.joint_components.contains_key(&first));
-        assert_eq!(manager.joint_components.get(&second).unwrap().joint_count(), 0);
+        assert_eq!(
+            manager.joint_components.get(&second).unwrap().joint_count(),
+            0
+        );
         assert_eq!(manager.owner_contact_count(map), 0);
     }
 
@@ -6349,7 +7044,8 @@ mod tests {
         let mut manager = EntityManager::new();
         let first = manager.create_entity_uninitialized(None);
         let second = manager.create_entity_uninitialized(None);
-        let mut joint = butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
+        let mut joint =
+            butsuri::Joint::new(first.raw(), second.raw(), butsuri::JointType::Distance);
         joint.id = "rope".to_string();
         assert!(manager.add_joint_between(joint));
 
@@ -6357,7 +7053,10 @@ mod tests {
         manager.flush_queued_deletions();
 
         assert!(!manager.joint_components.contains_key(&first));
-        assert_eq!(manager.joint_components.get(&second).unwrap().joint_count(), 0);
+        assert_eq!(
+            manager.joint_components.get(&second).unwrap().joint_count(),
+            0
+        );
     }
 
     #[test]
@@ -6406,9 +7105,11 @@ mod tests {
             .get_mut(&map_owner)
             .unwrap()
             .drain_runtime_events();
-        assert!(events.contains(&PhysicsRuntimeEvent::Sleep(crate::PhysicsSleepMessage {
-            body: uid,
-        })));
+        assert!(
+            events.contains(&PhysicsRuntimeEvent::Sleep(crate::PhysicsSleepMessage {
+                body: uid,
+            }))
+        );
         assert!(events.contains(&PhysicsRuntimeEvent::CollisionChange(
             crate::CollisionChangeMessage {
                 owner: uid,
@@ -6460,10 +7161,12 @@ mod tests {
             })]
         );
 
-        assert!(manager.apply_joint_component_state(
-            uid,
-            crate::JointComponentState { joints: Vec::new() },
-        ));
+        assert!(
+            manager.apply_joint_component_state(
+                uid,
+                crate::JointComponentState { joints: Vec::new() },
+            )
+        );
         let removed = manager
             .physics_maps
             .get_mut(&map_owner)
@@ -6471,11 +7174,13 @@ mod tests {
             .drain_runtime_events();
         assert_eq!(
             removed,
-            vec![PhysicsRuntimeEvent::JointRemoved(crate::JointRemovedEvent {
-                body_a: EntityUid::new(joint.body_a_uid),
-                body_b: EntityUid::new(joint.body_b_uid),
-                joint_id: "rope".to_string(),
-            })]
+            vec![PhysicsRuntimeEvent::JointRemoved(
+                crate::JointRemovedEvent {
+                    body_a: EntityUid::new(joint.body_a_uid),
+                    body_b: EntityUid::new(joint.body_b_uid),
+                    joint_id: "rope".to_string(),
+                }
+            )]
         );
     }
 
@@ -6488,25 +7193,31 @@ mod tests {
         let _ = manager.ensure_physics(uid);
         assert_eq!(
             manager.drain_entity_runtime_events(),
-            vec![EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
-                owner: uid,
-                component: "Physics".to_string(),
-                stage: ComponentLifeStage::Added,
-            })]
+            vec![EntityRuntimeEvent::ComponentLifecycle(
+                ComponentLifecycleEvent {
+                    owner: uid,
+                    component: "Physics".to_string(),
+                    stage: ComponentLifeStage::Added,
+                }
+            )]
         );
 
         manager.initialize_entity(uid);
         let init_events = manager.drain_entity_runtime_events();
-        assert!(init_events.contains(&EntityRuntimeEvent::ComponentLifecycle(
-            ComponentLifecycleEvent {
-                owner: uid,
-                component: "Physics".to_string(),
-                stage: ComponentLifeStage::Initialized,
-            }
-        )));
-        assert!(init_events.contains(&EntityRuntimeEvent::PhysicsInitialized(
-            PhysicsInitializedEvent { uid }
-        )));
+        assert!(
+            init_events.contains(&EntityRuntimeEvent::ComponentLifecycle(
+                ComponentLifecycleEvent {
+                    owner: uid,
+                    component: "Physics".to_string(),
+                    stage: ComponentLifeStage::Initialized,
+                }
+            ))
+        );
+        assert!(
+            init_events.contains(&EntityRuntimeEvent::PhysicsInitialized(
+                PhysicsInitializedEvent { uid }
+            ))
+        );
 
         let _ = manager.ensure_physics(uid);
         assert!(manager.drain_entity_runtime_events().is_empty());
@@ -6610,22 +7321,22 @@ mod tests {
                 EntityRuntimeEvent::EntityTerminating(EntityTerminatingEvent { entity: uid }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "MetaDataComponent".to_string(),
+                    component: "TransformComponent".to_string(),
                     stage: ComponentLifeStage::Stopped,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "MetaDataComponent".to_string(),
+                    component: "TransformComponent".to_string(),
                     stage: ComponentLifeStage::Deleted,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "TransformComponent".to_string(),
+                    component: "MetaDataComponent".to_string(),
                     stage: ComponentLifeStage::Stopped,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "TransformComponent".to_string(),
+                    component: "MetaDataComponent".to_string(),
                     stage: ComponentLifeStage::Deleted,
                 }),
                 EntityRuntimeEvent::EntityDeleted(EntityDeletedMessage { entity: uid }),
@@ -6642,11 +7353,13 @@ mod tests {
         let _ = manager.ensure_appearance(uid);
         assert_eq!(
             manager.drain_entity_runtime_events(),
-            vec![EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
-                owner: uid,
-                component: "AppearanceComponent".to_string(),
-                stage: ComponentLifeStage::Added,
-            })]
+            vec![EntityRuntimeEvent::ComponentLifecycle(
+                ComponentLifecycleEvent {
+                    owner: uid,
+                    component: "AppearanceComponent".to_string(),
+                    stage: ComponentLifeStage::Added,
+                }
+            )]
         );
 
         manager.initialize_entity(uid);
@@ -6655,12 +7368,12 @@ mod tests {
             vec![
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "AppearanceComponent".to_string(),
+                    component: "TransformComponent".to_string(),
                     stage: ComponentLifeStage::Initialized,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "TransformComponent".to_string(),
+                    component: "AppearanceComponent".to_string(),
                     stage: ComponentLifeStage::Initialized,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
@@ -6671,12 +7384,12 @@ mod tests {
                 EntityRuntimeEvent::EntityInitialized(EntityInitializedMessage { entity: uid }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "AppearanceComponent".to_string(),
+                    component: "TransformComponent".to_string(),
                     stage: ComponentLifeStage::Running,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
                     owner: uid,
-                    component: "TransformComponent".to_string(),
+                    component: "AppearanceComponent".to_string(),
                     stage: ComponentLifeStage::Running,
                 }),
                 EntityRuntimeEvent::ComponentLifecycle(ComponentLifecycleEvent {
@@ -6876,7 +7589,14 @@ mod tests {
 
         assert_eq!(
             hits.lock().unwrap().clone(),
-            vec!["add", "init", "entity-init", "startup", "shutdown", "remove"]
+            vec![
+                "add",
+                "init",
+                "entity-init",
+                "startup",
+                "shutdown",
+                "remove"
+            ]
         );
     }
 
@@ -6922,9 +7642,11 @@ mod tests {
         assert!(events.contains(&EntityRuntimeEvent::EntityTerminating(
             EntityTerminatingEvent { entity: uid }
         )));
-        assert!(events.contains(&EntityRuntimeEvent::EntityDeleted(
-            EntityDeletedMessage { entity: uid }
-        )));
+        assert!(
+            events.contains(&EntityRuntimeEvent::EntityDeleted(EntityDeletedMessage {
+                entity: uid
+            }))
+        );
     }
 
     #[test]
@@ -7101,22 +7823,30 @@ mod tests {
         assert!(manager.is_entity_paused(child));
 
         let events = manager.drain_entity_runtime_events();
-        assert!(events.contains(&EntityRuntimeEvent::MapPaused(crate::MapPausedEvent {
-            entity: map,
-            paused: true,
-        })));
-        assert!(events.contains(&EntityRuntimeEvent::EntityPaused(crate::EntityPausedEvent {
-            entity: map,
-            paused: true,
-        })));
-        assert!(events.contains(&EntityRuntimeEvent::EntityPaused(crate::EntityPausedEvent {
-            entity: grid,
-            paused: true,
-        })));
-        assert!(events.contains(&EntityRuntimeEvent::EntityPaused(crate::EntityPausedEvent {
-            entity: child,
-            paused: true,
-        })));
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapPaused(crate::MapPausedEvent {
+                entity: map,
+                paused: true,
+            }))
+        );
+        assert!(events.contains(&EntityRuntimeEvent::EntityPaused(
+            crate::EntityPausedEvent {
+                entity: map,
+                paused: true,
+            }
+        )));
+        assert!(events.contains(&EntityRuntimeEvent::EntityPaused(
+            crate::EntityPausedEvent {
+                entity: grid,
+                paused: true,
+            }
+        )));
+        assert!(events.contains(&EntityRuntimeEvent::EntityPaused(
+            crate::EntityPausedEvent {
+                entity: child,
+                paused: true,
+            }
+        )));
     }
 
     #[test]
@@ -7144,16 +7874,176 @@ mod tests {
         assert!(manager.is_entity_paused(child));
 
         let events = manager.drain_entity_runtime_events();
-        assert!(events.contains(&EntityRuntimeEvent::MapPaused(crate::MapPausedEvent {
-            entity: map,
-            paused: true,
-        })));
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapPaused(crate::MapPausedEvent {
+                entity: map,
+                paused: true,
+            }))
+        );
 
         assert!(manager.set_map_pre_init(map, false));
         assert!(!manager.is_map_paused(MapId::new(63)));
         assert!(manager.is_map_initialized(MapId::new(63)));
         assert!(!manager.is_entity_paused(map));
         assert!(!manager.is_entity_paused(child));
+    }
+
+    #[test]
+    fn entity_manager_map_initialize_runs_map_init_recursively_for_initialized_entities() {
+        let mut manager = EntityManager::new();
+        let map = manager.create_entity_uninitialized_as_map(None, MapId::new(163));
+        let child = manager.create_entity_uninitialized_with_transform(
+            None,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: map,
+                map_id: MapId::new(163),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+
+        assert!(manager.set_map_pre_init(map, true));
+        manager.initialize_entity(map);
+        manager.initialize_entity(child);
+        manager.drain_entity_runtime_events();
+
+        assert!(manager.set_map_pre_init(map, false));
+        let events = manager.drain_entity_runtime_events();
+        assert_eq!(
+            manager.metadata.get(&map).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        assert_eq!(
+            manager.metadata.get(&child).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: map,
+            }))
+        );
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: child,
+            }))
+        );
+    }
+
+    #[test]
+    fn entity_manager_initialize_entity_runs_map_init_when_target_map_is_initialized() {
+        let mut manager = EntityManager::new();
+        let map = manager.create_entity_uninitialized_as_map(None, MapId::new(164));
+        manager.initialize_entity(map);
+        manager.drain_entity_runtime_events();
+
+        let uid = manager.create_entity_uninitialized_with_transform(
+            None,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: map,
+                map_id: MapId::new(164),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        manager.drain_entity_runtime_events();
+
+        manager.initialize_entity(uid);
+        let events = manager.drain_entity_runtime_events();
+        assert_eq!(
+            manager.metadata.get(&uid).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: uid,
+            }))
+        );
+    }
+
+    #[test]
+    fn entity_manager_transform_to_initialized_map_runs_map_init() {
+        let mut manager = EntityManager::new();
+        let pre_init_map = manager.create_entity_uninitialized_as_map(None, MapId::new(165));
+        let initialized_map = manager.create_entity_uninitialized_as_map(None, MapId::new(166));
+        assert!(manager.set_map_pre_init(pre_init_map, true));
+        manager.initialize_entity(initialized_map);
+
+        let uid = manager.create_entity_uninitialized_with_transform(
+            None,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: pre_init_map,
+                map_id: MapId::new(165),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        manager.initialize_entity(uid);
+        manager.drain_entity_runtime_events();
+
+        assert_eq!(
+            manager.metadata.get(&uid).unwrap().entity_life_stage,
+            crate::EntityLifeStage::Initialized
+        );
+        assert!(manager.apply_transform_state(
+            uid,
+            TransformComponentState {
+                local_position: Vector2::ZERO,
+                rotation: Angle::ZERO,
+                parent_id: initialized_map,
+                map_id: MapId::new(166),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        ));
+
+        let events = manager.drain_entity_runtime_events();
+        assert_eq!(
+            manager.metadata.get(&uid).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: uid,
+            }))
+        );
+    }
+
+    #[test]
+    fn entity_manager_map_component_added_after_initialize_runs_map_init() {
+        let mut manager = EntityManager::new();
+        let uid = manager.create_entity_uninitialized(None);
+        manager.initialize_entity(uid);
+        manager.drain_entity_runtime_events();
+
+        assert!(manager.apply_map_component_state(
+            uid,
+            crate::MapComponentState {
+                map_id: MapId::new(167),
+                lighting_enabled: true,
+                map_paused: false,
+            },
+        ));
+        let events = manager.drain_entity_runtime_events();
+
+        assert_eq!(
+            manager.metadata.get(&uid).unwrap().entity_life_stage,
+            crate::EntityLifeStage::MapInitialized
+        );
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: uid,
+            }))
+        );
     }
 
     #[test]
@@ -7240,12 +8130,16 @@ mod tests {
 
         assert!(manager.remove_ignore_pause_component(uid));
         assert!(manager.is_entity_paused(uid));
-        assert!(manager
-            .drain_entity_runtime_events()
-            .contains(&EntityRuntimeEvent::EntityPaused(crate::EntityPausedEvent {
-                entity: uid,
-                paused: true,
-            })));
+        assert!(
+            manager
+                .drain_entity_runtime_events()
+                .contains(&EntityRuntimeEvent::EntityPaused(
+                    crate::EntityPausedEvent {
+                        entity: uid,
+                        paused: true,
+                    }
+                ))
+        );
     }
 
     #[test]
@@ -7303,7 +8197,12 @@ mod tests {
         manager.ensure_timer(paused);
         assert!(manager.set_entity_paused(paused, true));
 
-        let query3 = manager.entity_query3(&manager.transforms, &manager.appearances, &manager.entity_lookups, false);
+        let query3 = manager.entity_query3(
+            &manager.transforms,
+            &manager.appearances,
+            &manager.entity_lookups,
+            false,
+        );
         assert_eq!(query3.len(), 1);
         assert_eq!(query3[0].0, active);
 
@@ -7465,14 +8364,21 @@ mod tests {
             .unwrap()
             .set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
 
-        assert_eq!(manager.try_find_grid_at(MapId::new(70), Vector2::new(0.5, 0.5)), Some(GridId::new(170)));
-        assert_eq!(manager.try_find_grid_at(MapId::new(70), Vector2::new(10.5, 0.5)), Some(GridId::new(171)));
+        assert_eq!(
+            manager.try_find_grid_at(MapId::new(70), Vector2::new(0.5, 0.5)),
+            Some(GridId::new(170))
+        );
+        assert_eq!(
+            manager.try_find_grid_at(MapId::new(70), Vector2::new(10.5, 0.5)),
+            Some(GridId::new(171))
+        );
         assert_eq!(
             manager.find_grids_intersecting(MapId::new(70), Box2::new(-1.0, -1.0, 1.0, 1.0), false),
             vec![GridId::new(170)]
         );
 
-        let mut approx = manager.find_grids_intersecting(MapId::new(70), Box2::new(-1.0, -1.0, 12.0, 1.0), true);
+        let mut approx =
+            manager.find_grids_intersecting(MapId::new(70), Box2::new(-1.0, -1.0, 12.0, 1.0), true);
         approx.sort_by_key(|grid_id| grid_id.raw());
         assert_eq!(approx, vec![GridId::new(170), GridId::new(171)]);
     }
@@ -7532,12 +8438,24 @@ mod tests {
         );
         let _ = manager.refresh_entity_lookup(uid);
 
-        assert_eq!(manager.tile_ref(GridId::new(173), Vector2i::new(0, 0)).unwrap().tile.type_id, 1);
-        assert!(manager
-            .tile_world_bounds(GridId::new(173), Vector2i::new(0, 0))
-            .unwrap()
-            .contains(Vector2::new(0.5, 0.5), true));
-        assert_eq!(manager.entities_at_tile(GridId::new(173), Vector2i::new(0, 0)), vec![uid]);
+        assert_eq!(
+            manager
+                .tile_ref(GridId::new(173), Vector2i::new(0, 0))
+                .unwrap()
+                .tile
+                .type_id,
+            1
+        );
+        assert!(
+            manager
+                .tile_world_bounds(GridId::new(173), Vector2i::new(0, 0))
+                .unwrap()
+                .contains(Vector2::new(0.5, 0.5), true)
+        );
+        assert_eq!(
+            manager.entities_at_tile(GridId::new(173), Vector2i::new(0, 0)),
+            vec![uid]
+        );
         assert_eq!(
             manager.entities_at_tiles(GridId::new(173), [Vector2i::new(0, 0), Vector2i::new(0, 0)]),
             vec![uid]
@@ -7546,7 +8464,12 @@ mod tests {
             manager.entities_in_grid_aabb(GridId::new(173), Box2::new(-1.0, -1.0, 1.0, 1.0), false),
             vec![uid]
         );
-        assert!(manager.entity_world_aabb(uid).unwrap().contains(Vector2::new(0.5, 0.5), true));
+        assert!(
+            manager
+                .entity_world_aabb(uid)
+                .unwrap()
+                .contains(Vector2::new(0.5, 0.5), true)
+        );
     }
 
     #[test]
@@ -7574,21 +8497,26 @@ mod tests {
             uid,
             butsuri::Fixture::new(
                 "main",
-                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    Box2::new(-1.0, -1.0, 1.0, 1.0),
+                    0.0,
+                )),
             ),
         );
         manager.refresh_map_physics_runtime(MapId::new(73));
 
-        assert_eq!(manager.entities_in_map_aabb(MapId::new(73), Box2::new(4.0, -1.0, 6.0, 1.0)), vec![uid]);
         assert_eq!(
-            manager
-                .intersect_ray(
-                    MapId::new(73),
-                    butsuri::CollisionRay::new(Vector2::new(-5.0, 0.0), Vector2::UNIT_X, -1),
-                    20.0,
-                    true,
-                )[0]
-                .entity,
+            manager.entities_in_map_aabb(MapId::new(73), Box2::new(4.0, -1.0, 6.0, 1.0)),
+            vec![uid]
+        );
+        assert_eq!(
+            manager.intersect_ray(
+                MapId::new(73),
+                butsuri::CollisionRay::new(Vector2::new(-5.0, 0.0), Vector2::UNIT_X, -1),
+                20.0,
+                true,
+            )[0]
+            .entity,
             uid
         );
     }
@@ -7617,7 +8545,10 @@ mod tests {
             uid,
             butsuri::Fixture::new(
                 "main",
-                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    Box2::new(-0.5, -0.5, 0.5, 0.5),
+                    0.0,
+                )),
             ),
         );
 
@@ -7657,7 +8588,10 @@ mod tests {
             first,
             butsuri::Fixture::new(
                 "first",
-                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    Box2::new(-0.5, -0.5, 0.5, 0.5),
+                    0.0,
+                )),
             ),
         );
 
@@ -7681,7 +8615,10 @@ mod tests {
             second,
             butsuri::Fixture::new(
                 "second",
-                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    Box2::new(-0.5, -0.5, 0.5, 0.5),
+                    0.0,
+                )),
             ),
         );
 
@@ -7720,21 +8657,26 @@ mod tests {
             uid,
             butsuri::Fixture::new(
                 "main",
-                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+                butsuri::PhysShape::Aabb(butsuri::AabbShape::new(
+                    Box2::new(-1.0, -1.0, 1.0, 1.0),
+                    0.0,
+                )),
             ),
         );
         manager.refresh_broadphase_runtime(owner, &[uid]);
 
-        assert_eq!(manager.query_aabb_entities(owner, Box2::new(4.0, -1.0, 6.0, 1.0)), vec![uid]);
         assert_eq!(
-            manager
-                .intersect_ray_on(
-                    owner,
-                    butsuri::CollisionRay::new(Vector2::new(-5.0, 0.0), Vector2::UNIT_X, -1),
-                    20.0,
-                    true,
-                )[0]
-                .entity,
+            manager.query_aabb_entities(owner, Box2::new(4.0, -1.0, 6.0, 1.0)),
+            vec![uid]
+        );
+        assert_eq!(
+            manager.intersect_ray_on(
+                owner,
+                butsuri::CollisionRay::new(Vector2::new(-5.0, 0.0), Vector2::UNIT_X, -1),
+                20.0,
+                true,
+            )[0]
+            .entity,
             uid
         );
     }
@@ -7745,11 +8687,13 @@ mod tests {
         let map = manager.create_entity_uninitialized_as_map(None, MapId::new(74));
         let map_uid = manager.map_entity_for(MapId::new(74)).unwrap_or(map);
 
-        manager.ensure_physics_map(map_uid).queue_runtime_event(crate::PhysicsRuntimeEvent::Wake(
-            crate::PhysicsWakeMessage {
-                body: EntityUid::new(900),
-            },
-        ));
+        manager
+            .ensure_physics_map(map_uid)
+            .queue_runtime_event(crate::PhysicsRuntimeEvent::Wake(
+                crate::PhysicsWakeMessage {
+                    body: EntityUid::new(900),
+                },
+            ));
         manager.ensure_physics_map(map_uid).queue_contact_event(
             butsuri::ContactStatus::StartTouching,
             butsuri::Contact::new("a", "b", butsuri::ContactType::Aabb),
@@ -7757,15 +8701,23 @@ mod tests {
 
         assert_eq!(
             manager.drain_map_runtime_events(MapId::new(74)),
-            vec![crate::PhysicsRuntimeEvent::Wake(crate::PhysicsWakeMessage {
-                body: EntityUid::new(900),
-            })]
+            vec![crate::PhysicsRuntimeEvent::Wake(
+                crate::PhysicsWakeMessage {
+                    body: EntityUid::new(900),
+                }
+            )]
         );
-        assert_eq!(manager.drain_map_runtime_events(MapId::new(74)), Vec::<crate::PhysicsRuntimeEvent>::new());
+        assert_eq!(
+            manager.drain_map_runtime_events(MapId::new(74)),
+            Vec::<crate::PhysicsRuntimeEvent>::new()
+        );
 
         let contact_events = manager.drain_map_contact_events(MapId::new(74));
         assert_eq!(contact_events.len(), 1);
-        assert_eq!(contact_events[0].status, butsuri::ContactStatus::StartTouching);
+        assert_eq!(
+            contact_events[0].status,
+            butsuri::ContactStatus::StartTouching
+        );
         assert_eq!(contact_events[0].contact.fixture_a, "a");
         assert_eq!(manager.drain_map_contact_events(MapId::new(74)), Vec::new());
     }
@@ -7816,11 +8768,13 @@ mod tests {
         assert!(default_entities.contains(&near));
         assert!(!default_entities.contains(&paused));
 
-        let mut visible = manager.entities_in_map_radius(MapId::new(75), Vector2::ZERO, 8.0, true, true);
+        let mut visible =
+            manager.entities_in_map_radius(MapId::new(75), Vector2::ZERO, 8.0, true, true);
         visible.sort();
         assert_eq!(visible, vec![map, near, paused]);
 
-        let mut without_paused = manager.entities_in_map_radius(MapId::new(75), Vector2::ZERO, 8.0, false, true);
+        let mut without_paused =
+            manager.entities_in_map_radius(MapId::new(75), Vector2::ZERO, 8.0, false, true);
         without_paused.sort();
         assert_eq!(without_paused, vec![map, near]);
         assert!(!without_paused.contains(&far));
@@ -7859,30 +8813,42 @@ mod tests {
         manager.entity_sys_manager.initialize();
 
         assert!(manager.entity_sys_manager.initialized);
-        assert!(!manager
-            .entity_sys_manager
-            .system_names()
-            .contains(&"shared_physics".to_string()));
-        assert!(!manager
-            .entity_sys_manager
-            .system_names()
-            .contains(&"entity_lookup".to_string()));
-        assert!(!manager
-            .entity_sys_manager
-            .system_names()
-            .contains(&"collision_wake".to_string()));
-        assert!(!manager
-            .entity_sys_manager
-            .system_names()
-            .contains(&"collide_on_anchor".to_string()));
-        assert!(!manager
-            .entity_sys_manager
-            .system_names()
-            .contains(&"transform".to_string()));
-        assert!(!manager
-            .entity_sys_manager
-            .system_names()
-            .contains(&"SharedAppearanceSystem".to_string()));
+        assert!(
+            !manager
+                .entity_sys_manager
+                .system_names()
+                .contains(&"shared_physics".to_string())
+        );
+        assert!(
+            !manager
+                .entity_sys_manager
+                .system_names()
+                .contains(&"entity_lookup".to_string())
+        );
+        assert!(
+            !manager
+                .entity_sys_manager
+                .system_names()
+                .contains(&"collision_wake".to_string())
+        );
+        assert!(
+            !manager
+                .entity_sys_manager
+                .system_names()
+                .contains(&"collide_on_anchor".to_string())
+        );
+        assert!(
+            !manager
+                .entity_sys_manager
+                .system_names()
+                .contains(&"transform".to_string())
+        );
+        assert!(
+            !manager
+                .entity_sys_manager
+                .system_names()
+                .contains(&"SharedAppearanceSystem".to_string())
+        );
 
         manager.entity_sys_manager.shutdown();
         assert!(!manager.entity_sys_manager.initialized);
@@ -7901,10 +8867,12 @@ mod tests {
         manager.entity_runtime_events.push_back(event.into());
         assert_eq!(
             manager.drain_entity_runtime_events(),
-            vec![crate::EntityRuntimeEvent::EntityPaused(crate::EntityPausedEvent {
-                entity: metadata_uid,
-                paused: true,
-            })]
+            vec![crate::EntityRuntimeEvent::EntityPaused(
+                crate::EntityPausedEvent {
+                    entity: metadata_uid,
+                    paused: true,
+                }
+            )]
         );
     }
 
@@ -7996,25 +8964,32 @@ mod tests {
         let map = manager.create_entity_uninitialized_as_map(None, MapId::new(44));
         manager.ensure_lookup(map);
 
-        let uid = manager.create_entity_uninitialized_at_map(None, MapCoordinates::new(Vector2::ZERO, MapId::new(44)));
+        let uid = manager.create_entity_uninitialized_at_map(
+            None,
+            MapCoordinates::new(Vector2::ZERO, MapId::new(44)),
+        );
         let mut move_event = manager
             .set_local_transform(uid, Vector2::new(2.0, 0.0), Angle::ZERO)
             .unwrap();
         manager.raise_component_event(uid, "TransformComponent", &mut move_event);
 
-        assert!(manager
-            .entity_lookups
-            .get(&map)
-            .unwrap()
-            .entities
-            .contains_key(&uid));
+        assert!(
+            manager
+                .entity_lookups
+                .get(&map)
+                .unwrap()
+                .entities
+                .contains_key(&uid)
+        );
 
         assert!(manager.delete_entity(uid).is_some());
-        assert!(!manager
-            .entity_lookups
-            .get(&map)
-            .unwrap()
-            .entities
-            .contains_key(&uid));
+        assert!(
+            !manager
+                .entity_lookups
+                .get(&map)
+                .unwrap()
+                .entities
+                .contains_key(&uid)
+        );
     }
 }

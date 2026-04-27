@@ -37,14 +37,20 @@ impl<T: Stopwatch> GameLoop<T> {
     }
 
     pub fn run<H: GameLoopHooks>(&mut self, hooks: &mut H) {
-        assert!(self.timing.tick_rate > 0, "TickRate must be greater than 0.");
+        assert!(
+            self.timing.tick_rate > 0,
+            "TickRate must be greater than 0."
+        );
         self.running = true;
         while self.running {
             let max_time = self
                 .timing
                 .tick_period()
                 .mul_f64(self.max_queued_ticks as f64);
-            let mut accumulator = self.timing.real_time().saturating_sub(self.timing.last_tick);
+            let mut accumulator = self
+                .timing
+                .real_time()
+                .saturating_sub(self.timing.last_tick);
             if accumulator > max_time {
                 accumulator = max_time;
                 self.timing.last_tick = self.timing.real_time().saturating_sub(max_time);

@@ -1,6 +1,6 @@
 use crate::{EntityUid, GridId, MapCoordinates, MapId};
-use keisan::{Vector2, Vector2i};
 use core::fmt;
+use keisan::{Vector2, Vector2i};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransformState {
@@ -27,7 +27,10 @@ impl EntityCoordinates {
     };
 
     pub const fn new(entity_id: EntityUid, position: Vector2) -> Self {
-        Self { entity_id, position }
+        Self {
+            entity_id,
+            position,
+        }
     }
 
     pub fn new_xy(entity_id: EntityUid, x: f32, y: f32) -> Self {
@@ -87,17 +90,27 @@ impl EntityCoordinates {
         Self::new(self.entity_id, self.position + position)
     }
 
-    pub fn in_range<R: EntityCoordinateResolver>(self, resolver: &R, other: Self, range: f32) -> bool {
+    pub fn in_range<R: EntityCoordinateResolver>(
+        self,
+        resolver: &R,
+        other: Self,
+        range: f32,
+    ) -> bool {
         if !self.is_valid(resolver) || !other.is_valid(resolver) {
             return false;
         }
         if self.entity_id == other.entity_id {
             return (other.position - self.position).length_squared() < range * range;
         }
-        self.to_map(resolver).in_range(other.to_map(resolver), range)
+        self.to_map(resolver)
+            .in_range(other.to_map(resolver), range)
     }
 
-    pub fn try_distance<R: EntityCoordinateResolver>(self, resolver: &R, other: Self) -> Option<f32> {
+    pub fn try_distance<R: EntityCoordinateResolver>(
+        self,
+        resolver: &R,
+        other: Self,
+    ) -> Option<f32> {
         if !self.is_valid(resolver) || !other.is_valid(resolver) {
             return None;
         }
@@ -122,7 +135,10 @@ impl core::ops::Add for EntityCoordinates {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        assert!(self.entity_id == rhs.entity_id, "Can't sum EntityCoordinates with different relative entities.");
+        assert!(
+            self.entity_id == rhs.entity_id,
+            "Can't sum EntityCoordinates with different relative entities."
+        );
         Self::new(self.entity_id, self.position + rhs.position)
     }
 }
@@ -131,7 +147,10 @@ impl core::ops::Sub for EntityCoordinates {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        assert!(self.entity_id == rhs.entity_id, "Can't subtract EntityCoordinates with different relative entities.");
+        assert!(
+            self.entity_id == rhs.entity_id,
+            "Can't subtract EntityCoordinates with different relative entities."
+        );
         Self::new(self.entity_id, self.position - rhs.position)
     }
 }
@@ -140,7 +159,10 @@ impl core::ops::Mul for EntityCoordinates {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        assert!(self.entity_id == rhs.entity_id, "Can't multiply EntityCoordinates with different relative entities.");
+        assert!(
+            self.entity_id == rhs.entity_id,
+            "Can't multiply EntityCoordinates with different relative entities."
+        );
         Self::new(self.entity_id, self.position * rhs.position)
     }
 }
@@ -163,7 +185,11 @@ impl core::ops::Mul<i32> for EntityCoordinates {
 
 impl fmt::Display for EntityCoordinates {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EntId={}, X={:.2}, Y={:.2}", self.entity_id, self.position.x, self.position.y)
+        write!(
+            f,
+            "EntId={}, X={:.2}, Y={:.2}",
+            self.entity_id, self.position.x, self.position.y
+        )
     }
 }
 

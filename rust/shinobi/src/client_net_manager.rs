@@ -49,10 +49,6 @@ impl ClientNetManager {
         self.outbound_player_list_requests = 0;
     }
 
-    pub fn is_connected(&self) -> bool {
-        self.connected
-    }
-
     pub fn receive_state(&mut self, state: MsgState) {
         if self.connected {
             self.inbound_states.push_back(state);
@@ -69,18 +65,10 @@ impl ClientNetManager {
         }
     }
 
-    pub fn next_entity(&mut self) -> Option<MsgEntity> {
-        self.inbound_entities.pop_front()
-    }
-
     pub fn receive_player_list(&mut self, message: MsgPlayerList) {
         if self.connected {
             self.inbound_player_lists.push_back(message);
         }
-    }
-
-    pub fn next_player_list(&mut self) -> Option<MsgPlayerList> {
-        self.inbound_player_lists.pop_front()
     }
 
     pub fn take_inbound_batch(&mut self) -> ClientInboundBatch {
@@ -115,28 +103,12 @@ impl ClientNetManager {
         }
     }
 
-    pub fn take_acks(&mut self) -> Vec<MsgStateAck> {
-        std::mem::take(&mut self.outbound_acks)
-    }
-
-    pub fn take_inputs(&mut self) -> Vec<FullInputCmdMessage> {
-        std::mem::take(&mut self.outbound_inputs)
-    }
-
-    pub fn take_entities(&mut self) -> Vec<MsgEntity> {
-        std::mem::take(&mut self.outbound_entities)
-    }
-
-    pub fn take_player_list_requests(&mut self) -> usize {
-        std::mem::take(&mut self.outbound_player_list_requests)
-    }
-
     pub fn take_outbound_batch(&mut self) -> ClientOutboundBatch {
         ClientOutboundBatch {
-            acks: self.take_acks(),
-            inputs: self.take_inputs(),
-            entities: self.take_entities(),
-            player_list_requests: self.take_player_list_requests(),
+            acks: std::mem::take(&mut self.outbound_acks),
+            inputs: std::mem::take(&mut self.outbound_inputs),
+            entities: std::mem::take(&mut self.outbound_entities),
+            player_list_requests: std::mem::take(&mut self.outbound_player_list_requests),
         }
     }
 }
@@ -144,17 +116,22 @@ impl ClientNetManager {
 #[cfg(test)]
 mod tests {
     use super::ClientNetManager;
-    use daikoku::{BoundKeyState, EntityMessageType, FullInputCmdMessage, MsgEntity, MsgState, MsgStateAck};
+    use daikoku::{
+        BoundKeyState, EntityMessageType, FullInputCmdMessage, MsgEntity, MsgState, MsgStateAck,
+    };
     use jikan::GameTick;
     use keisan::Vector2;
-    use sekai::{EntityCoordinates, EntityUid, GameState, PlayerState, ScreenCoordinates, SessionStatus, WindowId};
+    use sekai::{
+        EntityCoordinates, EntityUid, GameState, PlayerState, ScreenCoordinates, SessionStatus,
+        WindowId,
+    };
 
     #[test]
     fn client_net_manager_buffers_state_inputs_and_acks() {
         let mut net = ClientNetManager::new();
         net.connect();
         net.request_player_list();
-        assert_eq!(net.take_player_list_requests(), 1);
+        assert_eq!(net.take_outbound_batch().player_list_requests, 1);
 
         net.receive_state(MsgState::new(GameState {
             from_sequence: GameTick::ZERO,
@@ -181,8 +158,9 @@ mod tests {
             EntityCoordinates::new(EntityUid::new(1), Vector2::ZERO),
             ScreenCoordinates::new_xy(1.0, 1.0, WindowId::MAIN),
         ));
-        assert_eq!(net.take_acks().len(), 1);
-        assert_eq!(net.take_inputs().len(), 1);
+        let outbound = net.take_outbound_batch();
+        assert_eq!(outbound.acks.len(), 1);
+        assert_eq!(outbound.inputs.len(), 1);
         net.receive_entity(MsgEntity {
             message_type: EntityMessageType::SystemMessage,
             system_message: Some("ping".to_string()),
@@ -192,7 +170,6 @@ mod tests {
             sequence: 5,
             source_tick: GameTick::FIRST,
         });
-        assert!(net.next_entity().is_some());
         net.receive_player_list(sekai::MsgPlayerList {
             plyrs: vec![PlayerState {
                 user_id: "u1".to_string(),
@@ -202,6 +179,8 @@ mod tests {
                 controlled_entity: None,
             }],
         });
-        assert_eq!(net.next_player_list().unwrap().plyrs.len(), 1);
+        let batch = net.take_inbound_batch();
+        assert_eq!(batch.entities.len(), 1);
+        assert_eq!(batch.player_lists[0].plyrs.len(), 1);
     }
 }

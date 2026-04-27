@@ -34,7 +34,11 @@ impl Fixture {
         self.shape.compute_aabb(transform)
     }
 
-    pub fn ray_cast(&self, transform: Transform, ray: CollisionRay) -> Option<(f32, keisan::Vector2)> {
+    pub fn ray_cast(
+        &self,
+        transform: Transform,
+        ray: CollisionRay,
+    ) -> Option<(f32, keisan::Vector2)> {
         self.shape.ray_cast(transform, ray.into())
     }
 
@@ -63,7 +67,10 @@ mod tests {
 
     #[test]
     fn fixture_tracks_shape_area() {
-        let fixture = Fixture::new("main", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -2.0, 1.0, 2.0), 0.0)));
+        let fixture = Fixture::new(
+            "main",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -2.0, 1.0, 2.0), 0.0)),
+        );
         assert_eq!(fixture.area(), 8.0);
     }
 }

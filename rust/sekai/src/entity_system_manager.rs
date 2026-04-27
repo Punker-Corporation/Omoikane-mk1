@@ -147,7 +147,8 @@ impl EntitySystemManager {
     ) where
         T: std::any::Any + Send + 'static,
     {
-        self.event_bus.raise_component_event(uid, component_name, event);
+        self.event_bus
+            .raise_component_event(uid, component_name, event);
     }
 
     pub fn queue_event<T>(&mut self, source: EventSource, event: T)
@@ -172,7 +173,10 @@ impl EntitySystemManager {
 #[cfg(test)]
 mod tests {
     use super::EntitySystemManager;
-    use crate::{EntityPausedEvent, EntitySystem, EntitySystemInfo, EntitySystemSubscriptions, EntityUid, EventSource};
+    use crate::{
+        EntityPausedEvent, EntitySystem, EntitySystemInfo, EntitySystemSubscriptions, EntityUid,
+        EventSource,
+    };
     use std::sync::{Arc, Mutex};
 
     struct FakeSystem {

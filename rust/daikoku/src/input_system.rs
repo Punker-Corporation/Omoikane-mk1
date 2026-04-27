@@ -43,7 +43,10 @@ pub struct PlayerCommandStates {
 
 impl PlayerCommandStates {
     pub fn get_state(&self, function: &BoundKeyFunction) -> BoundKeyState {
-        self.function_states.get(function).copied().unwrap_or(BoundKeyState::Up)
+        self.function_states
+            .get(function)
+            .copied()
+            .unwrap_or(BoundKeyState::Up)
     }
 
     pub fn set_state(&mut self, function: BoundKeyFunction, state: BoundKeyState) {
@@ -102,8 +105,6 @@ impl InputSystem {
         Self::default()
     }
 
-    pub fn initialize(&mut self) {}
-
     pub fn handle_player_connected(&mut self, user_id: impl Into<String>) {
         let user_id = user_id.into();
         self.player_inputs.entry(user_id.clone()).or_default();
@@ -148,15 +149,7 @@ impl InputSystem {
         true
     }
 
-    pub fn get_input_states(&self, user_id: &str) -> Option<&PlayerCommandStates> {
-        self.player_inputs.get(user_id)
-    }
-
-    pub fn get_last_input_command(&self, user_id: &str) -> Option<u32> {
-        self.last_processed_input_cmd.get(user_id).copied()
-    }
-
-    pub fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
+    fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
         if state != BoundKeyState::Down {
             return Vector2::ZERO;
         }
@@ -170,7 +163,7 @@ impl InputSystem {
         }
     }
 
-    pub fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
+    fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
         let mut velocity = Vector2::ZERO;
         if states.is_down(&"MoveUp".into()) {
             velocity.y += Self::MOVE_SPEED;
@@ -187,7 +180,7 @@ impl InputSystem {
         velocity
     }
 
-    pub fn desired_velocity_for(&self, user_id: &str) -> Option<Vector2> {
+    fn desired_velocity_for(&self, user_id: &str) -> Option<Vector2> {
         self.player_inputs.get(user_id).map(Self::desired_velocity)
     }
 
@@ -199,7 +192,10 @@ impl InputSystem {
         user_id: &str,
         message: &FullInputCmdMessage,
     ) -> bool {
-        let Some(controlled) = players.get_session(user_id).and_then(|session| session.controlled_entity) else {
+        let Some(controlled) = players
+            .get_session(user_id)
+            .and_then(|session| session.controlled_entity)
+        else {
             return false;
         };
 
@@ -218,7 +214,10 @@ impl InputSystem {
         physics: &crate::PhysicsSystem,
         user_id: &str,
     ) -> bool {
-        let Some(controlled) = players.get_session(user_id).and_then(|session| session.controlled_entity) else {
+        let Some(controlled) = players
+            .get_session(user_id)
+            .and_then(|session| session.controlled_entity)
+        else {
             return false;
         };
         let Some(velocity) = self.desired_velocity_for(user_id) else {
@@ -256,11 +255,14 @@ mod tests {
         );
 
         assert!(system.handle_input(&mut players, "u1", message));
-        assert_eq!(system.get_last_input_command("u1"), Some(9));
-        assert!(system
-            .get_input_states("u1")
-            .unwrap()
-            .is_down(&"MoveUp".into()));
+        assert_eq!(system.last_processed_input_cmd.get("u1").copied(), Some(9));
+        assert!(
+            system
+                .player_inputs
+                .get("u1")
+                .unwrap()
+                .is_down(&"MoveUp".into())
+        );
         assert_eq!(players.get_session("u1").unwrap().last_processed_input, 9);
     }
 
@@ -271,8 +273,10 @@ mod tests {
         assert!(players.set_attached_entity("u1", Some(EntityUid::new(7))));
 
         let mut entities = ServerEntityManager::new();
-        entities.alloc_entity(None, EntityUid::new(7));
-        entities.initialize_entity(EntityUid::new(7));
+        entities
+            .inner
+            .alloc_entity_external(EntityUid::new(7), None);
+        entities.inner.initialize_entity(EntityUid::new(7));
 
         let system = InputSystem::new();
         let mut transforms = TransformSystem::new();
@@ -286,8 +290,22 @@ mod tests {
             ScreenCoordinates::new_xy(10.0, 12.0, WindowId::MAIN),
         );
 
-        assert!(system.apply_movement_command(&mut entities, &players, &mut transforms, "u1", &message));
-        assert_eq!(entities.inner.transforms.get(&EntityUid::new(7)).unwrap().local_position, Vector2::new(1.0, 0.0));
+        assert!(system.apply_movement_command(
+            &mut entities,
+            &players,
+            &mut transforms,
+            "u1",
+            &message
+        ));
+        assert_eq!(
+            entities
+                .inner
+                .transforms
+                .get(&EntityUid::new(7))
+                .unwrap()
+                .local_position,
+            Vector2::new(1.0, 0.0)
+        );
     }
 
     #[test]
@@ -326,7 +344,10 @@ mod tests {
 
         assert_eq!(
             system.desired_velocity_for("u1"),
-            Some(Vector2::new(InputSystem::MOVE_SPEED, InputSystem::MOVE_SPEED))
+            Some(Vector2::new(
+                InputSystem::MOVE_SPEED,
+                InputSystem::MOVE_SPEED
+            ))
         );
     }
 }

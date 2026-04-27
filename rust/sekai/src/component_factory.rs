@@ -66,7 +66,11 @@ impl ComponentFactory {
         self.constructors.insert(name, Box::new(constructor));
     }
 
-    pub fn register_reference(&mut self, target: &str, reference: impl Into<String>) -> Result<(), UnknownComponentError> {
+    pub fn register_reference(
+        &mut self,
+        target: &str,
+        reference: impl Into<String>,
+    ) -> Result<(), UnknownComponentError> {
         let Some(registration) = self.names.get_mut(target) else {
             return Err(UnknownComponentError(format!("Unknown type: {target}")));
         };
@@ -81,9 +85,16 @@ impl ComponentFactory {
         self.ignored_component_names.insert(name.into());
     }
 
-    pub fn get_component_availability(&self, component_name: &str, ignore_case: bool) -> ComponentAvailability {
+    pub fn get_component_availability(
+        &self,
+        component_name: &str,
+        ignore_case: bool,
+    ) -> ComponentAvailability {
         let key = if ignore_case {
-            self.lower_case_names.get(&component_name.to_ascii_lowercase()).map(String::as_str).unwrap_or(component_name)
+            self.lower_case_names
+                .get(&component_name.to_ascii_lowercase())
+                .map(String::as_str)
+                .unwrap_or(component_name)
         } else {
             component_name
         };
@@ -96,7 +107,11 @@ impl ComponentFactory {
         }
     }
 
-    pub fn get_component(&self, component_name: &str, ignore_case: bool) -> Result<Component, UnknownComponentError> {
+    pub fn get_component(
+        &self,
+        component_name: &str,
+        ignore_case: bool,
+    ) -> Result<Component, UnknownComponentError> {
         let key = if ignore_case {
             self.lower_case_names
                 .get(&component_name.to_ascii_lowercase())
@@ -106,12 +121,18 @@ impl ComponentFactory {
             component_name
         };
         let Some(constructor) = self.constructors.get(key) else {
-            return Err(UnknownComponentError(format!("Unknown name: {component_name}")));
+            return Err(UnknownComponentError(format!(
+                "Unknown name: {component_name}"
+            )));
         };
         Ok(constructor())
     }
 
-    pub fn get_registration(&self, component_name: &str, ignore_case: bool) -> Result<&ComponentRegistration, UnknownComponentError> {
+    pub fn get_registration(
+        &self,
+        component_name: &str,
+        ignore_case: bool,
+    ) -> Result<&ComponentRegistration, UnknownComponentError> {
         let key = if ignore_case {
             self.lower_case_names
                 .get(&component_name.to_ascii_lowercase())
@@ -120,10 +141,16 @@ impl ComponentFactory {
         } else {
             component_name
         };
-        self.names.get(key).ok_or_else(|| UnknownComponentError(format!("Unknown name: {component_name}")))
+        self.names
+            .get(key)
+            .ok_or_else(|| UnknownComponentError(format!("Unknown name: {component_name}")))
     }
 
-    pub fn try_get_registration(&self, component_name: &str, ignore_case: bool) -> Option<&ComponentRegistration> {
+    pub fn try_get_registration(
+        &self,
+        component_name: &str,
+        ignore_case: bool,
+    ) -> Option<&ComponentRegistration> {
         self.get_registration(component_name, ignore_case).ok()
     }
 
@@ -155,10 +182,20 @@ mod tests {
     #[test]
     fn component_factory_registers_lookups_and_net_ids() {
         let mut factory = ComponentFactory::new();
-        factory.register("Transform", "TransformComponent", || Component::new("Transform"));
-        factory.register_reference("Transform", "ITransform").unwrap();
-        assert_eq!(factory.get_component_availability("transform", true), ComponentAvailability::Available);
-        assert_eq!(factory.get_component("Transform", false).unwrap().name, "Transform");
+        factory.register("Transform", "TransformComponent", || {
+            Component::new("Transform")
+        });
+        factory
+            .register_reference("Transform", "ITransform")
+            .unwrap();
+        assert_eq!(
+            factory.get_component_availability("transform", true),
+            ComponentAvailability::Available
+        );
+        assert_eq!(
+            factory.get_component("Transform", false).unwrap().name,
+            "Transform"
+        );
         factory.generate_net_ids(&["Transform"]);
         assert_eq!(factory.networked_components().unwrap()[0].net_id, Some(0));
     }

@@ -40,8 +40,6 @@ impl MapManager {
         Self::default()
     }
 
-    pub fn initialize(&mut self) {}
-
     pub fn set_current_tick(&mut self, current_tick: jikan::GameTick) {
         self.current_tick = current_tick;
     }
@@ -67,7 +65,10 @@ impl MapManager {
 
     pub fn create_map(&mut self, manager: &mut EntityManager, map_id: Option<MapId>) -> MapId {
         let actual_id = map_id.unwrap_or_else(|| self.next_map_id());
-        assert!(!self.map_exists(actual_id), "map already exists: {actual_id}");
+        assert!(
+            !self.map_exists(actual_id),
+            "map already exists: {actual_id}"
+        );
 
         if actual_id.raw() > self.highest_map_id.raw() {
             self.highest_map_id = actual_id;
@@ -83,7 +84,11 @@ impl MapManager {
         actual_id
     }
 
-    pub fn create_uninitialized_map(&mut self, manager: &mut EntityManager, map_id: Option<MapId>) -> MapId {
+    pub fn create_uninitialized_map(
+        &mut self,
+        manager: &mut EntityManager,
+        map_id: Option<MapId>,
+    ) -> MapId {
         let actual_id = self.create_map(manager, map_id);
         if actual_id != MapId::NULLSPACE {
             let _ = self.add_uninitialized_map(manager, actual_id);
@@ -125,20 +130,35 @@ impl MapManager {
         self.map_entities.contains_key(&map_id)
     }
 
-    pub fn create_new_map_entity(&mut self, manager: &mut EntityManager, map_id: MapId) -> EntityUid {
+    pub fn create_new_map_entity(
+        &mut self,
+        manager: &mut EntityManager,
+        map_id: MapId,
+    ) -> EntityUid {
         let entity = manager.create_entity_uninitialized_as_map(None, map_id);
         self.set_map_entity(manager, map_id, entity);
         entity
     }
 
-    pub fn set_map_entity(&mut self, manager: &mut EntityManager, map_id: MapId, new_map_entity_id: EntityUid) {
+    pub fn set_map_entity(
+        &mut self,
+        manager: &mut EntityManager,
+        map_id: MapId,
+        new_map_entity_id: EntityUid,
+    ) {
         assert!(self.map_exists(map_id), "map does not exist: {map_id}");
 
         let previous = self.map_entities.insert(map_id, new_map_entity_id);
         let map_grids = self
             .grids
             .values()
-            .filter_map(|uid| manager.map_grids.get(uid).filter(|grid| grid.parent_map_id == map_id).map(|_| *uid))
+            .filter_map(|uid| {
+                manager
+                    .map_grids
+                    .get(uid)
+                    .filter(|grid| grid.parent_map_id == map_id)
+                    .map(|_| *uid)
+            })
             .collect::<Vec<_>>();
 
         let _ = manager.materialize_map_entity(new_map_entity_id, map_id);
@@ -166,11 +186,13 @@ impl MapManager {
                 manager.queue_delete_entity(old);
             }
         }
-
     }
 
     pub fn get_map_entity_id(&self, map_id: MapId) -> EntityUid {
-        self.map_entities.get(&map_id).copied().unwrap_or(EntityUid::INVALID)
+        self.map_entities
+            .get(&map_id)
+            .copied()
+            .unwrap_or(EntityUid::INVALID)
     }
 
     pub fn get_map_entity_id_or_throw(&self, map_id: MapId) -> EntityUid {
@@ -213,10 +235,16 @@ impl MapManager {
         forced_grid_id: Option<GridId>,
         chunk_size: u16,
     ) -> GridId {
-        assert!(self.map_exists(current_map_id), "map does not exist: {current_map_id}");
+        assert!(
+            self.map_exists(current_map_id),
+            "map does not exist: {current_map_id}"
+        );
 
         let actual_id = forced_grid_id.unwrap_or_else(|| self.next_grid_id());
-        assert!(!self.grid_exists(actual_id), "grid already exists: {actual_id}");
+        assert!(
+            !self.grid_exists(actual_id),
+            "grid already exists: {actual_id}"
+        );
 
         if actual_id.raw() > self.highest_grid_id.raw() {
             self.highest_grid_id = actual_id;
@@ -240,11 +268,19 @@ impl MapManager {
         manager.map_grids.get(uid)
     }
 
-    pub fn try_get_grid<'a>(&self, manager: &'a EntityManager, grid_id: GridId) -> Option<&'a MapGrid> {
+    pub fn try_get_grid<'a>(
+        &self,
+        manager: &'a EntityManager,
+        grid_id: GridId,
+    ) -> Option<&'a MapGrid> {
         self.get_grid(manager, grid_id)
     }
 
-    pub fn try_get_grid_by_entity<'a>(&self, manager: &'a EntityManager, entity: EntityUid) -> Option<&'a MapGrid> {
+    pub fn try_get_grid_by_entity<'a>(
+        &self,
+        manager: &'a EntityManager,
+        entity: EntityUid,
+    ) -> Option<&'a MapGrid> {
         manager.map_grids.get(&entity)
     }
 
@@ -256,7 +292,11 @@ impl MapManager {
         manager.map_grids.contains_key(&entity)
     }
 
-    pub fn get_all_map_grids<'a>(&self, manager: &'a EntityManager, map_id: MapId) -> Vec<&'a MapGrid> {
+    pub fn get_all_map_grids<'a>(
+        &self,
+        manager: &'a EntityManager,
+        map_id: MapId,
+    ) -> Vec<&'a MapGrid> {
         self.grids
             .values()
             .filter_map(|uid| manager.map_grids.get(uid))
@@ -264,7 +304,12 @@ impl MapManager {
             .collect()
     }
 
-    pub fn try_find_grid_at<'a>(&self, manager: &'a EntityManager, map_id: MapId, world_pos: Vector2) -> Option<&'a MapGrid> {
+    pub fn try_find_grid_at<'a>(
+        &self,
+        manager: &'a EntityManager,
+        map_id: MapId,
+        world_pos: Vector2,
+    ) -> Option<&'a MapGrid> {
         let point = Box2::centered_around(world_pos, Vector2::ONE);
         self.find_grids_intersecting(manager, map_id, point, true)
             .into_iter()
@@ -305,8 +350,13 @@ impl MapManager {
                 continue;
             }
 
-            let chunk_hit = grid.get_map_chunks_intersecting(world_aabb).next().is_some();
-            if chunk_hit || (grid.chunk_count() == 0 && world_aabb.contains(grid.world_position, true)) {
+            let chunk_hit = grid
+                .get_map_chunks_intersecting(world_aabb)
+                .next()
+                .is_some();
+            if chunk_hit
+                || (grid.chunk_count() == 0 && world_aabb.contains(grid.world_position, true))
+            {
                 grids.push(grid);
             }
         }
@@ -343,7 +393,13 @@ impl MapManager {
         self.moved_grids.remove(&map_id);
     }
 
-    pub fn set_tile(&mut self, manager: &mut EntityManager, grid_id: GridId, indices: keisan::Vector2i, tile: crate::Tile) -> bool {
+    pub fn set_tile(
+        &mut self,
+        manager: &mut EntityManager,
+        grid_id: GridId,
+        indices: keisan::Vector2i,
+        tile: crate::Tile,
+    ) -> bool {
         let Some(grid_uid) = self.grids.get(&grid_id).copied() else {
             return false;
         };
@@ -376,7 +432,12 @@ impl MapManager {
         changed
     }
 
-    pub fn remove_chunk(&mut self, manager: &mut EntityManager, grid_id: GridId, chunk_index: keisan::Vector2i) -> bool {
+    pub fn remove_chunk(
+        &mut self,
+        manager: &mut EntityManager,
+        grid_id: GridId,
+        chunk_index: keisan::Vector2i,
+    ) -> bool {
         let Some(grid_uid) = self.grids.get(&grid_id).copied() else {
             return false;
         };
@@ -408,7 +469,11 @@ impl MapManager {
         chunks
     }
 
-    pub fn get_deleted_grids_since(&self, map_id: MapId, from_tick: jikan::GameTick) -> Vec<GridId> {
+    pub fn get_deleted_grids_since(
+        &self,
+        map_id: MapId,
+        from_tick: jikan::GameTick,
+    ) -> Vec<GridId> {
         self.deleted_grids
             .get(&map_id)
             .map(|history| {
@@ -456,10 +521,12 @@ impl MapManager {
                     continue;
                 }
             } else {
-                let moved_match = moved.contains(&grid.index) && visible_grids.contains(&grid.index);
+                let moved_match =
+                    moved.contains(&grid.index) && visible_grids.contains(&grid.index);
                 let newly_visible_match = newly_visible_grids.contains(&grid.index);
                 let changed_chunks = self.get_changed_chunks_since(grid.index, from_tick);
-                let chunk_changed_match = !changed_chunks.is_empty() && visible_grids.contains(&grid.index);
+                let chunk_changed_match =
+                    !changed_chunks.is_empty() && visible_grids.contains(&grid.index);
                 if !moved_match && !newly_visible_match && !chunk_changed_match {
                     continue;
                 }
@@ -566,11 +633,17 @@ impl MapManager {
             .push((self.current_tick, grid_id));
     }
 
-    fn note_chunk_changed(&mut self, grid_id: GridId, chunk_index: keisan::Vector2i, deleted: bool) {
-        self.changed_chunks
-            .entry(grid_id)
-            .or_default()
-            .push((self.current_tick, chunk_index, deleted));
+    fn note_chunk_changed(
+        &mut self,
+        grid_id: GridId,
+        chunk_index: keisan::Vector2i,
+        deleted: bool,
+    ) {
+        self.changed_chunks.entry(grid_id).or_default().push((
+            self.current_tick,
+            chunk_index,
+            deleted,
+        ));
     }
 
     fn ensure_nullspace_exists_and_clear(&mut self, manager: &mut EntityManager) {
@@ -615,8 +688,15 @@ mod tests {
         grid.set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
         assert!(maps.map_exists(map_id));
         assert!(maps.grid_exists(grid_id));
-        assert_eq!(maps.find_grids_intersecting(&entities, map_id, Box2::new(-1.0, -1.0, 1.0, 1.0), false).len(), 1);
-        assert!(maps.try_find_grid_at(&entities, map_id, Vector2::ZERO).is_some());
+        assert_eq!(
+            maps.find_grids_intersecting(&entities, map_id, Box2::new(-1.0, -1.0, 1.0, 1.0), false)
+                .len(),
+            1
+        );
+        assert!(
+            maps.try_find_grid_at(&entities, map_id, Vector2::ZERO)
+                .is_some()
+        );
     }
 
     #[test]
@@ -639,9 +719,15 @@ mod tests {
         let grid_id = maps.create_grid(&mut entities, map_id, None, 8);
         maps.set_current_tick(jikan::GameTick::new(6));
         maps.delete_grid(&mut entities, grid_id);
-        assert_eq!(maps.get_deleted_grids_since(map_id, jikan::GameTick::new(5)), vec![grid_id]);
+        assert_eq!(
+            maps.get_deleted_grids_since(map_id, jikan::GameTick::new(5)),
+            vec![grid_id]
+        );
         maps.cull_deleted_grid_history(jikan::GameTick::new(6));
-        assert!(maps.get_deleted_grids_since(map_id, jikan::GameTick::ZERO).is_empty());
+        assert!(
+            maps.get_deleted_grids_since(map_id, jikan::GameTick::ZERO)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -653,15 +739,29 @@ mod tests {
         let grid_id = maps.create_grid(&mut entities, map_id, None, 4);
 
         maps.set_current_tick(jikan::GameTick::new(2));
-        assert!(maps.set_tile(&mut entities, grid_id, Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0)));
-        assert_eq!(maps.get_changed_chunks_since(grid_id, jikan::GameTick::new(1)), vec![(Vector2i::new(0, 0), false)]);
+        assert!(maps.set_tile(
+            &mut entities,
+            grid_id,
+            Vector2i::new(0, 0),
+            Tile::new(1, TileRenderFlag(0), 0)
+        ));
+        assert_eq!(
+            maps.get_changed_chunks_since(grid_id, jikan::GameTick::new(1)),
+            vec![(Vector2i::new(0, 0), false)]
+        );
 
         maps.set_current_tick(jikan::GameTick::new(3));
         assert!(maps.remove_chunk(&mut entities, grid_id, Vector2i::new(0, 0)));
-        assert_eq!(maps.get_changed_chunks_since(grid_id, jikan::GameTick::new(2)), vec![(Vector2i::new(0, 0), true)]);
+        assert_eq!(
+            maps.get_changed_chunks_since(grid_id, jikan::GameTick::new(2)),
+            vec![(Vector2i::new(0, 0), true)]
+        );
 
         maps.cull_deleted_grid_history(jikan::GameTick::new(3));
-        assert!(maps.get_changed_chunks_since(grid_id, jikan::GameTick::ZERO).is_empty());
+        assert!(
+            maps.get_changed_chunks_since(grid_id, jikan::GameTick::ZERO)
+                .is_empty()
+        );
     }
 
     #[test]

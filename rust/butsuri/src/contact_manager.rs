@@ -43,14 +43,10 @@ impl ContactManager {
             return None;
         }
 
-        if self
-            .active_contacts
-            .iter()
-            .any(|contact| {
-                (contact.fixture_a == fixture_a_key && contact.fixture_b == fixture_b_key)
-                    || (contact.fixture_a == fixture_b_key && contact.fixture_b == fixture_a_key)
-            })
-        {
+        if self.active_contacts.iter().any(|contact| {
+            (contact.fixture_a == fixture_a_key && contact.fixture_b == fixture_b_key)
+                || (contact.fixture_a == fixture_b_key && contact.fixture_b == fixture_a_key)
+        }) {
             return None;
         }
 
@@ -60,7 +56,11 @@ impl ContactManager {
             _ => ContactType::Mixed,
         };
 
-        let mut contact = Contact::new(fixture_a_key.to_string(), fixture_b_key.to_string(), contact_type);
+        let mut contact = Contact::new(
+            fixture_a_key.to_string(),
+            fixture_b_key.to_string(),
+            contact_type,
+        );
         contact.reset_friction(fixture_a.friction, fixture_b.friction);
         contact.reset_restitution(fixture_a.restitution, fixture_b.restitution);
         self.active_contacts.push(contact);
@@ -97,8 +97,14 @@ mod tests {
 
     #[test]
     fn contact_manager_adds_updates_and_removes_contacts() {
-        let fixture_a = Fixture::new("a", PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)));
-        let fixture_b = Fixture::new("b", PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)));
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
         let mut manager = ContactManager::new();
         let index = manager.add_pair(&fixture_a, &fixture_b).unwrap();
         assert_eq!(manager.contact_count(), 1);
@@ -109,12 +115,20 @@ mod tests {
 
     #[test]
     fn contact_manager_can_track_duplicate_fixture_ids_with_distinct_keys() {
-        let fixture_a = Fixture::new("main", PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)));
-        let fixture_b = Fixture::new("main", PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)));
+        let fixture_a = Fixture::new(
+            "main",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "main",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
         let mut manager = ContactManager::new();
-        assert!(manager
-            .add_pair_with_keys("1:main", &fixture_a, "2:main", &fixture_b)
-            .is_some());
+        assert!(
+            manager
+                .add_pair_with_keys("1:main", &fixture_a, "2:main", &fixture_b)
+                .is_some()
+        );
         assert_eq!(manager.contact_count(), 1);
     }
 }

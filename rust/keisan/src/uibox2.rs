@@ -121,13 +121,22 @@ impl core::ops::Add<(f32, f32, f32, f32)> for UIBox2 {
     type Output = Self;
 
     fn add(self, rhs: (f32, f32, f32, f32)) -> Self::Output {
-        Self::new(self.left + rhs.0, self.top + rhs.1, self.right + rhs.2, self.bottom + rhs.3)
+        Self::new(
+            self.left + rhs.0,
+            self.top + rhs.1,
+            self.right + rhs.2,
+            self.bottom + rhs.3,
+        )
     }
 }
 
 impl fmt::Display for UIBox2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, {}, {})", self.left, self.top, self.right, self.bottom)
+        write!(
+            f,
+            "({}, {}, {}, {})",
+            self.left, self.top, self.right, self.bottom
+        )
     }
 }
 

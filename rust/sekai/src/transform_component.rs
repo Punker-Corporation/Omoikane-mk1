@@ -108,7 +108,14 @@ impl TransformComponent {
 
     pub fn coordinates(&self) -> EntityCoordinates {
         let valid = self.parent.is_valid();
-        EntityCoordinates::new(if valid { self.parent } else { self.base.owner }, if valid { self.local_position } else { Vector2::ZERO })
+        EntityCoordinates::new(
+            if valid { self.parent } else { self.base.owner },
+            if valid {
+                self.local_position
+            } else {
+                Vector2::ZERO
+            },
+        )
     }
 
     pub fn map_position<R: TransformResolver>(&self, resolver: &R) -> MapCoordinates {
@@ -179,12 +186,19 @@ impl TransformComponent {
         self.rebuild_matrices();
     }
 
-    pub fn get_world_position_rotation_matrix<R: TransformResolver>(&self, resolver: &R) -> (Vector2, Angle, Matrix3) {
+    pub fn get_world_position_rotation_matrix<R: TransformResolver>(
+        &self,
+        resolver: &R,
+    ) -> (Vector2, Angle, Matrix3) {
         if self.parent.is_valid() {
             if let Some(parent) = resolver.world_transform(self.parent) {
                 let matrix = self.local_matrix * parent.world_matrix;
                 let position = Vector2::new(matrix.r0c2, matrix.r1c2);
-                return (position, self.local_rotation + parent.world_rotation, matrix);
+                return (
+                    position,
+                    self.local_rotation + parent.world_rotation,
+                    matrix,
+                );
             }
         }
         (self.local_position, self.local_rotation, self.local_matrix)

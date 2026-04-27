@@ -35,7 +35,11 @@ impl Tile {
     }
 
     pub fn unpack(value: u32) -> Self {
-        Self::new((value >> 16) as u16, TileRenderFlag((value >> 8) as u8), value as u8)
+        Self::new(
+            (value >> 16) as u16,
+            TileRenderFlag((value >> 8) as u8),
+            value as u8,
+        )
     }
 }
 
@@ -53,7 +57,11 @@ impl From<u32> for Tile {
 
 impl fmt::Display for Tile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Tile {}, {}, {}", self.type_id, self.flags.0, self.variant)
+        write!(
+            f,
+            "Tile {}, {}, {}",
+            self.type_id, self.flags.0, self.variant
+        )
     }
 }
 

@@ -215,7 +215,9 @@ impl Color {
     }
 
     pub fn from_name(color_name: &str) -> Option<Self> {
-        default_colors().get(&color_name.to_ascii_lowercase()).copied()
+        default_colors()
+            .get(&color_name.to_ascii_lowercase())
+            .copied()
     }
 
     pub fn name(self) -> Option<&'static str> {
@@ -225,7 +227,11 @@ impl Color {
 
 impl fmt::Debug for Color {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{(R, G, B, A) = ({}, {}, {}, {})}}", self.r, self.g, self.b, self.a)
+        write!(
+            f,
+            "{{(R, G, B, A) = ({}, {}, {}, {})}}",
+            self.r, self.g, self.b, self.a
+        )
     }
 }
 

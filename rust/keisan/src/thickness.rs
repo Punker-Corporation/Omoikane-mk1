@@ -61,7 +61,12 @@ impl Thickness {
     pub fn deflate_box(self, box2: UIBox2) -> UIBox2 {
         let left = box2.left + self.left;
         let top = box2.top + self.top;
-        UIBox2::new(left, top, left.max(box2.right - self.right), top.max(box2.bottom - self.bottom))
+        UIBox2::new(
+            left,
+            top,
+            left.max(box2.right - self.right),
+            top.max(box2.bottom - self.bottom),
+        )
     }
 
     pub fn deflate_size(self, size: Vector2) -> Vector2 {
@@ -74,7 +79,11 @@ impl Thickness {
 
 impl fmt::Display for Thickness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{},{},{},{}", self.left, self.top, self.right, self.bottom)
+        write!(
+            f,
+            "{},{},{},{}",
+            self.left, self.top, self.right, self.bottom
+        )
     }
 }
 
@@ -88,6 +97,9 @@ mod tests {
         let t = Thickness::new(1.0, 2.0, 3.0, 4.0);
         let box2 = UIBox2::new(10.0, 10.0, 20.0, 20.0);
         assert_eq!(t.inflate_box(box2), UIBox2::new(9.0, 8.0, 23.0, 24.0));
-        assert_eq!(t.deflate_size(Vector2::new(10.0, 10.0)), Vector2::new(6.0, 4.0));
+        assert_eq!(
+            t.deflate_size(Vector2::new(10.0, 10.0)),
+            Vector2::new(6.0, 4.0)
+        );
     }
 }
