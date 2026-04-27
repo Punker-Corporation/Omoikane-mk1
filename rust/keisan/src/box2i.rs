@@ -118,19 +118,33 @@ impl Box2i {
 
 impl From<Box2> for Box2i {
     fn from(value: Box2) -> Self {
-        Self::new(value.left as i32, value.bottom as i32, value.right as i32, value.top as i32)
+        Self::new(
+            value.left as i32,
+            value.bottom as i32,
+            value.right as i32,
+            value.top as i32,
+        )
     }
 }
 
 impl From<Box2i> for Box2 {
     fn from(value: Box2i) -> Self {
-        Box2::new(value.left as f32, value.bottom as f32, value.right as f32, value.top as f32)
+        Box2::new(
+            value.left as f32,
+            value.bottom as f32,
+            value.right as f32,
+            value.top as f32,
+        )
     }
 }
 
 impl fmt::Display for Box2i {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, {}, {})", self.left, self.bottom, self.right, self.top)
+        write!(
+            f,
+            "({}, {}, {}, {})",
+            self.left, self.bottom, self.right, self.top
+        )
     }
 }
 

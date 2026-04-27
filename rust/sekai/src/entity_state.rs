@@ -31,7 +31,12 @@ pub struct ComponentChange {
 }
 
 impl ComponentChange {
-    pub fn new(net_id: u16, created: bool, deleted: bool, state: Option<ComponentStateValue>) -> Self {
+    pub fn new(
+        net_id: u16,
+        created: bool,
+        deleted: bool,
+        state: Option<ComponentStateValue>,
+    ) -> Self {
         Self {
             deleted,
             created,
@@ -69,7 +74,11 @@ impl fmt::Debug for ComponentChange {
             "{} {} {}",
             if self.deleted { "D" } else { "C" },
             self.net_id,
-            if self.state.is_some() { "SomeState" } else { "None" }
+            if self.state.is_some() {
+                "SomeState"
+            } else {
+                "None"
+            }
         )
     }
 }
@@ -81,7 +90,11 @@ impl fmt::Display for ComponentChange {
             "{} {} {}",
             if self.deleted { "D" } else { "C" },
             self.net_id,
-            if self.state.is_some() { "SomeState" } else { "None" }
+            if self.state.is_some() {
+                "SomeState"
+            } else {
+                "None"
+            }
         )
     }
 }
@@ -119,7 +132,7 @@ impl SerializedComponentChange {
 #[cfg(test)]
 mod tests {
     use super::{SerializedComponentChange, SerializedEntityState};
-    use crate::{serialization::SerializableComponentState, EntityUid};
+    use crate::{EntityUid, serialization::SerializableComponentState};
 
     #[test]
     fn serialized_entity_state_keeps_serialized_component_payloads() {

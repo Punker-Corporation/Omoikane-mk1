@@ -13,7 +13,13 @@ pub struct NetworkComponentMessage<C = (), S = (), M = ComponentMessage> {
 }
 
 impl<C, S, M> NetworkComponentMessage<C, S, M> {
-    pub fn new(channel: C, entity_uid: EntityUid, net_id: u32, message: M, session: Option<S>) -> Self {
+    pub fn new(
+        channel: C,
+        entity_uid: EntityUid,
+        net_id: u32,
+        message: M,
+        session: Option<S>,
+    ) -> Self {
         Self {
             channel,
             entity_uid,

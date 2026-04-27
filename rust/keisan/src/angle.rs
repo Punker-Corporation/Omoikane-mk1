@@ -224,7 +224,10 @@ mod tests {
     #[test]
     fn direction_mapping_matches_expected_octants() {
         assert_eq!(Angle::ZERO.get_dir(), Direction::South);
-        assert_eq!(Angle::from_world_vec(Vector2::new(0.0, -1.0)).get_dir(), Direction::South);
+        assert_eq!(
+            Angle::from_world_vec(Vector2::new(0.0, -1.0)).get_dir(),
+            Direction::South
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::MapId;
-use keisan::Vector2;
 use core::fmt;
+use keisan::Vector2;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -49,7 +49,11 @@ impl MapCoordinates {
 
 impl fmt::Display for MapCoordinates {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Map={}, X={:.2}, Y={:.2}", self.map_id, self.position.x, self.position.y)
+        write!(
+            f,
+            "Map={}, X={:.2}, Y={:.2}",
+            self.map_id, self.position.x, self.position.y
+        )
     }
 }
 

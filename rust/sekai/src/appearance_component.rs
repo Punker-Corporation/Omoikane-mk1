@@ -186,7 +186,10 @@ mod tests {
         component.set_data("name", "omoikane");
         assert!(component.appearance_dirty);
         assert_eq!(component.get_data::<u32>("state"), Some(5));
-        assert_eq!(component.get_data::<String>("name").as_deref(), Some("omoikane"));
+        assert_eq!(
+            component.get_data::<String>("name").as_deref(),
+            Some("omoikane")
+        );
         component.clear_dirty();
         component.set_data("state", 5u32);
         assert!(!component.appearance_dirty);

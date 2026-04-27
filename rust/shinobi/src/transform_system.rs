@@ -2,7 +2,7 @@ use keisan::{Angle, Vector2};
 use sekai::EntityUid;
 use std::collections::HashMap;
 
-use crate::{client_entity_manager::PendingTransformLerp, ClientEntityManager};
+use crate::{ClientEntityManager, client_entity_manager::PendingTransformLerp};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransformLerp {
@@ -34,30 +34,6 @@ impl Default for TransformSystem {
 impl TransformSystem {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn note_transform_state(
-        &mut self,
-        entities: &ClientEntityManager,
-        uid: EntityUid,
-        destination: Vector2,
-        destination_angle: Angle,
-        parent: EntityUid,
-    ) {
-        let Some(transform) = entities.inner.transforms.get(&uid) else {
-            return;
-        };
-        self.queue_snapshot_lerp(
-            uid,
-            transform.local_position,
-            destination,
-            transform.local_rotation,
-            destination_angle,
-            transform.parent,
-            parent,
-            transform.anchored,
-            false,
-        );
     }
 
     pub fn queue_snapshot_lerp(
@@ -125,13 +101,13 @@ impl TransformSystem {
             let Some(transform) = entities.inner.transforms.get(uid) else {
                 finished.push(*uid);
                 continue;
-            };            
+            };
             if transform.parent != lerp.parent {
                 finished.push(*uid);
                 continue;
             }
             lerp.progress = (lerp.progress + step).clamp(0.0, 1.0);
-            let _ = entities.set_local_transform(
+            let _ = entities.inner.set_local_transform_immediate(
                 *uid,
                 Vector2::lerp(lerp.source, lerp.destination, lerp.progress),
                 Angle::lerp(lerp.source_angle, lerp.destination_angle, lerp.progress),
@@ -144,13 +120,12 @@ impl TransformSystem {
             self.lerps.remove(&uid);
         }
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::TransformSystem;
-    use crate::{client_entity_manager::PendingTransformLerp, ClientEntityManager};
+    use crate::{ClientEntityManager, client_entity_manager::PendingTransformLerp};
     use butsuri::{AabbShape, Fixture, PhysShape};
     use keisan::{Angle, Box2, Vector2};
     use sekai::{EntityUid, MapId};
@@ -159,20 +134,48 @@ mod tests {
     fn transform_system_lerps_known_transforms() {
         let mut entities = ClientEntityManager::new();
         let uid = entities.create_entity(None, EntityUid::new(9));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         let mut system = TransformSystem::new();
-        system.note_transform_state(&entities, uid, Vector2::new(1.0, 0.0), Angle::ZERO, EntityUid::INVALID);
+        system.queue_snapshot_lerp(
+            uid,
+            Vector2::ZERO,
+            Vector2::new(1.0, 0.0),
+            Angle::ZERO,
+            Angle::ZERO,
+            EntityUid::INVALID,
+            EntityUid::INVALID,
+            false,
+            false,
+        );
         system.frame_update(&mut entities, 0.5);
-        assert_eq!(entities.inner.transforms.get(&uid).unwrap().local_position.x, 0.5);
+        assert_eq!(
+            entities
+                .inner
+                .transforms
+                .get(&uid)
+                .unwrap()
+                .local_position
+                .x,
+            0.5
+        );
         system.frame_update(&mut entities, 0.5);
-        assert_eq!(entities.inner.transforms.get(&uid).unwrap().local_position.x, 1.0);
+        assert_eq!(
+            entities
+                .inner
+                .transforms
+                .get(&uid)
+                .unwrap()
+                .local_position
+                .x,
+            1.0
+        );
     }
 
     #[test]
     fn transform_system_skips_lerps_for_anchored_transitions() {
         let mut entities = ClientEntityManager::new();
         let uid = entities.create_entity(None, EntityUid::new(10));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         let mut system = TransformSystem::new();
         system.queue_snapshot_lerp(
             uid,
@@ -186,7 +189,10 @@ mod tests {
             true,
         );
         system.frame_update(&mut entities, 0.5);
-        assert_eq!(entities.inner.transforms.get(&uid).unwrap().local_position, Vector2::ZERO);
+        assert_eq!(
+            entities.inner.transforms.get(&uid).unwrap().local_position,
+            Vector2::ZERO
+        );
     }
 
     #[test]
@@ -194,8 +200,8 @@ mod tests {
         let mut entities = ClientEntityManager::new();
         let first = entities.create_entity(None, EntityUid::new(90));
         let second = entities.create_entity(None, EntityUid::new(91));
-        entities.initialize_entity(first);
-        entities.initialize_entity(second);
+        entities.inner.initialize_entity(first);
+        entities.inner.initialize_entity(second);
 
         let mut system = TransformSystem::new();
         system.queue_pending_snapshot_lerps(
@@ -225,9 +231,22 @@ mod tests {
         );
 
         system.frame_update(&mut entities, 1.0);
-        assert_eq!(entities.inner.transforms.get(&first).unwrap().local_position, Vector2::ZERO);
         assert_eq!(
-            entities.inner.transforms.get(&second).unwrap().local_position,
+            entities
+                .inner
+                .transforms
+                .get(&first)
+                .unwrap()
+                .local_position,
+            Vector2::ZERO
+        );
+        assert_eq!(
+            entities
+                .inner
+                .transforms
+                .get(&second)
+                .unwrap()
+                .local_position,
             Vector2::new(1.5, 0.0)
         );
     }
@@ -243,7 +262,7 @@ mod tests {
         entities.inner.ensure_physics_map(map_owner);
 
         let uid = entities.create_entity(None, EntityUid::new(11));
-        entities.initialize_entity(uid);
+        entities.inner.initialize_entity(uid);
         let _ = entities.inner.apply_transform_state(
             uid,
             sekai::TransformComponentState {
@@ -267,14 +286,28 @@ mod tests {
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
         );
-        entities.sync_map_physics_runtime(MapId::new(3));
+        entities
+            .inner
+            .refresh_map_physics_runtime_many([MapId::new(3)]);
 
         let mut system = TransformSystem::new();
-        system.note_transform_state(&entities, uid, Vector2::new(1.0, 0.0), Angle::ZERO, EntityUid::INVALID);
+        system.queue_snapshot_lerp(
+            uid,
+            Vector2::ZERO,
+            Vector2::new(1.0, 0.0),
+            Angle::ZERO,
+            Angle::ZERO,
+            EntityUid::INVALID,
+            EntityUid::INVALID,
+            false,
+            false,
+        );
         system.frame_update(&mut entities, 1.0);
 
         assert_eq!(
-            entities.inner.query_aabb_entities(map_owner, Box2::new(0.25, -1.0, 2.0, 1.0)),
+            entities
+                .inner
+                .query_aabb_entities(map_owner, Box2::new(0.25, -1.0, 2.0, 1.0)),
             vec![uid]
         );
     }

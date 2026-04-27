@@ -90,7 +90,9 @@ mod tests {
         lookup.add_or_update(EntityUid::new(1), Box2::new(0.0, 0.0, 1.0, 1.0));
         let state = lookup.get_component_state();
         let mut restored = EntityLookupComponent::new();
-        restored.handle_component_state(EntityLookupComponentState { entries: state.entries });
+        restored.handle_component_state(EntityLookupComponentState {
+            entries: state.entries,
+        });
         assert_eq!(restored.entities.len(), 1);
         assert!(restored.entities.contains_key(&EntityUid::new(1)));
     }

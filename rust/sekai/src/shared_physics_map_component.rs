@@ -78,6 +78,8 @@ impl SharedPhysicsMapComponent {
         self.awake_bodies.remove(&body);
         self.queued_wake.remove(&body);
         self.queued_sleep.remove(&body);
+        self.queued_collision_changes
+            .retain(|(queued_body, _)| *queued_body != body);
     }
 
     pub fn replace_contacts(&mut self, contacts: ContactManager) {
@@ -98,7 +100,8 @@ impl SharedPhysicsMapComponent {
 
     pub fn queue_contact_event(&mut self, status: ContactStatus, contact: Contact) {
         if status != ContactStatus::NoContact {
-            self.contact_events.push_back(PhysicsContactEvent { status, contact });
+            self.contact_events
+                .push_back(PhysicsContactEvent { status, contact });
         }
     }
 
@@ -115,10 +118,12 @@ impl SharedPhysicsMapComponent {
     }
 
     pub fn add_awake_body(&mut self, body: EntityUid) {
+        self.queued_sleep.remove(&body);
         self.queued_wake.insert(body);
     }
 
     pub fn remove_sleep_body(&mut self, body: EntityUid) {
+        self.queued_wake.remove(&body);
         self.queued_sleep.insert(body);
     }
 
@@ -190,7 +195,10 @@ impl Default for SharedPhysicsMapComponent {
 
 #[cfg(test)]
 mod tests {
-    use super::{PhysicsContactEvent, PhysicsRuntimeEvent, SharedPhysicsMapComponent, SharedPhysicsMapComponentState};
+    use super::{
+        PhysicsContactEvent, PhysicsRuntimeEvent, SharedPhysicsMapComponent,
+        SharedPhysicsMapComponentState,
+    };
     use crate::EntityUid;
     use butsuri::{Contact, ContactStatus, ContactType};
     use keisan::Vector2;
@@ -207,6 +215,36 @@ mod tests {
         assert_eq!(map.contact_count(), 0);
         map.queue_deferred_update(body);
         assert_eq!(map.process_queue(), vec![body]);
+    }
+
+    #[test]
+    fn physics_map_component_uses_latest_awake_intent() {
+        let mut map = SharedPhysicsMapComponent::new();
+        let body = EntityUid::new(9);
+        map.add_body(body, false);
+
+        map.remove_sleep_body(body);
+        map.add_awake_body(body);
+        map.process_changes();
+        assert!(map.awake_bodies.contains(&body));
+
+        map.add_awake_body(body);
+        map.remove_sleep_body(body);
+        map.process_changes();
+        assert!(!map.awake_bodies.contains(&body));
+    }
+
+    #[test]
+    fn physics_map_component_removes_pending_collision_changes_for_removed_body() {
+        let mut map = SharedPhysicsMapComponent::new();
+        let body = EntityUid::new(9);
+        map.add_body(body, true);
+        map.queue_collision_change(body, true);
+        map.remove_body(body);
+
+        map.process_changes();
+        assert!(!map.bodies.contains(&body));
+        assert!(!map.awake_bodies.contains(&body));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::FullInputCmdMessage;
 use jikan::GameTick;
 use sekai::{EntityUid, GameState, MsgPlayerList};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryMethod {
@@ -26,8 +26,13 @@ impl MsgState {
     pub const RELIABLE_THRESHOLD: usize = 1300;
 
     pub fn new(state: GameState) -> Self {
-        let payload_size = bincode::serialize(&state).map(|bytes| bytes.len()).unwrap_or(0);
-        Self { state, payload_size }
+        let payload_size = bincode::serialize(&state)
+            .map(|bytes| bytes.len())
+            .unwrap_or(0);
+        Self {
+            state,
+            payload_size,
+        }
     }
 
     pub fn should_send_reliably(&self) -> bool {
@@ -66,15 +71,9 @@ pub enum OutboundMessage {
     PlayerList(MsgPlayerList),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ServerChannel {
-    pub user_id: String,
-    pub connected: bool,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ServerNetManager {
-    channels: HashMap<String, ServerChannel>,
+    channels: HashSet<String>,
     outbox: HashMap<String, Vec<OutboundMessage>>,
     inbound_inputs: HashMap<String, Vec<FullInputCmdMessage>>,
     inbound_entities: HashMap<String, Vec<MsgEntity>>,
@@ -93,18 +92,10 @@ impl ServerNetManager {
         Self::default()
     }
 
-    pub fn initialize(&mut self) {}
-
     pub fn connect(&mut self, user_id: impl Into<String>) -> bool {
         let user_id = user_id.into();
-        let newly_connected = !self.channels.contains_key(&user_id);
-        self.channels.insert(
-            user_id.clone(),
-            ServerChannel {
-                user_id: user_id.clone(),
-                connected: true,
-            },
-        );
+        let newly_connected = !self.channels.contains(&user_id);
+        self.channels.insert(user_id.clone());
         self.outbox.entry(user_id.clone()).or_default();
         self.inbound_inputs.entry(user_id.clone()).or_default();
         self.inbound_entities.entry(user_id.clone()).or_default();
@@ -122,8 +113,8 @@ impl ServerNetManager {
         self.inbound_player_list_requests.remove(user_id);
     }
 
-    pub fn is_connected(&self, user_id: &str) -> bool {
-        self.channels.get(user_id).map(|channel| channel.connected).unwrap_or(false)
+    fn is_connected(&self, user_id: &str) -> bool {
+        self.channels.contains(user_id)
     }
 
     pub fn send_state(&mut self, user_id: &str, state: GameState) -> bool {
@@ -148,13 +139,6 @@ impl ServerNetManager {
         true
     }
 
-    pub fn broadcast_entity(&mut self, message: MsgEntity) {
-        let targets: Vec<_> = self.channels.keys().cloned().collect();
-        for user_id in targets {
-            let _ = self.send_entity(&user_id, message.clone());
-        }
-    }
-
     pub fn take_outbox(&mut self, user_id: &str) -> Vec<OutboundMessage> {
         self.outbox.remove(user_id).unwrap_or_default()
     }
@@ -170,10 +154,6 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_input(&mut self, user_id: &str) -> Vec<FullInputCmdMessage> {
-        self.inbound_inputs.remove(user_id).unwrap_or_default()
-    }
-
     pub fn queue_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
         if !self.is_connected(user_id) {
             return false;
@@ -183,10 +163,6 @@ impl ServerNetManager {
             .or_default()
             .push(message);
         true
-    }
-
-    pub fn take_entities(&mut self, user_id: &str) -> Vec<MsgEntity> {
-        self.inbound_entities.remove(user_id).unwrap_or_default()
     }
 
     pub fn queue_player_list_request(&mut self, user_id: &str) -> bool {
@@ -200,15 +176,14 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_player_list_requests(&mut self, user_id: &str) -> usize {
-        self.inbound_player_list_requests.remove(user_id).unwrap_or_default()
-    }
-
     pub fn take_session_inbound(&mut self, user_id: &str) -> SessionInboundBatch {
         SessionInboundBatch {
-            player_list_requests: self.take_player_list_requests(user_id),
-            inputs: self.take_input(user_id),
-            entities: self.take_entities(user_id),
+            player_list_requests: self
+                .inbound_player_list_requests
+                .remove(user_id)
+                .unwrap_or_default(),
+            inputs: self.inbound_inputs.remove(user_id).unwrap_or_default(),
+            entities: self.inbound_entities.remove(user_id).unwrap_or_default(),
         }
     }
 
@@ -231,7 +206,10 @@ mod tests {
     use jikan::GameTick;
     use keisan::Vector2;
     use sekai::GameState;
-    use sekai::{EntityCoordinates, EntityUid, MsgPlayerList, PlayerState, ScreenCoordinates, SessionStatus, WindowId};
+    use sekai::{
+        EntityCoordinates, EntityUid, MsgPlayerList, PlayerState, ScreenCoordinates, SessionStatus,
+        WindowId,
+    };
 
     #[test]
     fn net_manager_tracks_connections_and_outbound_messages() {
@@ -264,7 +242,10 @@ mod tests {
         let outbox = net.take_outbox("u1");
         assert_eq!(outbox.len(), 2);
         if let super::OutboundMessage::State(message) = &outbox[0] {
-            assert_eq!(message.delivery_method(), MsgState::new(message.state.clone()).delivery_method());
+            assert_eq!(
+                message.delivery_method(),
+                MsgState::new(message.state.clone()).delivery_method()
+            );
         }
 
         assert!(net.queue_input(
@@ -279,7 +260,6 @@ mod tests {
                 ScreenCoordinates::new_xy(1.0, 1.0, WindowId::MAIN),
             ),
         ));
-        assert_eq!(net.take_input("u1").len(), 1);
         assert!(net.queue_entity(
             "u1",
             MsgEntity {
@@ -292,9 +272,11 @@ mod tests {
                 source_tick: GameTick::FIRST,
             },
         ));
-        assert_eq!(net.take_entities("u1").len(), 1);
         assert!(net.queue_player_list_request("u1"));
-        assert_eq!(net.take_player_list_requests("u1"), 1);
+        let inbound = net.take_session_inbound("u1");
+        assert_eq!(inbound.inputs.len(), 1);
+        assert_eq!(inbound.entities.len(), 1);
+        assert_eq!(inbound.player_list_requests, 1);
         assert!(net.send_player_list(
             "u1",
             MsgPlayerList {
@@ -307,6 +289,9 @@ mod tests {
                 }],
             },
         ));
-        assert!(matches!(net.take_outbox("u1").pop().unwrap(), OutboundMessage::PlayerList(_)));
+        assert!(matches!(
+            net.take_outbox("u1").pop().unwrap(),
+            OutboundMessage::PlayerList(_)
+        ));
     }
 }

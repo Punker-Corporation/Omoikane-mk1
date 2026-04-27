@@ -18,4 +18,3 @@ impl Default for IgnorePauseComponent {
         Self::new()
     }
 }
-

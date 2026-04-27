@@ -107,7 +107,9 @@ mod tests {
             "main",
             PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
         ));
-        let bounds = component.compute_aabb(Transform::new(Vector2::new(5.0, 2.0), 0.0)).unwrap();
+        let bounds = component
+            .compute_aabb(Transform::new(Vector2::new(5.0, 2.0), 0.0))
+            .unwrap();
         assert_eq!(bounds, Box2::new(4.0, 1.0, 6.0, 3.0));
     }
 

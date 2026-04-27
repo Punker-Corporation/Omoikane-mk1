@@ -1,4 +1,7 @@
-use crate::{BodyStatus, Component, FixturesComponent, PhysicsComponentState, TransformComponent, TransformResolver};
+use crate::{
+    BodyStatus, Component, FixturesComponent, PhysicsComponentState, TransformComponent,
+    TransformResolver,
+};
 use butsuri::{BodyType, Transform as PhysicsTransform};
 use keisan::{ApproxEq, Box2, Vector2};
 
@@ -121,7 +124,10 @@ impl PhysicsComponent {
             self.set_awake(true);
         }
 
-        if self.linear_velocity.approx_eq_with_tolerance(velocity, 0.0001) {
+        if self
+            .linear_velocity
+            .approx_eq_with_tolerance(velocity, 0.0001)
+        {
             return;
         }
 
@@ -267,7 +273,10 @@ impl Default for PhysicsComponent {
 #[cfg(test)]
 mod tests {
     use super::PhysicsComponent;
-    use crate::{BodyStatus, EntityUid, FixturesComponent, GridId, MapId, PhysicsComponentState, TransformComponent, TransformResolver, WorldTransform};
+    use crate::{
+        BodyStatus, EntityUid, FixturesComponent, GridId, MapId, PhysicsComponentState,
+        TransformComponent, TransformResolver, WorldTransform,
+    };
     use butsuri::{AabbShape, BodyType, Fixture, PhysShape};
     use keisan::{Angle, Box2, Matrix3, Vector2};
 

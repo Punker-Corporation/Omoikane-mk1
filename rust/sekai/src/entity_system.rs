@@ -27,7 +27,11 @@ pub struct EntitySystemSubscriptions<'a> {
 }
 
 impl<'a> EntitySystemSubscriptions<'a> {
-    pub fn new(bus: &'a mut EntityEventBus, subscriber: impl Into<String>, order_key: impl Into<String>) -> Self {
+    pub fn new(
+        bus: &'a mut EntityEventBus,
+        subscriber: impl Into<String>,
+        order_key: impl Into<String>,
+    ) -> Self {
         Self {
             bus,
             subscriber: subscriber.into(),

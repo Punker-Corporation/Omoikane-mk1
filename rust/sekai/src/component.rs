@@ -1,5 +1,5 @@
-use crate::{ComponentMessage, ComponentStateValue, EntityUid};
 use crate::component_event_args::IComponent;
+use crate::{ComponentMessage, ComponentStateValue, EntityUid};
 use jikan::GameTick;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

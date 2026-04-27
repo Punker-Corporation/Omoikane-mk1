@@ -40,6 +40,9 @@ pub struct EntitySessionMessage<S, T> {
 
 impl<S, T> EntitySessionMessage<S, T> {
     pub fn new(event_args: EntitySessionEventArgs<S>, message: T) -> Self {
-        Self { event_args, message }
+        Self {
+            event_args,
+            message,
+        }
     }
 }

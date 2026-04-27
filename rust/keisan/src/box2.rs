@@ -86,7 +86,12 @@ impl Box2 {
     }
 
     pub fn enlarged(self, size: f32) -> Self {
-        Self::new(self.left - size, self.bottom - size, self.right + size, self.top + size)
+        Self::new(
+            self.left - size,
+            self.bottom - size,
+            self.right + size,
+            self.top + size,
+        )
     }
 
     pub fn intersect(self, other: Self) -> Self {
@@ -219,13 +224,21 @@ impl ApproxEq for Box2 {
 
 impl fmt::Debug for Box2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, {}, {})", self.left, self.bottom, self.right, self.top)
+        write!(
+            f,
+            "({}, {}, {}, {})",
+            self.left, self.bottom, self.right, self.top
+        )
     }
 }
 
 impl fmt::Display for Box2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {}, {}, {})", self.left, self.bottom, self.right, self.top)
+        write!(
+            f,
+            "({}, {}, {}, {})",
+            self.left, self.bottom, self.right, self.top
+        )
     }
 }
 
@@ -241,6 +254,9 @@ mod tests {
         assert!(a.intersects(b));
         assert_eq!(a.intersect(b), Box2::new(5.0, 5.0, 10.0, 10.0));
         assert_eq!(a.union(b), Box2::new(0.0, 0.0, 15.0, 15.0));
-        assert_eq!(a.closest_point(Vector2::new(20.0, -3.0)), Vector2::new(10.0, 0.0));
+        assert_eq!(
+            a.closest_point(Vector2::new(20.0, -3.0)),
+            Vector2::new(10.0, 0.0)
+        );
     }
 }

@@ -12,7 +12,10 @@ impl Ray {
             MathHelper::close_to_percent(direction.length_squared(), 1.0, 0.00001),
             "ray direction must be normalized"
         );
-        Self { position, direction }
+        Self {
+            position,
+            direction,
+        }
     }
 
     pub fn intersects(self, box2: Box2) -> Option<(f32, Vector2)> {
@@ -21,7 +24,9 @@ impl Ray {
         const EPSILON: f32 = 1.0E-07;
 
         if self.direction.x.abs() < EPSILON {
-            if self.position.x < self.direction_min_x(box2) || self.position.x > self.direction_max_x(box2) {
+            if self.position.x < self.direction_min_x(box2)
+                || self.position.x > self.direction_max_x(box2)
+            {
                 return None;
             }
         } else {
@@ -39,7 +44,9 @@ impl Ray {
         }
 
         if self.direction.y.abs() < EPSILON {
-            if self.position.y < self.direction_min_y(box2) || self.position.y > self.direction_max_y(box2) {
+            if self.position.y < self.direction_min_y(box2)
+                || self.position.y > self.direction_max_y(box2)
+            {
                 return None;
             }
         } else {

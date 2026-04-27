@@ -22,7 +22,9 @@ pub struct Broadphase {
 
 impl Broadphase {
     pub fn new() -> Self {
-        Self { fixtures: Vec::new() }
+        Self {
+            fixtures: Vec::new(),
+        }
     }
 
     pub fn insert(&mut self, owner_id: i32, fixture: Fixture, transform: Transform) -> usize {
@@ -52,7 +54,12 @@ impl Broadphase {
             .collect()
     }
 
-    pub fn query_ray(&self, ray: CollisionRay, max_length: f32, return_on_first_hit: bool) -> Vec<RayCastHit<BroadphaseHit>> {
+    pub fn query_ray(
+        &self,
+        ray: CollisionRay,
+        max_length: f32,
+        return_on_first_hit: bool,
+    ) -> Vec<RayCastHit<BroadphaseHit>> {
         let mut results = Vec::new();
         for (index, entry) in self.fixtures.iter().enumerate() {
             if !Self::ray_can_hit_fixture(ray, &entry.fixture) {
@@ -75,7 +82,11 @@ impl Broadphase {
                 }
             }
         }
-        results.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(core::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(core::cmp::Ordering::Equal)
+        });
         if return_on_first_hit && results.len() > 1 {
             results.truncate(1);
         }
@@ -116,11 +127,21 @@ mod tests {
         let mut broadphase = Broadphase::new();
         broadphase.insert(
             44,
-            Fixture::new("wall", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))),
+            Fixture::new(
+                "wall",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
             Transform::new(Vector2::new(5.0, 0.0), 0.0),
         );
-        assert_eq!(broadphase.query_aabb(Box2::new(3.0, -2.0, 6.0, 2.0)).len(), 1);
-        let hits = broadphase.query_ray(CollisionRay::new(Vector2::ZERO, Vector2::UNIT_X, -1), 10.0, true);
+        assert_eq!(
+            broadphase.query_aabb(Box2::new(3.0, -2.0, 6.0, 2.0)).len(),
+            1
+        );
+        let hits = broadphase.query_ray(
+            CollisionRay::new(Vector2::ZERO, Vector2::UNIT_X, -1),
+            10.0,
+            true,
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].hit.owner_id, 44);
     }
@@ -128,15 +149,25 @@ mod tests {
     #[test]
     fn broadphase_query_ray_respects_collision_masks() {
         let mut broadphase = Broadphase::new();
-        let mut first = Fixture::new("wall", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)));
+        let mut first = Fixture::new(
+            "wall",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        );
         first.collision_layer = 1 << 0;
         broadphase.insert(44, first, Transform::new(Vector2::new(5.0, 0.0), 0.0));
 
-        let mut second = Fixture::new("door", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)));
+        let mut second = Fixture::new(
+            "door",
+            PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+        );
         second.collision_layer = 1 << 1;
         broadphase.insert(55, second, Transform::new(Vector2::new(8.0, 0.0), 0.0));
 
-        let hits = broadphase.query_ray(CollisionRay::new(Vector2::ZERO, Vector2::UNIT_X, 1 << 1), 10.0, false);
+        let hits = broadphase.query_ray(
+            CollisionRay::new(Vector2::ZERO, Vector2::UNIT_X, 1 << 1),
+            10.0,
+            false,
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].hit.owner_id, 55);
     }
@@ -146,16 +177,26 @@ mod tests {
         let mut broadphase = Broadphase::new();
         broadphase.insert(
             44,
-            Fixture::new("far", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))),
+            Fixture::new(
+                "far",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
             Transform::new(Vector2::new(8.0, 0.0), 0.0),
         );
         broadphase.insert(
             55,
-            Fixture::new("near", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))),
+            Fixture::new(
+                "near",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
             Transform::new(Vector2::new(5.0, 0.0), 0.0),
         );
 
-        let hits = broadphase.query_ray(CollisionRay::new(Vector2::ZERO, Vector2::UNIT_X, -1), 10.0, true);
+        let hits = broadphase.query_ray(
+            CollisionRay::new(Vector2::ZERO, Vector2::UNIT_X, -1),
+            10.0,
+            true,
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].hit.owner_id, 55);
     }
@@ -165,7 +206,10 @@ mod tests {
         let mut broadphase = Broadphase::new();
         broadphase.insert(
             44,
-            Fixture::new("circle", PhysShape::Circle(crate::CircleShape::new(Vector2::ZERO, 1.0))),
+            Fixture::new(
+                "circle",
+                PhysShape::Circle(crate::CircleShape::new(Vector2::ZERO, 1.0)),
+            ),
             Transform::new(Vector2::ZERO, 0.0),
         );
 
@@ -182,7 +226,10 @@ mod tests {
         let mut broadphase = Broadphase::new();
         broadphase.insert(
             77,
-            Fixture::new("wall", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))),
+            Fixture::new(
+                "wall",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
             Transform::new(Vector2::new(5.0, 0.0), 0.0),
         );
         let snapshot = broadphase.snapshot();
@@ -194,7 +241,10 @@ mod tests {
             snapshot[0],
             BroadphaseEntry {
                 owner_id: 77,
-                fixture: Fixture::new("wall", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))),
+                fixture: Fixture::new(
+                    "wall",
+                    PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))
+                ),
                 transform: Transform::new(Vector2::new(5.0, 0.0), 0.0),
             }
         );

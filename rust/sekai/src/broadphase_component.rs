@@ -55,12 +55,21 @@ mod tests {
         let mut component = BroadphaseComponent::new();
         component.tree.insert(
             5,
-            Fixture::new("main", PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0))),
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
+            ),
             Transform::new(Vector2::new(2.0, 0.0), 0.0),
         );
         let state = component.get_component_state();
         let mut restored = BroadphaseComponent::new();
         restored.handle_component_state(state);
-        assert_eq!(restored.tree.query_aabb(Box2::new(0.0, -2.0, 4.0, 2.0)).len(), 1);
+        assert_eq!(
+            restored
+                .tree
+                .query_aabb(Box2::new(0.0, -2.0, 4.0, 2.0))
+                .len(),
+            1
+        );
     }
 }

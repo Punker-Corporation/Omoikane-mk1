@@ -2,7 +2,7 @@ use crate::EntityUid;
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventSource {
@@ -195,7 +195,8 @@ impl EntityEventBus {
     {
         if let Some(subscriptions) = self.local_subscriptions.get_mut(&TypeId::of::<T>()) {
             subscriptions.retain(|subscription| {
-                !(subscription.subscriber == subscriber && subscription.component_name == component_name)
+                !(subscription.subscriber == subscriber
+                    && subscription.component_name == component_name)
             });
         }
     }
@@ -275,7 +276,10 @@ impl EntityEventBus {
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, subscription)| {
-                            subscription.source.matches(EventSource::Local).then_some(OrderedTarget::Broadcast(idx))
+                            subscription
+                                .source
+                                .matches(EventSource::Local)
+                                .then_some(OrderedTarget::Broadcast(idx))
                         })
                         .collect::<Vec<_>>()
                 })
@@ -284,11 +288,8 @@ impl EntityEventBus {
             Vec::new()
         };
 
-        let ordered_targets = self.ordered_local_and_broadcast_targets(
-            &type_id,
-            &local_targets,
-            &broadcast_targets,
-        );
+        let ordered_targets =
+            self.ordered_local_and_broadcast_targets(&type_id, &local_targets, &broadcast_targets);
 
         for target in ordered_targets {
             match target {
@@ -315,12 +316,8 @@ impl EntityEventBus {
         }
     }
 
-    pub fn raise_component_event<T>(
-        &mut self,
-        uid: EntityUid,
-        component_name: &str,
-        event: &mut T,
-    ) where
+    pub fn raise_component_event<T>(&mut self, uid: EntityUid, component_name: &str, event: &mut T)
+    where
         T: Any + Send + 'static,
     {
         let type_id = TypeId::of::<T>();
@@ -329,7 +326,8 @@ impl EntityEventBus {
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, subscription)| {
-                    (subscription.component_name == component_name).then_some(OrderedTarget::Local(idx))
+                    (subscription.component_name == component_name)
+                        .then_some(OrderedTarget::Local(idx))
                 })
                 .collect::<Vec<_>>();
 
@@ -388,25 +386,41 @@ impl EntityEventBus {
                     .local_subscriptions
                     .get(type_id)
                     .and_then(|subs| subs.get(*idx))
-                    .and_then(|sub| sub.ordering.as_ref().map(|ordering| ordering.order_key.clone())),
+                    .and_then(|sub| {
+                        sub.ordering
+                            .as_ref()
+                            .map(|ordering| ordering.order_key.clone())
+                    }),
                 OrderedTarget::Broadcast(idx) => self
                     .broadcast_subscriptions
                     .get(type_id)
                     .and_then(|subs| subs.get(*idx))
-                    .and_then(|sub| sub.ordering.as_ref().map(|ordering| ordering.order_key.clone())),
+                    .and_then(|sub| {
+                        sub.ordering
+                            .as_ref()
+                            .map(|ordering| ordering.order_key.clone())
+                    }),
             },
             |target| match target {
                 OrderedTarget::Local(idx) => self
                     .local_subscriptions
                     .get(type_id)
                     .and_then(|subs| subs.get(*idx))
-                    .and_then(|sub| sub.ordering.as_ref().map(|ordering| ordering.before.clone()))
+                    .and_then(|sub| {
+                        sub.ordering
+                            .as_ref()
+                            .map(|ordering| ordering.before.clone())
+                    })
                     .unwrap_or_default(),
                 OrderedTarget::Broadcast(idx) => self
                     .broadcast_subscriptions
                     .get(type_id)
                     .and_then(|subs| subs.get(*idx))
-                    .and_then(|sub| sub.ordering.as_ref().map(|ordering| ordering.before.clone()))
+                    .and_then(|sub| {
+                        sub.ordering
+                            .as_ref()
+                            .map(|ordering| ordering.before.clone())
+                    })
                     .unwrap_or_default(),
             },
             |target| match target {
@@ -471,20 +485,26 @@ fn ordered_indices_broadcast(
     indices.sort_by_key(|idx| *idx);
     topological_indices(
         &indices,
-        |idx| subscriptions[*idx]
-            .ordering
-            .as_ref()
-            .map(|ordering| ordering.order_key.clone()),
-        |idx| subscriptions[*idx]
-            .ordering
-            .as_ref()
-            .map(|ordering| ordering.before.clone())
-            .unwrap_or_default(),
-        |idx| subscriptions[*idx]
-            .ordering
-            .as_ref()
-            .map(|ordering| ordering.after.clone())
-            .unwrap_or_default(),
+        |idx| {
+            subscriptions[*idx]
+                .ordering
+                .as_ref()
+                .map(|ordering| ordering.order_key.clone())
+        },
+        |idx| {
+            subscriptions[*idx]
+                .ordering
+                .as_ref()
+                .map(|ordering| ordering.before.clone())
+                .unwrap_or_default()
+        },
+        |idx| {
+            subscriptions[*idx]
+                .ordering
+                .as_ref()
+                .map(|ordering| ordering.after.clone())
+                .unwrap_or_default()
+        },
     )
 }
 
@@ -566,7 +586,11 @@ mod tests {
             bus.subscribe_event(
                 EventSource::Local,
                 "late",
-                Some(OrderingData::new("late", std::iter::empty::<String>(), ["early"])),
+                Some(OrderingData::new(
+                    "late",
+                    std::iter::empty::<String>(),
+                    ["early"],
+                )),
                 move |_: &mut i32| calls.lock().unwrap().push("late".to_string()),
             );
         }
@@ -575,14 +599,21 @@ mod tests {
             bus.subscribe_event(
                 EventSource::Local,
                 "early",
-                Some(OrderingData::new("early", ["late"], std::iter::empty::<String>())),
+                Some(OrderingData::new(
+                    "early",
+                    ["late"],
+                    std::iter::empty::<String>(),
+                )),
                 move |_: &mut i32| calls.lock().unwrap().push("early".to_string()),
             );
         }
 
         let mut ev = 5i32;
         bus.raise_event(EventSource::Local, &mut ev);
-        assert_eq!(&*calls.lock().unwrap(), &["early".to_string(), "late".to_string()]);
+        assert_eq!(
+            &*calls.lock().unwrap(),
+            &["early".to_string(), "late".to_string()]
+        );
     }
 
     #[test]
@@ -596,7 +627,9 @@ mod tests {
                 "physics_sys",
                 None,
                 move |uid: EntityUid, component: &str, event: &mut i32| {
-                    hits.lock().unwrap().push((uid.raw(), component.to_string()));
+                    hits.lock()
+                        .unwrap()
+                        .push((uid.raw(), component.to_string()));
                     *event += 1;
                 },
             );
@@ -633,7 +666,11 @@ mod tests {
             bus.subscribe_event(
                 EventSource::Local,
                 "broadcast_late",
-                Some(OrderingData::new("broadcast_late", std::iter::empty::<String>(), ["local_early"])),
+                Some(OrderingData::new(
+                    "broadcast_late",
+                    std::iter::empty::<String>(),
+                    ["local_early"],
+                )),
                 move |_: &mut i32| calls.lock().unwrap().push("broadcast_late".to_string()),
             );
         }
@@ -642,7 +679,11 @@ mod tests {
             bus.subscribe_local_event(
                 "Physics",
                 "local_early",
-                Some(OrderingData::new("local_early", ["broadcast_late"], std::iter::empty::<String>())),
+                Some(OrderingData::new(
+                    "local_early",
+                    ["broadcast_late"],
+                    std::iter::empty::<String>(),
+                )),
                 move |_uid: EntityUid, _component: &str, _: &mut i32| {
                     calls.lock().unwrap().push("local_early".to_string())
                 },
@@ -691,9 +732,14 @@ mod tests {
         }
         {
             let hits = hits.clone();
-            bus.subscribe_event(EventSource::Local, "broadcast_sys", None, move |_: &mut i32| {
-                hits.lock().unwrap().push("broadcast".to_string());
-            });
+            bus.subscribe_event(
+                EventSource::Local,
+                "broadcast_sys",
+                None,
+                move |_: &mut i32| {
+                    hits.lock().unwrap().push("broadcast".to_string());
+                },
+            );
         }
 
         let mut ev = 2i32;

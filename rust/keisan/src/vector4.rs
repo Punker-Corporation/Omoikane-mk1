@@ -85,7 +85,10 @@ impl Vector4 {
     }
 
     pub fn interpolate_cubic(pre_a: Self, a: Self, b: Self, post_b: Self, t: f32) -> Self {
-        a + (b - pre_a + (pre_a * 2.0 - a * 5.0 + b * 4.0 - post_b + ((a - b) * 3.0 + post_b - pre_a) * t) * t) * t * 0.5
+        a + (b - pre_a
+            + (pre_a * 2.0 - a * 5.0 + b * 4.0 - post_b + ((a - b) * 3.0 + post_b - pre_a) * t) * t)
+            * t
+            * 0.5
     }
 }
 
@@ -111,7 +114,12 @@ impl Add for Vector4 {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z, self.w + rhs.w)
+        Self::new(
+            self.x + rhs.x,
+            self.y + rhs.y,
+            self.z + rhs.z,
+            self.w + rhs.w,
+        )
     }
 }
 
@@ -127,7 +135,12 @@ impl Sub for Vector4 {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z, self.w - rhs.w)
+        Self::new(
+            self.x - rhs.x,
+            self.y - rhs.y,
+            self.z - rhs.z,
+            self.w - rhs.w,
+        )
     }
 }
 
@@ -159,7 +172,12 @@ impl Mul for Vector4 {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        Self::new(self.x * rhs.x, self.y * rhs.y, self.z * rhs.z, self.w * rhs.w)
+        Self::new(
+            self.x * rhs.x,
+            self.y * rhs.y,
+            self.z * rhs.z,
+            self.w * rhs.w,
+        )
     }
 }
 
@@ -175,7 +193,12 @@ impl Div for Vector4 {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        Self::new(self.x / rhs.x, self.y / rhs.y, self.z / rhs.z, self.w / rhs.w)
+        Self::new(
+            self.x / rhs.x,
+            self.y / rhs.y,
+            self.z / rhs.z,
+            self.w / rhs.w,
+        )
     }
 }
 
@@ -246,9 +269,16 @@ mod tests {
         let a = Vector4::UNIT_X;
         let b = Vector4::ONE;
         assert_eq!(Vector4::dot(a, b), 1.0);
-        assert_eq!(Vector4::lerp(Vector4::ZERO, Vector4::ONE, 0.5), Vector4::splat(0.5));
         assert_eq!(
-            Vector4::clamp(Vector4::new(-1.0, 0.5, 2.0, 8.0), Vector4::ZERO, Vector4::ONE),
+            Vector4::lerp(Vector4::ZERO, Vector4::ONE, 0.5),
+            Vector4::splat(0.5)
+        );
+        assert_eq!(
+            Vector4::clamp(
+                Vector4::new(-1.0, 0.5, 2.0, 8.0),
+                Vector4::ZERO,
+                Vector4::ONE
+            ),
             Vector4::new(0.0, 0.5, 1.0, 1.0)
         );
     }
@@ -261,6 +291,10 @@ mod tests {
         assert_eq!(from_v2, Vector4::new(2.0, 3.0, 0.0, 0.0));
         assert_eq!(from_v3, Vector4::new(2.0, 3.0, 4.0, 0.0));
         assert_eq!(from_v3w, Vector4::new(2.0, 3.0, 4.0, 5.0));
-        assert!(Vector4::new(0.0, 0.0, 3.0, 4.0).normalized().approx_eq(Vector4::new(0.0, 0.0, 0.6, 0.8)));
+        assert!(
+            Vector4::new(0.0, 0.0, 3.0, 4.0)
+                .normalized()
+                .approx_eq(Vector4::new(0.0, 0.0, 0.6, 0.8))
+        );
     }
 }

@@ -1,12 +1,11 @@
-use crate::{PlayerManager, PlayerSession, ServerEntityManager};
-use sekai::{EntityUid, SessionStatus, TransformResolver};
+use crate::{PlayerSession, ServerEntityManager};
+use sekai::{EntityUid, TransformResolver};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct PvsSystem {
     pub culling_enabled: bool,
     pub view_size: f32,
-    seen_all: HashSet<String>,
     player_visible_sets: HashMap<String, HashSet<EntityUid>>,
     player_seen_sets: HashMap<String, HashSet<EntityUid>>,
 }
@@ -16,22 +15,8 @@ impl PvsSystem {
         Self {
             culling_enabled: true,
             view_size: 16.0,
-            seen_all: HashSet::new(),
             player_visible_sets: HashMap::new(),
             player_seen_sets: HashMap::new(),
-        }
-    }
-
-    pub fn handle_player_status_changed(&mut self, session: &PlayerSession) {
-        if session.status == SessionStatus::InGame {
-            self.player_visible_sets
-                .entry(session.user_id.clone())
-                .or_default();
-            self.player_seen_sets.entry(session.user_id.clone()).or_default();
-        } else if session.status == SessionStatus::Disconnected {
-            self.player_visible_sets.remove(&session.user_id);
-            self.player_seen_sets.remove(&session.user_id);
-            self.seen_all.remove(&session.user_id);
         }
     }
 
@@ -44,15 +29,6 @@ impl PvsSystem {
     pub fn remove_session(&mut self, user_id: &str) {
         self.player_visible_sets.remove(user_id);
         self.player_seen_sets.remove(user_id);
-        self.seen_all.remove(user_id);
-    }
-
-    pub fn cleanup(&mut self, players: &PlayerManager) {
-        if !self.culling_enabled {
-            self.seen_all = players.sessions().map(|s| s.user_id.clone()).collect();
-        } else {
-            self.seen_all.clear();
-        }
     }
 
     fn map_entity_for_world_map(
@@ -78,7 +54,8 @@ impl PvsSystem {
         let existing: Vec<_> = current.iter().copied().collect();
         for entity in existing {
             if let Some(grid) = entities.inner.map_grids.get(&entity) {
-                if let Some(map_uid) = Self::map_entity_for_world_map(entities, grid.parent_map_id) {
+                if let Some(map_uid) = Self::map_entity_for_world_map(entities, grid.parent_map_id)
+                {
                     current.insert(map_uid);
                 }
                 continue;
@@ -97,7 +74,11 @@ impl PvsSystem {
         session: &PlayerSession,
     ) -> (Vec<EntityUid>, Vec<EntityUid>, Vec<EntityUid>) {
         let mut current = if !self.culling_enabled {
-            entities.inner.entity_uids(true).into_iter().collect::<HashSet<_>>()
+            entities
+                .inner
+                .entity_uids(true)
+                .into_iter()
+                .collect::<HashSet<_>>()
         } else if let Some(controlled) = session.controlled_entity {
             let controlled_map = entities.inner.map_id_for(controlled);
             let center = entities
@@ -111,7 +92,11 @@ impl PvsSystem {
                 .into_iter()
                 .collect::<HashSet<_>>()
         } else {
-            entities.inner.entity_uids(true).into_iter().collect::<HashSet<_>>()
+            entities
+                .inner
+                .entity_uids(true)
+                .into_iter()
+                .collect::<HashSet<_>>()
         };
         self.augment_with_support_entities(entities, &mut current, session.controlled_entity);
 
@@ -121,15 +106,9 @@ impl PvsSystem {
             .or_default()
             .clone();
 
-        let deletions = previous
-            .difference(&current)
-            .copied()
-            .collect::<Vec<_>>();
+        let deletions = previous.difference(&current).copied().collect::<Vec<_>>();
 
-        let newly_visible = current
-            .difference(&previous)
-            .copied()
-            .collect::<Vec<_>>();
+        let newly_visible = current.difference(&previous).copied().collect::<Vec<_>>();
 
         self.player_visible_sets
             .insert(session.user_id.clone(), current.clone());
@@ -152,22 +131,21 @@ impl Default for PvsSystem {
 mod tests {
     use super::PvsSystem;
     use crate::{PlayerManager, ServerEntityManager};
-    use sekai::SessionStatus;
 
     #[test]
     fn pvs_system_tracks_visible_entities_per_player() {
         let mut players = PlayerManager::new(4);
         players.connect("u1", "pedel");
-        let session = players.get_session_mut("u1").unwrap();
-        session.status = SessionStatus::InGame;
+        assert!(players.join_game("u1"));
 
         let mut entities = ServerEntityManager::new();
-        let uid = entities.create_entity(None);
-        entities.initialize_entity(uid);
-        session.controlled_entity = Some(uid);
+        let uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(uid);
+        assert!(players.set_attached_entity("u1", Some(uid)));
+        let session = players.get_session("u1").unwrap();
 
         let mut pvs = PvsSystem::new();
-        pvs.handle_player_status_changed(session);
+        pvs.add_session("u1");
         let (visible, deletions, gained) = pvs.calculate_visible_entities(&entities, session);
         assert!(visible.contains(&uid));
         assert!(deletions.is_empty());
@@ -178,35 +156,39 @@ mod tests {
     fn pvs_system_marks_entities_entering_visibility_as_newly_visible() {
         let mut players = PlayerManager::new(4);
         players.connect("u1", "pedel");
-        let session = players.get_session_mut("u1").unwrap();
-        session.status = SessionStatus::InGame;
+        assert!(players.join_game("u1"));
 
         let mut entities = ServerEntityManager::new();
-        let controlled = entities.create_entity(None);
-        entities.initialize_entity(controlled);
-        session.controlled_entity = Some(controlled);
+        let controlled = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(controlled);
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+        let session = players.get_session("u1").unwrap();
 
-        let other = entities.create_entity(None);
-        entities.initialize_entity(other);
-        assert!(entities
-            .inner
-            .mutate_transform_and_reconcile(other, |transform| {
-                transform.local_position = keisan::Vector2::new(100.0, 0.0);
-            }));
+        let other = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(other);
+        assert!(
+            entities
+                .inner
+                .mutate_transform_and_reconcile(other, |transform| {
+                    transform.local_position = keisan::Vector2::new(100.0, 0.0);
+                })
+        );
 
         let mut pvs = PvsSystem::new();
         pvs.view_size = 8.0;
-        pvs.handle_player_status_changed(session);
+        pvs.add_session("u1");
         let (visible, _, gained) = pvs.calculate_visible_entities(&entities, session);
         assert!(gained.contains(&controlled));
         assert!(!visible.contains(&other));
         assert!(!gained.contains(&other));
 
-        assert!(entities
-            .inner
-            .mutate_transform_and_reconcile(other, |transform| {
-                transform.local_position = keisan::Vector2::new(1.0, 0.0);
-            }));
+        assert!(
+            entities
+                .inner
+                .mutate_transform_and_reconcile(other, |transform| {
+                    transform.local_position = keisan::Vector2::new(1.0, 0.0);
+                })
+        );
 
         let (visible, deletions, gained) = pvs.calculate_visible_entities(&entities, session);
         assert!(visible.contains(&other));
@@ -218,25 +200,27 @@ mod tests {
     fn pvs_system_keeps_map_entities_visible_for_visible_runtime_entities() {
         let mut players = PlayerManager::new(4);
         players.connect("u1", "pedel");
-        let session = players.get_session_mut("u1").unwrap();
-        session.status = SessionStatus::InGame;
+        assert!(players.join_game("u1"));
 
         let mut entities = ServerEntityManager::new();
-        let map_uid = entities.create_entity(None);
-        entities.initialize_entity(map_uid);
+        let map_uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(map_uid);
         entities.inner.ensure_map(sekai::MapId::new(2), map_uid);
 
-        let controlled = entities.create_entity(None);
-        entities.initialize_entity(controlled);
-        session.controlled_entity = Some(controlled);
-        assert!(entities
-            .inner
-            .mutate_transform_and_reconcile(controlled, |transform| {
-                transform.map_id = sekai::MapId::new(2);
-            }));
+        let controlled = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(controlled);
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+        let session = players.get_session("u1").unwrap();
+        assert!(
+            entities
+                .inner
+                .mutate_transform_and_reconcile(controlled, |transform| {
+                    transform.map_id = sekai::MapId::new(2);
+                })
+        );
 
         let mut pvs = PvsSystem::new();
-        pvs.handle_player_status_changed(session);
+        pvs.add_session("u1");
         let (visible, _, gained) = pvs.calculate_visible_entities(&entities, session);
         assert!(visible.contains(&controlled));
         assert!(visible.contains(&map_uid));
@@ -247,31 +231,35 @@ mod tests {
     fn pvs_system_does_not_pull_entities_from_other_maps_by_distance_only() {
         let mut players = PlayerManager::new(4);
         players.connect("u1", "pedel");
-        let session = players.get_session_mut("u1").unwrap();
-        session.status = SessionStatus::InGame;
+        assert!(players.join_game("u1"));
 
         let mut entities = ServerEntityManager::new();
-        let controlled = entities.create_entity(None);
-        entities.initialize_entity(controlled);
-        session.controlled_entity = Some(controlled);
-        assert!(entities
-            .inner
-            .mutate_transform_and_reconcile(controlled, |transform| {
-                transform.map_id = sekai::MapId::new(2);
-            }));
+        let controlled = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(controlled);
+        assert!(players.set_attached_entity("u1", Some(controlled)));
+        let session = players.get_session("u1").unwrap();
+        assert!(
+            entities
+                .inner
+                .mutate_transform_and_reconcile(controlled, |transform| {
+                    transform.map_id = sekai::MapId::new(2);
+                })
+        );
 
-        let other = entities.create_entity(None);
-        entities.initialize_entity(other);
-        assert!(entities
-            .inner
-            .mutate_transform_and_reconcile(other, |transform| {
-                transform.map_id = sekai::MapId::new(3);
-                transform.local_position = keisan::Vector2::new(1.0, 0.0);
-            }));
+        let other = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(other);
+        assert!(
+            entities
+                .inner
+                .mutate_transform_and_reconcile(other, |transform| {
+                    transform.map_id = sekai::MapId::new(3);
+                    transform.local_position = keisan::Vector2::new(1.0, 0.0);
+                })
+        );
 
         let mut pvs = PvsSystem::new();
         pvs.view_size = 8.0;
-        pvs.handle_player_status_changed(session);
+        pvs.add_session("u1");
         let (visible, _, _) = pvs.calculate_visible_entities(&entities, session);
         assert!(visible.contains(&controlled));
         assert!(!visible.contains(&other));

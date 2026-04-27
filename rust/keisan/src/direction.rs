@@ -237,12 +237,18 @@ mod tests {
 
     #[test]
     fn direction_roundtrips_to_flags() {
-        assert_eq!(Direction::NorthWest.as_flag().as_dir(), Direction::NorthWest);
+        assert_eq!(
+            Direction::NorthWest.as_flag().as_dir(),
+            Direction::NorthWest
+        );
     }
 
     #[test]
     fn int_offset_matches_cardinal_step() {
-        assert_eq!(Vector2i::new(4, 5).offset(Direction::West), Vector2i::new(3, 5));
+        assert_eq!(
+            Vector2i::new(4, 5).offset(Direction::West),
+            Vector2i::new(3, 5)
+        );
         assert_eq!(DirectionFlag::SouthEast.to_int_vec(), Vector2i::new(1, -1));
     }
 }

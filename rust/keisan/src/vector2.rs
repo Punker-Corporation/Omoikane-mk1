@@ -123,7 +123,10 @@ impl Vector2 {
     }
 
     pub fn interpolate_cubic(pre_a: Self, a: Self, b: Self, post_b: Self, t: f32) -> Self {
-        a + (b - pre_a + (pre_a * 2.0 - a * 5.0 + b * 4.0 - post_b + ((a - b) * 3.0 + post_b - pre_a) * t) * t) * t * 0.5
+        a + (b - pre_a
+            + (pre_a * 2.0 - a * 5.0 + b * 4.0 - post_b + ((a - b) * 3.0 + post_b - pre_a) * t) * t)
+            * t
+            * 0.5
     }
 }
 
@@ -225,7 +228,8 @@ impl From<(f32, f32)> for Vector2 {
 
 impl ApproxEq for Vector2 {
     fn approx_eq(&self, other: Self) -> bool {
-        MathHelper::close_to(self.x, other.x, 0.000_000_1) && MathHelper::close_to(self.y, other.y, 0.000_000_1)
+        MathHelper::close_to(self.x, other.x, 0.000_000_1)
+            && MathHelper::close_to(self.y, other.y, 0.000_000_1)
     }
 
     fn approx_eq_with_tolerance(&self, other: Self, tolerance: f64) -> bool {
@@ -254,7 +258,13 @@ mod tests {
         let a = Vector2::new(2.0, 3.0);
         let b = Vector2::new(5.0, 7.0);
         assert_eq!(Vector2::cross(a, b), -1.0);
-        assert_eq!(Vector2::cross_vector_scalar(a, 2.0), Vector2::new(6.0, -4.0));
-        assert_eq!(Vector2::cross_scalar_vector(2.0, a), Vector2::new(-6.0, 4.0));
+        assert_eq!(
+            Vector2::cross_vector_scalar(a, 2.0),
+            Vector2::new(6.0, -4.0)
+        );
+        assert_eq!(
+            Vector2::cross_scalar_vector(2.0, a),
+            Vector2::new(-6.0, 4.0)
+        );
     }
 }

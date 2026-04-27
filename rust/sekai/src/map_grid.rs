@@ -52,7 +52,12 @@ pub struct MapGrid {
 }
 
 impl MapGrid {
-    pub fn new(parent_map_id: MapId, grid_entity_id: EntityUid, index: GridId, chunk_size: u16) -> Self {
+    pub fn new(
+        parent_map_id: MapId,
+        grid_entity_id: EntityUid,
+        index: GridId,
+        chunk_size: u16,
+    ) -> Self {
         Self {
             parent_map_id,
             grid_entity_id,
@@ -77,7 +82,9 @@ impl MapGrid {
 
         points
             .into_iter()
-            .fold(Box2::from_corners(points[0], points[0]), |acc, point| acc.extend_to_contain(point))
+            .fold(Box2::from_corners(points[0], points[0]), |acc, point| {
+                acc.extend_to_contain(point)
+            })
     }
 
     pub fn bounds(&self) -> MapGridBounds {
@@ -102,7 +109,12 @@ impl MapGrid {
             let tile = chunk.get_tile(chunk_tile.x as u16, chunk_tile.y as u16);
             TileRef::new(self.parent_map_id, self.index, tile_coordinates, tile)
         } else {
-            TileRef::new(self.parent_map_id, self.index, tile_coordinates, Tile::EMPTY)
+            TileRef::new(
+                self.parent_map_id,
+                self.index,
+                tile_coordinates,
+                Tile::EMPTY,
+            )
         }
     }
 
@@ -115,7 +127,8 @@ impl MapGrid {
                     if ignore_space && tile.is_empty() {
                         continue;
                     }
-                    let grid = Vector2i::new(x as i32, y as i32) + chunk.indices() * self.chunk_size as i32;
+                    let grid = Vector2i::new(x as i32, y as i32)
+                        + chunk.indices() * self.chunk_size as i32;
                     refs.push(TileRef::new(self.parent_map_id, self.index, grid, tile));
                 }
             }
@@ -138,7 +151,10 @@ impl MapGrid {
         let mut touched = HashSet::new();
         for (indices, tile) in tiles {
             let (chunk, chunk_tile) = self.chunk_and_offset_for_tile(*indices);
-            if chunk.set_tile(chunk_tile.x as u16, chunk_tile.y as u16, *tile).is_some() {
+            if chunk
+                .set_tile(chunk_tile.x as u16, chunk_tile.y as u16, *tile)
+                .is_some()
+            {
                 touched.insert(chunk.indices());
             }
         }
@@ -188,7 +204,9 @@ impl MapGrid {
         ];
         let local_area = points
             .into_iter()
-            .fold(Box2::from_corners(points[0], points[0]), |acc, point| acc.extend_to_contain(point));
+            .fold(Box2::from_corners(points[0], points[0]), |acc, point| {
+                acc.extend_to_contain(point)
+            });
         let chunk_lb = Vector2i::new(
             (local_area.left / self.chunk_size as f32).floor() as i32,
             (local_area.bottom / self.chunk_size as f32).floor() as i32,
@@ -215,12 +233,17 @@ impl MapGrid {
             return Vec::new();
         };
         let chunk_tile = chunk.grid_tile_to_chunk_tile(pos);
-        chunk.get_snap_grid_cell(chunk_tile.x as u16, chunk_tile.y as u16).to_vec()
+        chunk
+            .get_snap_grid_cell(chunk_tile.x as u16, chunk_tile.y as u16)
+            .to_vec()
     }
 
     pub fn add_to_snap_grid_cell(&mut self, pos: Vector2i, entity: EntityUid) -> bool {
         let (chunk, chunk_tile) = self.chunk_and_offset_for_tile(pos);
-        if chunk.get_tile(chunk_tile.x as u16, chunk_tile.y as u16).is_empty() {
+        if chunk
+            .get_tile(chunk_tile.x as u16, chunk_tile.y as u16)
+            .is_empty()
+        {
             return false;
         }
         chunk.add_to_snap_grid_cell(chunk_tile.x as u16, chunk_tile.y as u16, entity);
@@ -288,7 +311,9 @@ impl MapGrid {
             return false;
         };
         let chunk_tile = chunk.grid_tile_to_chunk_tile(indices);
-        !chunk.get_tile(chunk_tile.x as u16, chunk_tile.y as u16).is_empty()
+        !chunk
+            .get_tile(chunk_tile.x as u16, chunk_tile.y as u16)
+            .is_empty()
     }
 
     pub fn grid_tile_to_chunk_indices(&self, grid_tile: Vector2i) -> Vector2i {
@@ -353,13 +378,27 @@ impl MapGrid {
 }
 
 impl MapGridLike for MapGrid {
-    fn parent_map_id(&self) -> MapId { self.parent_map_id }
-    fn grid_entity_id(&self) -> EntityUid { self.grid_entity_id }
-    fn index(&self) -> GridId { self.index }
-    fn tile_size(&self) -> u16 { self.tile_size }
-    fn chunk_size(&self) -> u16 { self.chunk_size }
-    fn world_position(&self) -> Vector2 { self.world_position }
-    fn world_rotation(&self) -> Angle { self.world_rotation }
+    fn parent_map_id(&self) -> MapId {
+        self.parent_map_id
+    }
+    fn grid_entity_id(&self) -> EntityUid {
+        self.grid_entity_id
+    }
+    fn index(&self) -> GridId {
+        self.index
+    }
+    fn tile_size(&self) -> u16 {
+        self.tile_size
+    }
+    fn chunk_size(&self) -> u16 {
+        self.chunk_size
+    }
+    fn world_position(&self) -> Vector2 {
+        self.world_position
+    }
+    fn world_rotation(&self) -> Angle {
+        self.world_rotation
+    }
     fn world_matrix(&self) -> Matrix3 {
         Matrix3::create_transform(
             self.world_position.x,
@@ -394,7 +433,10 @@ mod tests {
         let tile = grid.get_tile_ref(Vector2i::new(1, 1));
         assert_eq!(tile.tile.type_id, 3);
         assert!(grid.add_to_snap_grid_cell(Vector2i::new(1, 1), EntityUid::new(30)));
-        assert_eq!(grid.get_anchored_entities(Vector2i::new(1, 1)), vec![EntityUid::new(30)]);
+        assert_eq!(
+            grid.get_anchored_entities(Vector2i::new(1, 1)),
+            vec![EntityUid::new(30)]
+        );
         assert!(grid.collides_with_grid(Vector2i::new(1, 1)));
     }
 
@@ -417,7 +459,11 @@ mod tests {
         grid.set_tile(Vector2i::new(0, 0), Tile::new(3, TileRenderFlag(0), 0));
         assert_eq!(
             grid.chunk_indices(),
-            vec![Vector2i::new(-1, 0), Vector2i::new(0, 0), Vector2i::new(2, 0)]
+            vec![
+                Vector2i::new(-1, 0),
+                Vector2i::new(0, 0),
+                Vector2i::new(2, 0)
+            ]
         );
     }
 }
