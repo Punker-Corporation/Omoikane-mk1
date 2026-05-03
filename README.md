@@ -32,6 +32,10 @@ systems. The migration target is not a line-by-line port: new work should keep
 the behavior compatible where useful while replacing legacy assumptions with
 idiomatic Rust APIs, better invariants and measurable performance wins.
 
+See `docs/Research Intake.md` for the current technical intake of papers,
+theses, talks and Rust repositories being evaluated for future Omoikane
+subsystems.
+
 ## Legal
 
 See `legal.md` and the license files in this repository.
