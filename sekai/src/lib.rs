@@ -41,6 +41,7 @@ pub mod screen_coordinates;
 pub mod serialization;
 pub mod shared_physics_map_component;
 pub mod shared_physics_system;
+pub mod state_digest;
 pub mod tile;
 pub mod tile_ref;
 pub mod timer_component;
@@ -120,6 +121,7 @@ pub use serialization::{
 };
 pub use shared_physics_map_component::{SharedPhysicsMapComponent, SharedPhysicsMapComponentState};
 pub use shared_physics_system::{PhysicsQueryHit, SharedPhysicsSystem};
+pub use state_digest::{StateDigest, StateDigestBuilder, digest_game_state};
 pub use tile::{Tile, TileRenderFlag};
 pub use tile_ref::TileRef;
 pub use timer_component::TimerComponent;
