@@ -1,6 +1,7 @@
 pub mod appearance_component;
 pub mod appearance_system;
 pub mod broadphase_component;
+pub mod compatibility;
 pub mod component;
 pub mod component_event_args;
 pub mod component_factory;
@@ -55,6 +56,9 @@ pub use appearance_component::{
 pub use appearance_system::SharedAppearanceSystem;
 pub use broadphase_component::{BroadphaseComponent, BroadphaseComponentState};
 pub use butsuri::BodyType;
+pub use compatibility::{
+    CompatibilityProfile, CompatibilityReport, FeatureSet, ProtocolFeature, ProtocolVersion,
+};
 pub use component::{
     Component, ComponentAdd, ComponentInit, ComponentLifeStage, ComponentRemove, ComponentShutdown,
     ComponentStartup,

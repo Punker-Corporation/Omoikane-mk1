@@ -1,6 +1,6 @@
 use crate::FullInputCmdMessage;
 use jikan::GameTick;
-use sekai::{EntityUid, GameState, MsgPlayerList};
+use sekai::{CompatibilityProfile, CompatibilityReport, EntityUid, GameState, MsgPlayerList};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,11 +79,13 @@ pub struct ServerChannel {
 
 #[derive(Debug, Clone, Default)]
 pub struct ServerNetManager {
+    compatibility: CompatibilityProfile,
     channels: HashMap<String, ServerChannel>,
     outbox: HashMap<String, Vec<OutboundMessage>>,
     inbound_inputs: HashMap<String, Vec<FullInputCmdMessage>>,
     inbound_entities: HashMap<String, Vec<MsgEntity>>,
     inbound_player_list_requests: HashMap<String, usize>,
+    compatibility_reports: HashMap<String, CompatibilityReport>,
 }
 
 impl ServerNetManager {
@@ -92,6 +94,14 @@ impl ServerNetManager {
     }
 
     pub fn initialize(&mut self) {}
+
+    pub fn compatibility_profile(&self) -> &CompatibilityProfile {
+        &self.compatibility
+    }
+
+    pub fn set_compatibility_profile(&mut self, profile: CompatibilityProfile) {
+        self.compatibility = profile;
+    }
 
     pub fn connect(&mut self, user_id: impl Into<String>) -> bool {
         let user_id = user_id.into();
@@ -118,6 +128,7 @@ impl ServerNetManager {
         self.inbound_inputs.remove(user_id);
         self.inbound_entities.remove(user_id);
         self.inbound_player_list_requests.remove(user_id);
+        self.compatibility_reports.remove(user_id);
     }
 
     pub fn is_connected(&self, user_id: &str) -> bool {
@@ -217,6 +228,25 @@ impl ServerNetManager {
             .push(OutboundMessage::PlayerList(list));
         true
     }
+
+    pub fn negotiate_compatibility(
+        &mut self,
+        user_id: &str,
+        remote: &CompatibilityProfile,
+    ) -> Option<CompatibilityReport> {
+        if !self.is_connected(user_id) {
+            return None;
+        }
+
+        let report = self.compatibility.negotiate(remote);
+        self.compatibility_reports
+            .insert(user_id.to_string(), report.clone());
+        Some(report)
+    }
+
+    pub fn compatibility_report(&self, user_id: &str) -> Option<&CompatibilityReport> {
+        self.compatibility_reports.get(user_id)
+    }
 }
 
 #[cfg(test)]
@@ -225,7 +255,7 @@ mod tests {
     use crate::{BoundKeyState, FullInputCmdMessage};
     use jikan::GameTick;
     use keisan::Vector2;
-    use sekai::GameState;
+    use sekai::{CompatibilityProfile, GameState, ProtocolFeature};
     use sekai::{
         EntityCoordinates, EntityUid, MsgPlayerList, PlayerState, ScreenCoordinates, SessionStatus,
         WindowId,
@@ -312,5 +342,26 @@ mod tests {
             net.take_outbox("u1").pop().unwrap(),
             OutboundMessage::PlayerList(_)
         ));
+    }
+
+    #[test]
+    fn net_manager_negotiates_compatibility_per_connection() {
+        let mut net = ServerNetManager::new();
+        assert!(net.connect("u1"));
+
+        let report = net
+            .negotiate_compatibility("u1", &CompatibilityProfile::stable())
+            .unwrap();
+        assert!(report.accepted);
+        assert!(
+            report
+                .shared_features
+                .contains(ProtocolFeature::BinaryComponentState)
+        );
+        assert!(net.compatibility_report("u1").is_some());
+        assert!(
+            net.negotiate_compatibility("missing", &CompatibilityProfile::stable())
+                .is_none()
+        );
     }
 }

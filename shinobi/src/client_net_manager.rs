@@ -1,10 +1,11 @@
 use daikoku::{FullInputCmdMessage, MsgEntity, MsgState, MsgStateAck};
-use sekai::MsgPlayerList;
+use sekai::{CompatibilityProfile, CompatibilityReport, MsgPlayerList};
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientNetManager {
     connected: bool,
+    compatibility: CompatibilityProfile,
     inbound_states: VecDeque<MsgState>,
     inbound_entities: VecDeque<MsgEntity>,
     inbound_player_lists: VecDeque<MsgPlayerList>,
@@ -21,6 +22,18 @@ impl ClientNetManager {
 
     pub fn connect(&mut self) {
         self.connected = true;
+    }
+
+    pub fn compatibility_profile(&self) -> &CompatibilityProfile {
+        &self.compatibility
+    }
+
+    pub fn set_compatibility_profile(&mut self, profile: CompatibilityProfile) {
+        self.compatibility = profile;
+    }
+
+    pub fn negotiate_with_server(&self, server: &CompatibilityProfile) -> CompatibilityReport {
+        server.negotiate(&self.compatibility)
     }
 
     pub fn disconnect(&mut self) {
@@ -118,8 +131,8 @@ mod tests {
     use jikan::GameTick;
     use keisan::Vector2;
     use sekai::{
-        EntityCoordinates, EntityUid, GameState, PlayerState, ScreenCoordinates, SessionStatus,
-        WindowId,
+        CompatibilityProfile, EntityCoordinates, EntityUid, GameState, PlayerState,
+        ProtocolFeature, ScreenCoordinates, SessionStatus, WindowId,
     };
 
     #[test]
@@ -176,5 +189,24 @@ mod tests {
             }],
         });
         assert_eq!(net.next_player_list().unwrap().plyrs.len(), 1);
+    }
+
+    #[test]
+    fn client_net_manager_negotiates_compatibility_profile() {
+        let mut net = ClientNetManager::new();
+        net.set_compatibility_profile(CompatibilityProfile::stable());
+
+        let report = net.negotiate_with_server(&CompatibilityProfile::experimental());
+        assert!(report.accepted);
+        assert!(
+            report
+                .shared_features
+                .contains(ProtocolFeature::IncrementalSnapshots)
+        );
+        assert!(
+            !report
+                .shared_features
+                .contains(ProtocolFeature::ContentAddressedChunks)
+        );
     }
 }
