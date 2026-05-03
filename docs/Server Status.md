@@ -1,14 +1,35 @@
-# SS14 Status Protocol
+# Omoikane Server Status
 
-An SS14 server can host a simple HTTP server for status fetching by external software (like websites, bots...). We use HTTP here because it's simple and easy to consume.
+The authoritative server crate is `daikoku`. Its network-facing state is built
+around explicit session records, outbound message queues, player state deltas,
+visibility filtering and acknowledged game-state ticks.
 
-Enabling this HTTP server is done by setting the `status.enabled` config variable to `true`. You can control the address the server will be bound to with the `bind` variable. Because .NET's `HttpListener` is written by people who clearly have no idea how networking works, I recommend you simply leave this as `localhost` and change the port number if you want to run more than one server on a machine. This server is absolutely designed to be slapped behind an Nginx/Apache reverse proxy anyways so it doesn't matter. You're getting no modern features like SSL, gzip, better routing, etc... otherwise. Don't bother PRing it.
+## Runtime State
 
-Anyways, the URI path you're looking for is.. `/status`.
+Server state is intentionally split into small systems:
 
-This *should* send a JSON response with some information about the game. This data is handled by content though, so while I can't make any guarantees, you're definitely likely to get the following values back:
+- `DaikokuServer`: orchestration, tick lifecycle and message pumping.
+- `ServerNetManager`: inbound/outbound protocol queues.
+- `PlayerManager`: connection and session state.
+- `ServerGameStateManager`: full and incremental snapshots.
+- `PvsSystem`: per-player visibility sets.
+- `PhysicsSystem`, `MapSystem`, `TransformSystem`: authoritative simulation.
 
-* `name`: name of the server, string.
-* `players`: player count, integer.
+## Status Contract
 
-There's a few more there. Check the code for your content repo for specifics. If you're wondering where this HTTP server is handled, check `SS14.Server/ServerStatus/StatusHost.cs`. Just hit find usages a bit you'll find the content side.
+A production status endpoint should be a thin projection of server state, not a
+second source of truth. The stable JSON shape should start small:
+
+```json
+{
+  "name": "Omoikane",
+  "players": 0,
+  "tick": 0,
+  "tick_rate": 60,
+  "build": "0.1.0"
+}
+```
+
+Transport is deliberately not fixed here. The implementation can be HTTP,
+QUIC-side metadata or an in-process host API as long as it reads from the same
+authoritative state and never mutates simulation data.

@@ -1,25 +1,37 @@
-![Robust Toolbox](https://raw.githubusercontent.com/space-wizards/asset-dump/3dd3078e49e3a7e06709a6e0fc6e3223d8d44ca2/robust.png)
+# Omoikane mk1
 
-Robust Toolbox is an engine primarily being developed for [Space Station 14](https://github.com/space-wizards/space-station-14), although we're working on making it usable for both [singleplayer](https://github.com/space-wizards/RobustToolboxTemplateSingleplayer) and [multiplayer](https://github.com/space-wizards/RobustToolboxTemplate) projects.
+Omoikane is a Rust-first experimental engine and server runtime descended from
+the Robust Toolbox architecture, but no longer organized as a C#/.NET fork. The
+workspace is now rooted directly in Rust crates and keeps the runtime surface
+self-contained inside this repository.
 
-Use the [content repo](https://github.com/space-wizards/space-station-14) for actual development, even if you're modifying the engine itself.
+The current crates are:
 
-## Project Links
+- `keisan`: deterministic math primitives, colors, vectors, matrices and geometry.
+- `jikan`: ticks, timers, frame timing and loop support.
+- `butsuri`: collision, broadphase, bodies, fixtures, joints and ray queries.
+- `sekai`: shared ECS, maps, transforms, serialization, physics state and game state.
+- `daikoku`: authoritative server systems, networking queues, PVS and prediction inputs.
+- `shinobi`: client-side state application, interpolation, prediction and local systems.
+- `xtask`: repository maintenance checks for the Rust-only layout.
 
-[Website](https://spacestation14.io/) | [Discord](https://discord.gg/t2jac3p) | [Forum](https://forum.spacestation14.io/) | [Steam](https://store.steampowered.com/app/1255460/Space_Station_14/) | [Standalone Download](https://spacestation14.io/about/nightlies/)
+## Commands
 
-## Documentation/Wiki
+```bash
+cargo run -p xtask -- verify-layout
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+```
 
-The [wiki](https://docs.spacestation14.io/) has documentation on SS14s content, engine, game design and more. We also have lots of resources for new contributors to the project.
+## Direction
 
-## Contributing
+Omoikane favors deterministic data flow, explicit runtime state, server
+authority, client prediction, serializable component payloads and testable
+systems. The migration target is not a line-by-line port: new work should keep
+the behavior compatible where useful while replacing legacy assumptions with
+idiomatic Rust APIs, better invariants and measurable performance wins.
 
-We are happy to accept contributions from anybody. Get in Discord or IRC if you want to help. We've got a [list of issues](https://github.com/space-wizards/RobustToolbox/issues) that need to be done and anybody can pick them up. Don't be afraid to ask for help either!
+## Legal
 
-## Building
-
-This repository is the **engine** part of SS14. It's the base engine all SS14 servers will be built on. As such, it does not start on its own: it needs the [content repo](https://github.com/space-wizards/space-station-14). Think of Robust Toolbox as BYOND in the context of Spacestation 13.
-
-## Legal Info
-
-See [legal.md](https://github.com/space-wizards/RobustToolbox/blob/master/legal.md) for licenses and copyright.
+See `legal.md` and the license files in this repository.

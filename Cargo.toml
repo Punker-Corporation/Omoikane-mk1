@@ -1,11 +1,12 @@
 [workspace]
 members = [
-    "rust/keisan",
-    "rust/jikan",
-    "rust/butsuri",
-    "rust/sekai",
-    "rust/daikoku",
-    "rust/shinobi",
+    "keisan",
+    "jikan",
+    "butsuri",
+    "sekai",
+    "daikoku",
+    "shinobi",
+    "xtask",
 ]
 resolver = "2"
 
