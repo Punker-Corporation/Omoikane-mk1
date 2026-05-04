@@ -4,7 +4,8 @@ use sekai::{EntityCoordinates, ScreenCoordinates};
 use std::collections::HashMap;
 
 use crate::{
-    ServerEntityManager, player_manager::PlayerManager, transform_system::TransformSystem,
+    player_manager::PlayerManager, server_entity_manager::ServerEntityManager,
+    transform_system::TransformSystem,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -235,7 +236,8 @@ impl InputSystem {
 mod tests {
     use super::{BoundKeyState, FullInputCmdMessage, InputSystem};
     use crate::{
-        ServerEntityManager, player_manager::PlayerManager, transform_system::TransformSystem,
+        player_manager::PlayerManager, server_entity_manager::ServerEntityManager,
+        transform_system::TransformSystem,
     };
     use jikan::GameTick;
     use keisan::Vector2;

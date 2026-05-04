@@ -1,4 +1,4 @@
-use crate::ServerEntityManager;
+use crate::server_entity_manager::ServerEntityManager;
 #[cfg(test)]
 use keisan::Vector2i;
 use keisan::{Angle, Vector2};
@@ -144,7 +144,7 @@ impl TransformSystem {
 #[cfg(test)]
 mod tests {
     use super::TransformSystem;
-    use crate::ServerEntityManager;
+    use crate::server_entity_manager::ServerEntityManager;
     use butsuri::{AabbShape, BodyType, Fixture, PhysShape};
     use keisan::{ApproxEq, Box2, Vector2, Vector2i};
     use sekai::{EntityUid, GridId, MapId, MapManager, Tile, TileRenderFlag};

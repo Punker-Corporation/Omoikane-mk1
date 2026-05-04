@@ -12,7 +12,6 @@ mod transform_system;
 
 pub use base_server::{DaikokuServer, ServerOptions, ServerState};
 pub use input_system::{BoundKeyFunction, BoundKeyState, FullInputCmdMessage, PlayerCommandStates};
-pub use server_entity_manager::ServerEntityManager;
 pub use server_net_manager::{
     EntityMessageType, MsgEntity, MsgState, MsgStateAck, OutboundMessage,
 };

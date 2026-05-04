@@ -1,4 +1,4 @@
-use crate::{ServerEntityManager, transform_system::TransformSystem};
+use crate::{server_entity_manager::ServerEntityManager, transform_system::TransformSystem};
 use sekai::{
     BodyType, CollisionChangeMessage, EntityUid, MapId, MapManager, PhysicsRuntimeEvent,
     PhysicsSleepMessage, PhysicsWakeMessage,
@@ -524,7 +524,7 @@ impl PhysicsSystem {
 #[cfg(test)]
 mod tests {
     use super::PhysicsSystem;
-    use crate::{ServerEntityManager, transform_system::TransformSystem};
+    use crate::{server_entity_manager::ServerEntityManager, transform_system::TransformSystem};
     use butsuri::{AabbShape, BodyType, CircleShape, CollisionRay, Fixture, PhysShape};
     use keisan::{Box2, Vector2};
     use sekai::{BroadphaseComponent, MapId, MapManager};

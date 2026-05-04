@@ -289,14 +289,7 @@ mod tests {
         ));
         let uid = server.create_entity_uninitialized(Some("mob"));
         server.initialize_entity(uid);
-        assert!(
-            server
-                .entities
-                .inner
-                .mutate_transform_and_reconcile(uid, |transform| {
-                    transform.map_id = map_id;
-                })
-        );
+        assert!(server.set_entity_map(uid, map_id));
         assert!(server.configure_physics_body(
             uid,
             Some(sekai::BodyType::Dynamic),
@@ -521,14 +514,7 @@ mod tests {
         let grid_id = server.create_grid(map_id, Some(sekai::GridId::new(9)), 4);
         let controlled = server.create_entity_uninitialized(Some("mob"));
         server.initialize_entity(controlled);
-        assert!(
-            server
-                .entities
-                .inner
-                .mutate_transform_and_reconcile(controlled, |transform| {
-                    transform.map_id = map_id;
-                })
-        );
+        assert!(server.set_entity_map(controlled, map_id));
         server.attach_player("u1", controlled, false);
         server.set_replication_tick(GameTick::FIRST);
         assert!(server.join_player("u1"));
@@ -619,14 +605,7 @@ mod tests {
 
         let controlled = server.create_entity_uninitialized(Some("mob"));
         server.initialize_entity(controlled);
-        assert!(
-            server
-                .entities
-                .inner
-                .mutate_transform_and_reconcile(controlled, |transform| {
-                    transform.map_id = map_id;
-                })
-        );
+        assert!(server.set_entity_map(controlled, map_id));
         server.attach_player("u1", controlled, false);
         server.set_replication_tick(GameTick::FIRST);
         assert!(server.join_player("u1"));
@@ -645,10 +624,7 @@ mod tests {
                 anchored: false,
             },
         );
-        server
-            .entities
-            .inner
-            .reconcile_transform_runtime(child, None);
+        server.reconcile_transform_runtime(child, None);
 
         server.tick_update(0.016);
 
@@ -725,14 +701,7 @@ mod tests {
 
         let controlled = server.create_entity_uninitialized(Some("mob"));
         server.initialize_entity(controlled);
-        assert!(
-            server
-                .entities
-                .inner
-                .mutate_transform_and_reconcile(controlled, |transform| {
-                    transform.map_id = map_id;
-                })
-        );
+        assert!(server.set_entity_map(controlled, map_id));
         server.attach_player("u1", controlled, false);
         server.set_replication_tick(GameTick::FIRST);
         assert!(server.join_player("u1"));

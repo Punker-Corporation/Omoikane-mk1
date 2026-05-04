@@ -1,4 +1,7 @@
-use crate::{ServerEntityManager, player_manager::PlayerManager, pvs_system::PvsSystem};
+use crate::{
+    player_manager::PlayerManager, pvs_system::PvsSystem,
+    server_entity_manager::ServerEntityManager,
+};
 use jikan::GameTick;
 use sekai::{GameState, MapManager, RobustSerializer};
 use std::collections::HashMap;
@@ -151,7 +154,8 @@ impl Default for ServerGameStateManager {
 mod tests {
     use super::ServerGameStateManager;
     use crate::{
-        ServerEntityManager, player_manager::PlayerManager, transform_system::TransformSystem,
+        player_manager::PlayerManager, server_entity_manager::ServerEntityManager,
+        transform_system::TransformSystem,
     };
     use jikan::GameTick;
     use sekai::{GridId, MapId, MapManager};

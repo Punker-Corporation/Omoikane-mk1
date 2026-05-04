@@ -1,4 +1,4 @@
-use crate::{ServerEntityManager, player_manager::PlayerSession};
+use crate::{player_manager::PlayerSession, server_entity_manager::ServerEntityManager};
 use sekai::{EntityUid, TransformResolver};
 use std::collections::{HashMap, HashSet};
 
@@ -130,7 +130,7 @@ impl Default for PvsSystem {
 #[cfg(test)]
 mod tests {
     use super::PvsSystem;
-    use crate::{ServerEntityManager, player_manager::PlayerManager};
+    use crate::{player_manager::PlayerManager, server_entity_manager::ServerEntityManager};
 
     #[test]
     fn pvs_system_tracks_visible_entities_per_player() {

@@ -1,7 +1,7 @@
 use crate::{
-    EntityMessageType, FullInputCmdMessage, MsgEntity, OutboundMessage, ServerEntityManager,
-    actor_system::ActorSystem, input_system::InputSystem, physics_system::PhysicsSystem,
-    player_manager::PlayerManager, server_game_state_manager::ServerGameStateManager,
+    EntityMessageType, FullInputCmdMessage, MsgEntity, OutboundMessage, actor_system::ActorSystem,
+    input_system::InputSystem, physics_system::PhysicsSystem, player_manager::PlayerManager,
+    server_entity_manager::ServerEntityManager, server_game_state_manager::ServerGameStateManager,
     server_net_manager::ServerNetManager, transform_system::TransformSystem,
 };
 use butsuri::{Fixture, Joint};
@@ -37,7 +37,7 @@ pub enum ServerState {
 pub struct DaikokuServer {
     pub(crate) options: ServerOptions,
     state: ServerState,
-    pub entities: ServerEntityManager,
+    pub(crate) entities: ServerEntityManager,
     pub(crate) players: PlayerManager,
     pub(crate) game_states: ServerGameStateManager,
     pub(crate) network: ServerNetManager,
@@ -203,6 +203,20 @@ impl DaikokuServer {
         self.entities.inner.apply_transform_state(uid, state)
     }
 
+    pub fn set_entity_map(&mut self, uid: EntityUid, map_id: MapId) -> bool {
+        self.entities
+            .inner
+            .mutate_transform_and_reconcile(uid, |transform| {
+                transform.map_id = map_id;
+            })
+    }
+
+    pub fn reconcile_transform_runtime(&mut self, uid: EntityUid, previous_map: Option<MapId>) {
+        self.entities
+            .inner
+            .reconcile_transform_runtime(uid, previous_map);
+    }
+
     pub fn configure_physics_body(
         &mut self,
         uid: EntityUid,
@@ -323,6 +337,50 @@ impl DaikokuServer {
             .mutate_physics_and_reconcile(uid, |body| body.angular_velocity = velocity)
     }
 
+    pub fn body_linear_velocity(&self, uid: EntityUid) -> Option<Vector2> {
+        self.entities
+            .inner
+            .physics
+            .get(&uid)
+            .map(|body| body.linear_velocity)
+    }
+
+    pub fn body_angular_velocity(&self, uid: EntityUid) -> Option<f32> {
+        self.entities
+            .inner
+            .physics
+            .get(&uid)
+            .map(|body| body.angular_velocity)
+    }
+
+    pub fn body_force(&self, uid: EntityUid) -> Option<Vector2> {
+        self.entities.inner.physics.get(&uid).map(|body| body.force)
+    }
+
+    pub fn body_torque(&self, uid: EntityUid) -> Option<f32> {
+        self.entities
+            .inner
+            .physics
+            .get(&uid)
+            .map(|body| body.torque)
+    }
+
+    pub fn local_position(&self, uid: EntityUid) -> Option<Vector2> {
+        self.entities
+            .inner
+            .transforms
+            .get(&uid)
+            .map(|transform| transform.local_position)
+    }
+
+    pub fn local_rotation_theta(&self, uid: EntityUid) -> Option<f64> {
+        self.entities
+            .inner
+            .transforms
+            .get(&uid)
+            .map(|transform| transform.local_rotation.theta)
+    }
+
     pub fn set_collision_wake_enabled(&mut self, uid: EntityUid, enabled: bool) -> bool {
         let _ = self.entities.inner.ensure_collision_wake(uid);
         if self.entities.inner.set_collision_wake_enabled(uid, enabled) {
@@ -338,6 +396,11 @@ impl DaikokuServer {
     #[cfg(test)]
     pub(crate) fn apply_force(&mut self, uid: EntityUid, force: Vector2) -> bool {
         self.physics.apply_force(&mut self.entities, uid, force)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_torque(&mut self, uid: EntityUid, torque: f32) -> bool {
+        self.physics.apply_torque(&mut self.entities, uid, torque)
     }
 
     #[cfg(test)]
@@ -653,15 +716,8 @@ mod tests {
             Some(true),
             None,
         ));
-        assert!(
-            server
-                .entities
-                .inner
-                .mutate_physics_and_reconcile(uid, |body| {
-                    body.force = Vector2::new(2.0, 0.0);
-                    body.torque = 4.0;
-                })
-        );
+        assert!(server.apply_force(uid, Vector2::new(2.0, 0.0)));
+        assert!(server.apply_torque(uid, 4.0));
         assert!(server.insert_fixture(
             uid,
             Fixture::new(
@@ -671,14 +727,15 @@ mod tests {
         ));
 
         server.tick_update(0.5);
-        let body = server.entities.inner.physics.get(&uid).unwrap();
-        assert_eq!(body.linear_velocity, Vector2::new(0.9, -4.5));
-        assert_eq!(body.angular_velocity, 1.8);
-        assert_eq!(body.force, Vector2::ZERO);
-        assert_eq!(body.torque, 0.0);
-        let transform = server.entities.inner.transforms.get(&uid).unwrap();
-        assert_eq!(transform.local_position, Vector2::new(0.45, -2.25));
-        assert!((transform.local_rotation.theta - 0.9).abs() < 0.0001);
+        assert_eq!(
+            server.body_linear_velocity(uid),
+            Some(Vector2::new(0.9, -4.5))
+        );
+        assert_eq!(server.body_angular_velocity(uid), Some(1.8));
+        assert_eq!(server.body_force(uid), Some(Vector2::ZERO));
+        assert_eq!(server.body_torque(uid), Some(0.0));
+        assert_eq!(server.local_position(uid), Some(Vector2::new(0.45, -2.25)));
+        assert!((server.local_rotation_theta(uid).unwrap() - 0.9).abs() < 0.0001);
     }
 
     #[test]
@@ -710,13 +767,14 @@ mod tests {
         assert!(server.apply_angular_impulse(uid, 4.0));
 
         server.tick_update(0.5);
-        let body = server.entities.inner.physics.get(&uid).unwrap();
-        assert_eq!(body.linear_velocity, Vector2::new(1.8, 0.0));
-        assert_eq!(body.angular_velocity, 3.6);
-        assert_eq!(body.force, Vector2::new(2.0, 0.0));
-        assert_eq!(body.torque, 0.0);
-        let transform = server.entities.inner.transforms.get(&uid).unwrap();
-        assert_eq!(transform.local_position, Vector2::new(0.9, 0.0));
-        assert!((transform.local_rotation.theta - 1.8).abs() < 0.0001);
+        assert_eq!(
+            server.body_linear_velocity(uid),
+            Some(Vector2::new(1.8, 0.0))
+        );
+        assert_eq!(server.body_angular_velocity(uid), Some(3.6));
+        assert_eq!(server.body_force(uid), Some(Vector2::new(2.0, 0.0)));
+        assert_eq!(server.body_torque(uid), Some(0.0));
+        assert_eq!(server.local_position(uid), Some(Vector2::new(0.9, 0.0)));
+        assert!((server.local_rotation_theta(uid).unwrap() - 1.8).abs() < 0.0001);
     }
 }

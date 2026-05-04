@@ -1,4 +1,7 @@
-use crate::{ServerEntityManager, actor_component::ActorComponent, player_manager::PlayerManager};
+use crate::{
+    actor_component::ActorComponent, player_manager::PlayerManager,
+    server_entity_manager::ServerEntityManager,
+};
 use sekai::EntityUid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -89,7 +92,7 @@ impl ActorSystem {
 #[cfg(test)]
 mod tests {
     use super::ActorSystem;
-    use crate::{ServerEntityManager, player_manager::PlayerManager};
+    use crate::{player_manager::PlayerManager, server_entity_manager::ServerEntityManager};
 
     #[test]
     fn actor_system_attaches_forces_and_detaches_players() {
