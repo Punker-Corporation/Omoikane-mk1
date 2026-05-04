@@ -1,7 +1,7 @@
 use crate::{
     AppearanceComponent, BroadphaseComponent, CollideOnAnchorComponent, CollisionWakeComponent,
     Component, ComponentFactory, EntityDeletedMessage, EntityInitializedMessage,
-    EntityLookupComponent, EntitySystemManager, EntityTerminatingEvent, EntityUid,
+    EntityLookupComponent, EntitySystem, EntitySystemManager, EntityTerminatingEvent, EntityUid,
     FixturesComponent, GameState, GameStateMapData, IgnorePauseComponent, JointComponent,
     MapComponent, MapComponentState, MapCoordinates, MapGrid, MapGridComponent,
     MapGridComponentState, MapId, MetaDataComponent, PhysicsComponent, PhysicsQueryHit,
@@ -41,7 +41,7 @@ impl EntityStringRepresentation {
 pub struct EntityManager {
     pub current_tick: GameTick,
     pub component_factory: ComponentFactory,
-    pub entity_sys_manager: EntitySystemManager,
+    entity_sys_manager: EntitySystemManager,
     pub queued_deletions: VecDeque<EntityUid>,
     pub queued_deletions_set: HashSet<EntityUid>,
     pub entities: HashSet<EntityUid>,
@@ -217,6 +217,30 @@ impl EntityManager {
             deferred_other_moves: VecDeque::new(),
             processing_subscription_side_effects: false,
         }
+    }
+
+    pub fn add_entity_system(&mut self, system: Box<dyn EntitySystem>) {
+        self.entity_sys_manager.add_system(system);
+    }
+
+    pub fn initialize_entity_systems(&mut self) {
+        self.entity_sys_manager.initialize();
+    }
+
+    pub fn shutdown_entity_systems(&mut self) {
+        self.entity_sys_manager.shutdown();
+    }
+
+    pub fn entity_systems_initialized(&self) -> bool {
+        self.entity_sys_manager.initialized
+    }
+
+    pub fn entity_system_count(&self) -> usize {
+        self.entity_sys_manager.system_count()
+    }
+
+    pub fn entity_system_names(&self) -> Vec<String> {
+        self.entity_sys_manager.system_names()
     }
 
     pub fn create_entity_uninitialized(&mut self, prototype_name: Option<&str>) -> EntityUid {
@@ -7562,8 +7586,8 @@ mod tests {
         };
 
         let mut manager = EntityManager::new();
-        manager.entity_sys_manager.add_system(Box::new(probe));
-        manager.entity_sys_manager.initialize();
+        manager.add_entity_system(Box::new(probe));
+        manager.initialize_entity_systems();
 
         let uid = manager.create_entity_uninitialized(None);
         manager.drain_entity_runtime_events();
@@ -7686,7 +7710,7 @@ mod tests {
 
         let hits = Arc::new(Mutex::new(Vec::new()));
         let mut manager = EntityManager::new();
-        manager.entity_sys_manager.add_system(Box::new(PauseSystem {
+        manager.add_entity_system(Box::new(PauseSystem {
             info: EntitySystemInfo::new("pause"),
             hits: hits.clone(),
         }));
@@ -8783,59 +8807,53 @@ mod tests {
     #[test]
     fn entity_manager_registers_builtin_event_driven_systems() {
         let manager = EntityManager::new();
-        let systems = manager.entity_sys_manager.system_names();
+        let systems = manager.entity_system_names();
 
         assert!(systems.is_empty());
-        assert_eq!(manager.entity_sys_manager.system_count(), 0);
+        assert_eq!(manager.entity_system_count(), 0);
     }
 
     #[test]
     fn entity_manager_entity_system_manager_stays_empty_without_builtin_runtime_systems() {
         let mut manager = EntityManager::new();
-        assert!(!manager.entity_sys_manager.initialized);
+        assert!(!manager.entity_systems_initialized());
 
-        manager.entity_sys_manager.initialize();
+        manager.initialize_entity_systems();
 
-        assert!(manager.entity_sys_manager.initialized);
+        assert!(manager.entity_systems_initialized());
         assert!(
             !manager
-                .entity_sys_manager
-                .system_names()
+                .entity_system_names()
                 .contains(&"shared_physics".to_string())
         );
         assert!(
             !manager
-                .entity_sys_manager
-                .system_names()
+                .entity_system_names()
                 .contains(&"entity_lookup".to_string())
         );
         assert!(
             !manager
-                .entity_sys_manager
-                .system_names()
+                .entity_system_names()
                 .contains(&"collision_wake".to_string())
         );
         assert!(
             !manager
-                .entity_sys_manager
-                .system_names()
+                .entity_system_names()
                 .contains(&"collide_on_anchor".to_string())
         );
         assert!(
             !manager
-                .entity_sys_manager
-                .system_names()
+                .entity_system_names()
                 .contains(&"transform".to_string())
         );
         assert!(
             !manager
-                .entity_sys_manager
-                .system_names()
+                .entity_system_names()
                 .contains(&"SharedAppearanceSystem".to_string())
         );
 
-        manager.entity_sys_manager.shutdown();
-        assert!(!manager.entity_sys_manager.initialized);
+        manager.shutdown_entity_systems();
+        assert!(!manager.entity_systems_initialized());
     }
 
     #[test]
