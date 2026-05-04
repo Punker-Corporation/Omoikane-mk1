@@ -102,7 +102,7 @@ impl SharedPhysicsMapComponent {
     }
 
     pub(crate) fn queue_contact_event(&mut self, status: ContactStatus, contact: Contact) {
-        if status != ContactStatus::NoContact {
+        if status.is_contact_change() {
             self.contact_events
                 .push_back(PhysicsContactEvent { status, contact });
         }

@@ -9,6 +9,12 @@ pub enum ContactStatus {
     EndTouching,
 }
 
+impl ContactStatus {
+    pub fn is_contact_change(self) -> bool {
+        self != Self::NoContact
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContactType {
     Aabb,
@@ -143,6 +149,13 @@ mod tests {
         assert_eq!(contact.update_touching(true), ContactStatus::StartTouching);
         assert!(contact.is_touching);
         assert_eq!(contact.restitution, 0.8);
+    }
+
+    #[test]
+    fn contact_status_identifies_real_transitions() {
+        assert!(!ContactStatus::NoContact.is_contact_change());
+        assert!(ContactStatus::StartTouching.is_contact_change());
+        assert!(ContactStatus::EndTouching.is_contact_change());
     }
 
     #[test]

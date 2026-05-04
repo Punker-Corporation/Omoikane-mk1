@@ -338,11 +338,8 @@ impl SharedPhysicsSystem {
                             let status = contact.update_touching(true);
                             let cloned = contact.clone();
                             let index = contact_manager.insert_contact(contact);
-                            if status != butsuri::ContactStatus::NoContact {
-                                if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner)
-                                {
-                                    physics_map.queue_contact_event(status, cloned);
-                                }
+                            if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
+                                physics_map.queue_contact_event(status, cloned);
                             }
                             index
                         } else {
@@ -358,15 +355,11 @@ impl SharedPhysicsSystem {
                                 contact.manifold = manifold;
                             }
                             if let Some(status) = contact_manager.update_touching(index, true) {
-                                if status != butsuri::ContactStatus::NoContact {
-                                    if let Some(contact) =
-                                        contact_manager.contact_mut(index).cloned()
+                                if let Some(contact) = contact_manager.contact_mut(index).cloned() {
+                                    if let Some(physics_map) =
+                                        manager.physics_maps.get_mut(&map_owner)
                                     {
-                                        if let Some(physics_map) =
-                                            manager.physics_maps.get_mut(&map_owner)
-                                        {
-                                            physics_map.queue_contact_event(status, contact);
-                                        }
+                                        physics_map.queue_contact_event(status, contact);
                                     }
                                 }
                             }
