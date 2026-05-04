@@ -22,6 +22,13 @@ impl ContactManager {
         self.active_contacts.get_mut(index)
     }
 
+    pub fn has_contact_pair(&self, fixture_a_key: &str, fixture_b_key: &str) -> bool {
+        self.active_contacts.iter().any(|contact| {
+            (contact.fixture_a == fixture_a_key && contact.fixture_b == fixture_b_key)
+                || (contact.fixture_a == fixture_b_key && contact.fixture_b == fixture_a_key)
+        })
+    }
+
     pub fn insert_contact(&mut self, contact: Contact) -> usize {
         let index = self.active_contacts.len();
         self.active_contacts.push(contact);
@@ -39,10 +46,7 @@ impl ContactManager {
             return None;
         }
 
-        if self.active_contacts.iter().any(|contact| {
-            (contact.fixture_a == fixture_a_key && contact.fixture_b == fixture_b_key)
-                || (contact.fixture_a == fixture_b_key && contact.fixture_b == fixture_a_key)
-        }) {
+        if self.has_contact_pair(fixture_a_key, fixture_b_key) {
             return None;
         }
 
@@ -106,6 +110,33 @@ mod tests {
         assert!(manager.update_touching(index, true).is_some());
         assert_eq!(manager.destroy_fixture_contacts("a"), 1);
         assert_eq!(manager.contact_count(), 0);
+    }
+
+    #[test]
+    fn contact_manager_detects_existing_pairs_symmetrically() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let mut manager = ContactManager::new();
+
+        assert!(
+            manager
+                .add_pair_with_keys("body_a:a", &fixture_a, "body_b:b", &fixture_b)
+                .is_some()
+        );
+
+        assert!(manager.has_contact_pair("body_a:a", "body_b:b"));
+        assert!(manager.has_contact_pair("body_b:b", "body_a:a"));
+        assert!(
+            manager
+                .add_pair_with_keys("body_b:b", &fixture_b, "body_a:a", &fixture_a)
+                .is_none()
+        );
     }
 
     #[test]

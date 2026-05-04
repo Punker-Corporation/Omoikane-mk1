@@ -405,9 +405,8 @@ impl SharedPhysicsSystem {
             return 0;
         };
         for previous in &previous_contacts {
-            let still_present = contact_manager.contacts().iter().any(|current| {
-                current.fixture_a == previous.fixture_a && current.fixture_b == previous.fixture_b
-            });
+            let still_present =
+                contact_manager.has_contact_pair(&previous.fixture_a, &previous.fixture_b);
             if still_present {
                 continue;
             }
