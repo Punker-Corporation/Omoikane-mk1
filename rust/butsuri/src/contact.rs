@@ -81,6 +81,11 @@ impl Contact {
         self.friction = (friction_a * friction_b).sqrt();
     }
 
+    pub fn matches_pair(&self, fixture_a: &str, fixture_b: &str) -> bool {
+        (self.fixture_a == fixture_a && self.fixture_b == fixture_b)
+            || (self.fixture_a == fixture_b && self.fixture_b == fixture_a)
+    }
+
     pub fn update_touching(&mut self, touching: bool) -> ContactStatus {
         let previous = self.is_touching;
         self.is_touching = touching;
@@ -104,5 +109,14 @@ mod tests {
         assert_eq!(contact.update_touching(true), ContactStatus::StartTouching);
         assert!(contact.is_touching);
         assert_eq!(contact.restitution, 0.8);
+    }
+
+    #[test]
+    fn contact_matches_fixture_pairs_symmetrically() {
+        let contact = Contact::new("body_a:main", "body_b:main", ContactType::Aabb);
+
+        assert!(contact.matches_pair("body_a:main", "body_b:main"));
+        assert!(contact.matches_pair("body_b:main", "body_a:main"));
+        assert!(!contact.matches_pair("body_a:main", "body_c:main"));
     }
 }

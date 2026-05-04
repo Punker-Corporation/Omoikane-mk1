@@ -23,10 +23,9 @@ impl ContactManager {
     }
 
     pub fn has_contact_pair(&self, fixture_a_key: &str, fixture_b_key: &str) -> bool {
-        self.active_contacts.iter().any(|contact| {
-            (contact.fixture_a == fixture_a_key && contact.fixture_b == fixture_b_key)
-                || (contact.fixture_a == fixture_b_key && contact.fixture_b == fixture_a_key)
-        })
+        self.active_contacts
+            .iter()
+            .any(|contact| contact.matches_pair(fixture_a_key, fixture_b_key))
     }
 
     pub fn insert_contact(&mut self, contact: Contact) -> usize {

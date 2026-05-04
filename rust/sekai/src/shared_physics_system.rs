@@ -499,10 +499,9 @@ impl SharedPhysicsSystem {
         fixture_a: &str,
         fixture_b: &str,
     ) -> Option<&'a butsuri::Contact> {
-        contacts.iter().find(|contact| {
-            (contact.fixture_a == fixture_a && contact.fixture_b == fixture_b)
-                || (contact.fixture_a == fixture_b && contact.fixture_b == fixture_a)
-        })
+        contacts
+            .iter()
+            .find(|contact| contact.matches_pair(fixture_a, fixture_b))
     }
 
     fn compute_contact_manifold(
