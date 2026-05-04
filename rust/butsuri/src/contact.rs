@@ -1,3 +1,4 @@
+use crate::{Fixture, PhysShape};
 use keisan::Vector2;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,16 @@ pub enum ContactType {
     Aabb,
     Circle,
     Mixed,
+}
+
+impl ContactType {
+    pub fn from_shapes(shape_a: &PhysShape, shape_b: &PhysShape) -> Self {
+        match (shape_a, shape_b) {
+            (PhysShape::Aabb(_), PhysShape::Aabb(_)) => Self::Aabb,
+            (PhysShape::Circle(_), PhysShape::Circle(_)) => Self::Circle,
+            _ => Self::Mixed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -81,6 +92,27 @@ impl Contact {
         self.friction = (friction_a * friction_b).sqrt();
     }
 
+    pub fn reset_material(&mut self, fixture_a: &Fixture, fixture_b: &Fixture) {
+        self.contact_type = ContactType::from_shapes(&fixture_a.shape, &fixture_b.shape);
+        self.reset_friction(fixture_a.friction, fixture_b.friction);
+        self.reset_restitution(fixture_a.restitution, fixture_b.restitution);
+    }
+
+    pub fn from_fixtures(
+        fixture_a_key: impl Into<String>,
+        fixture_a: &Fixture,
+        fixture_b_key: impl Into<String>,
+        fixture_b: &Fixture,
+    ) -> Self {
+        let mut contact = Self::new(
+            fixture_a_key,
+            fixture_b_key,
+            ContactType::from_shapes(&fixture_a.shape, &fixture_b.shape),
+        );
+        contact.reset_material(fixture_a, fixture_b);
+        contact
+    }
+
     pub fn matches_pair(&self, fixture_a: &str, fixture_b: &str) -> bool {
         (self.fixture_a == fixture_a && self.fixture_b == fixture_b)
             || (self.fixture_a == fixture_b && self.fixture_b == fixture_a)
@@ -100,6 +132,8 @@ impl Contact {
 #[cfg(test)]
 mod tests {
     use super::{Contact, ContactStatus, ContactType};
+    use crate::{AabbShape, CircleShape, Fixture, PhysShape};
+    use keisan::{Box2, Vector2};
 
     #[test]
     fn contact_tracks_touching_state_and_mixes_materials() {
@@ -118,5 +152,25 @@ mod tests {
         assert!(contact.matches_pair("body_a:main", "body_b:main"));
         assert!(contact.matches_pair("body_b:main", "body_a:main"));
         assert!(!contact.matches_pair("body_a:main", "body_c:main"));
+    }
+
+    #[test]
+    fn contact_builds_type_and_material_from_fixtures() {
+        let mut fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        fixture_a.friction = 0.25;
+        fixture_a.restitution = 0.1;
+        let mut fixture_b =
+            Fixture::new("b", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 0.5)));
+        fixture_b.friction = 1.0;
+        fixture_b.restitution = 0.8;
+
+        let contact = Contact::from_fixtures("body_a:a", &fixture_a, "body_b:b", &fixture_b);
+
+        assert_eq!(contact.contact_type, ContactType::Mixed);
+        assert_eq!(contact.friction, 0.5);
+        assert_eq!(contact.restitution, 0.8);
     }
 }

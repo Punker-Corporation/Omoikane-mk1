@@ -1,4 +1,4 @@
-use crate::{Contact, ContactStatus, ContactType, Fixture, PhysShape};
+use crate::{Contact, ContactStatus, Fixture};
 
 #[derive(Debug, Clone, Default)]
 pub struct ContactManager {
@@ -49,19 +49,7 @@ impl ContactManager {
             return None;
         }
 
-        let contact_type = match (&fixture_a.shape, &fixture_b.shape) {
-            (PhysShape::Aabb(_), PhysShape::Aabb(_)) => ContactType::Aabb,
-            (PhysShape::Circle(_), PhysShape::Circle(_)) => ContactType::Circle,
-            _ => ContactType::Mixed,
-        };
-
-        let mut contact = Contact::new(
-            fixture_a_key.to_string(),
-            fixture_b_key.to_string(),
-            contact_type,
-        );
-        contact.reset_friction(fixture_a.friction, fixture_b.friction);
-        contact.reset_restitution(fixture_a.restitution, fixture_b.restitution);
+        let contact = Contact::from_fixtures(fixture_a_key, fixture_a, fixture_b_key, fixture_b);
         self.active_contacts.push(contact);
         Some(self.active_contacts.len() - 1)
     }

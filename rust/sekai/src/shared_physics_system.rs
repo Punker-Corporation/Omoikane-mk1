@@ -324,17 +324,6 @@ impl SharedPhysicsSystem {
                         if manifold.points.is_empty() {
                             continue;
                         }
-                        let contact_type =
-                            match (&ordered_fixture_a.shape, &ordered_fixture_b.shape) {
-                                (PhysShape::Aabb(_), PhysShape::Aabb(_)) => {
-                                    butsuri::ContactType::Aabb
-                                }
-                                (PhysShape::Circle(_), PhysShape::Circle(_)) => {
-                                    butsuri::ContactType::Circle
-                                }
-                                _ => butsuri::ContactType::Mixed,
-                            };
-
                         let index = if let Some(previous) = Self::find_previous_contact(
                             &previous_contacts,
                             &fixture_a_key,
@@ -343,15 +332,7 @@ impl SharedPhysicsSystem {
                             let mut contact = previous.clone();
                             contact.fixture_a = fixture_a_key;
                             contact.fixture_b = fixture_b_key;
-                            contact.contact_type = contact_type;
-                            contact.reset_friction(
-                                ordered_fixture_a.friction,
-                                ordered_fixture_b.friction,
-                            );
-                            contact.reset_restitution(
-                                ordered_fixture_a.restitution,
-                                ordered_fixture_b.restitution,
-                            );
+                            contact.reset_material(ordered_fixture_a, ordered_fixture_b);
                             contact.manifold =
                                 Self::merge_manifold_impulses(&previous.manifold, manifold);
                             let status = contact.update_touching(true);
