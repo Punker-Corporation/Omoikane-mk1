@@ -1,13 +1,13 @@
 use crate::{
     AppearanceComponent, BroadphaseComponent, CollideOnAnchorComponent, CollisionWakeComponent,
-    Component, ComponentFactory, EntityDeletedMessage, EntityInitializedMessage,
-    EntityLookupComponent, EntitySystem, EntitySystemManager, EntityTerminatingEvent, EntityUid,
-    FixturesComponent, GameState, GameStateMapData, IgnorePauseComponent, JointComponent,
-    MapComponent, MapComponentState, MapCoordinates, MapGrid, MapGridComponent,
-    MapGridComponentState, MapId, MetaDataComponent, PhysicsComponent, PhysicsQueryHit,
-    RobustSerializer, SerializableComponentState, SerializedComponentChange, SerializedEntityState,
-    SharedPhysicsMapComponent, Tile, TileRef, TimerComponent, TransformComponent,
-    TransformComponentState, TransformResolver, WorldTransform, map_grid::MapGridLike,
+    Component, EntityDeletedMessage, EntityInitializedMessage, EntityLookupComponent, EntitySystem,
+    EntitySystemManager, EntityTerminatingEvent, EntityUid, FixturesComponent, GameState,
+    GameStateMapData, IgnorePauseComponent, JointComponent, MapComponent, MapComponentState,
+    MapCoordinates, MapGrid, MapGridComponent, MapGridComponentState, MapId, MetaDataComponent,
+    PhysicsComponent, PhysicsQueryHit, RobustSerializer, SerializableComponentState,
+    SerializedComponentChange, SerializedEntityState, SharedPhysicsMapComponent, Tile, TileRef,
+    TimerComponent, TransformComponent, TransformComponentState, TransformResolver, WorldTransform,
+    map_grid::MapGridLike,
 };
 use butsuri::CollisionRay;
 use jikan::GameTick;
@@ -40,12 +40,11 @@ impl EntityStringRepresentation {
 
 pub struct EntityManager {
     pub current_tick: GameTick,
-    pub component_factory: ComponentFactory,
     entity_sys_manager: EntitySystemManager,
-    pub queued_deletions: VecDeque<EntityUid>,
-    pub queued_deletions_set: HashSet<EntityUid>,
+    queued_deletions: VecDeque<EntityUid>,
+    queued_deletions_set: HashSet<EntityUid>,
     pub entities: HashSet<EntityUid>,
-    pub next_entity_uid: i32,
+    next_entity_uid: i32,
     pub metadata: HashMap<EntityUid, MetaDataComponent>,
     pub transforms: HashMap<EntityUid, TransformComponent>,
     pub map_components: HashMap<EntityUid, MapComponent>,
@@ -63,7 +62,7 @@ pub struct EntityManager {
     pub map_grids: HashMap<EntityUid, MapGrid>,
     pub map_grid_components: HashMap<EntityUid, MapGridComponent>,
     pub components: HashMap<EntityUid, Vec<Component>>,
-    pub entity_runtime_events: VecDeque<crate::EntityRuntimeEvent>,
+    entity_runtime_events: VecDeque<crate::EntityRuntimeEvent>,
     appearance_dirty_components: HashSet<EntityUid>,
     deferred_grid_moves: VecDeque<crate::MoveEvent>,
     deferred_other_moves: VecDeque<crate::MoveEvent>,
@@ -188,7 +187,6 @@ impl EntityManager {
     pub fn new() -> Self {
         Self {
             current_tick: GameTick::ZERO,
-            component_factory: ComponentFactory::new(),
             entity_sys_manager: EntitySystemManager::new(),
             queued_deletions: VecDeque::new(),
             queued_deletions_set: HashSet::new(),
@@ -8861,12 +8859,11 @@ mod tests {
         let mut manager = EntityManager::new();
         let metadata_uid = manager.create_entity_uninitialized(None);
         manager.drain_entity_runtime_events();
-        let mut event = crate::EntityPausedEvent {
+        let event = crate::EntityPausedEvent {
             entity: metadata_uid,
             paused: true,
         };
-        manager.raise_component_event(metadata_uid, "MetaDataComponent", &mut event);
-        manager.entity_runtime_events.push_back(event.into());
+        manager.queue_entity_event(event);
         assert_eq!(
             manager.drain_entity_runtime_events(),
             vec![crate::EntityRuntimeEvent::EntityPaused(
