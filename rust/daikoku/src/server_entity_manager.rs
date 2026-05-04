@@ -1,4 +1,4 @@
-use crate::ActorComponent;
+use crate::actor_component::ActorComponent;
 use jikan::GameTick;
 use sekai::{
     EntityManager, EntityUid, NetworkComponentMessage, RobustSerializer, SerializedEntityState,
@@ -7,10 +7,10 @@ use std::collections::HashMap;
 
 pub struct ServerEntityManager {
     pub inner: EntityManager,
-    pub actors: HashMap<EntityUid, ActorComponent>,
+    pub(crate) actors: HashMap<EntityUid, ActorComponent>,
     component_deletion_history: HashMap<EntityUid, Vec<(GameTick, u16)>>,
-    pub received_component_messages: Vec<NetworkComponentMessage<(), String, String>>,
-    pub received_system_messages: Vec<(String, String)>,
+    pub(crate) received_component_messages: Vec<NetworkComponentMessage<(), String, String>>,
+    pub(crate) received_system_messages: Vec<(String, String)>,
 }
 
 impl ServerEntityManager {
@@ -44,7 +44,7 @@ impl ServerEntityManager {
             .unwrap_or_default()
     }
 
-    pub fn remove_component_by_net_id(&mut self, uid: EntityUid, net_id: u16) -> bool {
+    pub(crate) fn remove_component_by_net_id(&mut self, uid: EntityUid, net_id: u16) -> bool {
         let joints_present_before_physics_remove = net_id == EntityManager::PHYSICS_NET_ID
             && self.inner.joint_components.contains_key(&uid);
         let removed = self.inner.remove_component_by_net_id(uid, net_id);
@@ -197,7 +197,7 @@ mod tests {
         joint.id = "rope".to_string();
         assert!(entities.inner.add_joint_between(joint));
         entities.inner.ensure_broadphase(uid);
-        entities.inner.ensure_physics_map(uid).add_body(uid, true);
+        entities.inner.ensure_physics_map(uid);
         let mut serializer = RobustSerializer::new();
         let state = entities
             .inner
@@ -615,7 +615,7 @@ mod tests {
         entities.inner.refresh_map_physics_runtime(MapId::new(4));
 
         entities.inner.current_tick = GameTick::new(5);
-        let physics = crate::PhysicsSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
         assert!(physics.set_can_collide(&mut entities, uid, false));
 
         let mut serializer = RobustSerializer::new();

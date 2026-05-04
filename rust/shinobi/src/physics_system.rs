@@ -1,24 +1,24 @@
-use crate::ClientEntityManager;
+use crate::client_entity_manager::ClientEntityManager;
 use sekai::MapId;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Default)]
-pub struct PhysicsSystem {
+pub(crate) struct PhysicsSystem {
     suppressed_once: HashSet<sekai::EntityUid>,
 }
 
 impl PhysicsSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             suppressed_once: HashSet::new(),
         }
     }
 
-    pub fn suppress_prediction_once(&mut self, uid: sekai::EntityUid) {
+    pub(crate) fn suppress_prediction_once(&mut self, uid: sekai::EntityUid) {
         self.suppressed_once.insert(uid);
     }
 
-    pub fn update(&mut self, entities: &mut ClientEntityManager, frame_time: f32) {
+    pub(crate) fn update(&mut self, entities: &mut ClientEntityManager, frame_time: f32) {
         let suppressed = std::mem::take(&mut self.suppressed_once);
         let bodies = entities.inner.physics_body_entities(true);
         let mut affected_maps = HashSet::new();
@@ -78,7 +78,7 @@ impl PhysicsSystem {
 #[cfg(test)]
 mod tests {
     use super::PhysicsSystem;
-    use crate::ClientEntityManager;
+    use crate::client_entity_manager::ClientEntityManager;
     use butsuri::{AabbShape, BodyType, CircleShape, CollisionRay, Fixture, PhysShape};
     use keisan::{Box2, Vector2};
     use sekai::EntityUid;

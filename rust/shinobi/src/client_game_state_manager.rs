@@ -1,6 +1,7 @@
 use crate::{
-    ClientEntityManager, ClientNetManager, PlayerManager,
-    client_game_state_processor::ClientGameStateProcessor,
+    client_entity_manager::ClientEntityManager,
+    client_game_state_processor::ClientGameStateProcessor, client_net_manager::ClientNetManager,
+    player_manager::PlayerManager,
 };
 use daikoku::{FullInputCmdMessage, MsgState, MsgStateAck};
 use jikan::GameTick;
@@ -8,19 +9,19 @@ use sekai::{EntityUid, GameState, RobustSerializer};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GameStateRuntimeApplyContext {
-    pub pending_inputs: Vec<FullInputCmdMessage>,
-    pub local_controlled: Option<EntityUid>,
-    pub pending_for_local: bool,
+    pub(crate) pending_inputs: Vec<FullInputCmdMessage>,
+    pub(crate) local_controlled: Option<EntityUid>,
+    pub(crate) pending_for_local: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct ClientGameStateManager {
+pub(crate) struct ClientGameStateManager {
     processor: ClientGameStateProcessor,
     serializer: RobustSerializer,
     next_input_cmd_seq: u32,
     pending_inputs: Vec<FullInputCmdMessage>,
-    pub last_processed_seq: u32,
-    pub last_processed_tick: GameTick,
+    last_processed_seq: u32,
+    pub(crate) last_processed_tick: GameTick,
 }
 
 impl Default for ClientGameStateManager {
@@ -37,7 +38,7 @@ impl Default for ClientGameStateManager {
 }
 
 impl ClientGameStateManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -114,7 +115,10 @@ impl ClientGameStateManager {
 #[cfg(test)]
 mod tests {
     use super::{ClientGameStateManager, GameStateRuntimeApplyContext};
-    use crate::{ClientEntityManager, ClientNetManager, PlayerManager};
+    use crate::{
+        client_entity_manager::ClientEntityManager, client_net_manager::ClientNetManager,
+        player_manager::PlayerManager,
+    };
     use daikoku::MsgState;
     use jikan::GameTick;
     use keisan::{Angle, Vector2, Vector2i};

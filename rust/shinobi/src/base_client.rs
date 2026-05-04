@@ -1,8 +1,11 @@
 use crate::{
-    ClientEntityManager, ClientGameStateManager, ClientNetManager, InputSystem, PhysicsSystem,
-    PlayerManager, TransformSystem,
+    client_entity_manager::ClientEntityManager, client_game_state_manager::ClientGameStateManager,
+    client_net_manager::ClientNetManager, input_system::InputSystem, physics_system::PhysicsSystem,
+    player_manager::PlayerManager, transform_system::TransformSystem,
 };
-use daikoku::{BoundKeyFunction, BoundKeyState, DaikokuServer, FullInputCmdMessage};
+#[cfg(test)]
+use daikoku::DaikokuServer;
+use daikoku::{BoundKeyFunction, BoundKeyState, FullInputCmdMessage};
 use keisan::Vector2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,15 +29,15 @@ pub enum ClientRunLevel {
 }
 
 pub struct BaseClient {
-    pub options: ClientOptions,
-    pub run_level: ClientRunLevel,
-    pub entities: ClientEntityManager,
-    pub players: PlayerManager,
-    pub network: ClientNetManager,
-    pub game_states: ClientGameStateManager,
-    pub input: InputSystem,
-    pub transforms: TransformSystem,
-    pub physics: PhysicsSystem,
+    pub(crate) options: ClientOptions,
+    pub(crate) run_level: ClientRunLevel,
+    pub(crate) entities: ClientEntityManager,
+    pub(crate) players: PlayerManager,
+    pub(crate) network: ClientNetManager,
+    pub(crate) game_states: ClientGameStateManager,
+    pub(crate) input: InputSystem,
+    pub(crate) transforms: TransformSystem,
+    pub(crate) physics: PhysicsSystem,
 }
 
 impl BaseClient {
@@ -128,7 +131,12 @@ impl BaseClient {
         self.transforms.frame_update(&mut self.entities, 0.5);
     }
 
-    pub fn flush_to_server(&mut self, server: &mut DaikokuServer) {
+    pub fn run_level(&self) -> ClientRunLevel {
+        self.run_level
+    }
+
+    #[cfg(test)]
+    fn flush_to_server(&mut self, server: &mut DaikokuServer) {
         let local_user = self
             .players
             .local_player()
@@ -136,16 +144,16 @@ impl BaseClient {
             .unwrap_or_default();
         let batch = self.network.take_outbound_batch();
         for ack in batch.acks {
-            server.game_states.ack(&local_user, ack.sequence);
+            server.ack_state(&local_user, ack.sequence);
         }
         for input in batch.inputs {
-            let _ = server.network.queue_input(&local_user, input);
+            let _ = server.queue_input(&local_user, input);
         }
         for message in batch.entities {
-            let _ = server.network.queue_entity(&local_user, message);
+            let _ = server.queue_entity(&local_user, message);
         }
         for _ in 0..batch.player_list_requests {
-            let _ = server.network.queue_player_list_request(&local_user);
+            let _ = server.queue_player_list_request(&local_user);
         }
     }
 
@@ -212,7 +220,7 @@ mod tests {
         server: &mut DaikokuServer,
         user_id: &str,
     ) {
-        for message in server.network.take_outbox(user_id) {
+        for message in server.take_outbox(user_id) {
             if let daikoku::OutboundMessage::State(state) = message {
                 client.network.receive_state(state);
             }
@@ -260,10 +268,10 @@ mod tests {
             payload_size: 0,
         }));
         client.tick_update();
-        assert_eq!(client.run_level, ClientRunLevel::InGame);
+        assert_eq!(client.run_level(), ClientRunLevel::InGame);
         assert_eq!(client.network.take_outbound_batch().acks.len(), 3);
         client.shutdown();
-        assert_eq!(client.run_level, ClientRunLevel::Initialize);
+        assert_eq!(client.run_level(), ClientRunLevel::Initialize);
     }
 
     #[test]
@@ -271,19 +279,16 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server.maps.create_map(&mut server.entities.inner, None);
-        let grid_id = server
-            .maps
-            .create_grid(&mut server.entities.inner, map_id, None, 8);
-        server.maps.set_current_tick(GameTick::ZERO);
-        assert!(server.maps.set_tile(
-            &mut server.entities.inner,
+        let map_id = server.create_map(None);
+        let grid_id = server.create_grid(map_id, None, 8);
+        server.set_map_tick(GameTick::ZERO);
+        assert!(server.set_tile(
             grid_id,
             Vector2i::new(0, 0),
             sekai::Tile::new(7, sekai::TileRenderFlag(0), 0),
         ));
-        let uid = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(uid);
+        let uid = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(uid);
         assert!(
             server
                 .entities
@@ -292,30 +297,30 @@ mod tests {
                     transform.map_id = map_id;
                 })
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             uid,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             uid,
             Fixture::new(
                 "main",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
             ),
-        );
+        ));
         let mut joint = Joint::new(uid.raw(), 999, JointType::Distance);
         joint.id = "rope".to_string();
-        assert!(server.entities.inner.add_joint_between(joint));
+        assert!(server.add_joint_between(joint));
         server.attach_player("u1", uid, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
         let mut server_messages = Vec::new();
         for _ in 0..3 {
             server.tick_update(0.016);
-            server_messages.extend(server.network.take_outbox("u1"));
+            server_messages.extend(server.take_outbox("u1"));
         }
 
         let mut client = BaseClient::new(ClientOptions {
@@ -329,7 +334,7 @@ mod tests {
         }
         client.tick_update();
 
-        assert_eq!(client.run_level, ClientRunLevel::InGame);
+        assert_eq!(client.run_level(), ClientRunLevel::InGame);
         assert_eq!(
             client.players.local_player().unwrap().controlled_entity,
             Some(uid)
@@ -391,25 +396,13 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(11)));
-        assert!(server.physics.set_map_gravity(
-            &mut server.entities,
-            &server.maps,
-            map_id,
-            Vector2::new(0.0, -10.0)
-        ));
-        assert!(server.physics.set_auto_clear_forces(
-            &mut server.entities,
-            &server.maps,
-            map_id,
-            true
-        ));
+        let map_id = server.create_map(Some(MapId::new(11)));
+        assert!(server.set_map_gravity(map_id, Vector2::new(0.0, -10.0)));
+        assert!(server.set_map_auto_clear_forces(map_id, true));
 
-        let uid = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(uid);
-        let _ = server.entities.inner.apply_transform_state(
+        let uid = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(uid);
+        let _ = server.apply_transform_state(
             uid,
             TransformComponentState {
                 local_position: Vector2::ZERO,
@@ -421,22 +414,23 @@ mod tests {
                 anchored: false,
             },
         );
-        {
-            let physics = server.entities.inner.ensure_physics(uid);
-            physics.can_collide = true;
-            physics.set_body_type(sekai::BodyType::Dynamic);
-            physics.awake = true;
-        }
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        assert!(server.insert_fixture(
             uid,
             Fixture::new(
                 "main",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
         server.attach_player("u1", uid, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
         server.tick_update(0.0);
 
@@ -486,12 +480,10 @@ mod tests {
         server.start();
         assert!(server.connect_player("u1", "pedel"));
 
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(19)));
-        let uid = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(uid);
-        let _ = server.entities.inner.apply_transform_state(
+        let map_id = server.create_map(Some(MapId::new(19)));
+        let uid = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(uid);
+        let _ = server.apply_transform_state(
             uid,
             TransformComponentState {
                 local_position: Vector2::ZERO,
@@ -504,10 +496,9 @@ mod tests {
             },
         );
         server.attach_player("u1", uid, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
-        let map_uid = server.entities.inner.map_entity_for(map_id).unwrap();
-        assert!(server.entities.inner.set_map_paused(map_uid, true));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
+        assert!(server.set_map_paused(map_id, true));
 
         server.tick_update(0.0);
 
@@ -526,17 +517,10 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(sekai::MapId::new(2)));
-        let grid_id = server.maps.create_grid(
-            &mut server.entities.inner,
-            map_id,
-            Some(sekai::GridId::new(9)),
-            4,
-        );
-        let controlled = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(controlled);
+        let map_id = server.create_map(Some(sekai::MapId::new(2)));
+        let grid_id = server.create_grid(map_id, Some(sekai::GridId::new(9)), 4);
+        let controlled = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(controlled);
         assert!(
             server
                 .entities
@@ -546,18 +530,17 @@ mod tests {
                 })
         );
         server.attach_player("u1", controlled, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
-        server.maps.set_current_tick(GameTick::new(1));
-        assert!(server.maps.set_tile(
-            &mut server.entities.inner,
+        server.set_map_tick(GameTick::new(1));
+        assert!(server.set_tile(
             grid_id,
             Vector2i::new(0, 0),
             sekai::Tile::new(1, sekai::TileRenderFlag(0), 0),
         ));
         server.tick_update(0.016);
-        let initial = server.network.take_outbox("u1");
+        let initial = server.take_outbox("u1");
 
         let mut client = BaseClient::new(ClientOptions {
             username: "pedel".to_string(),
@@ -571,16 +554,14 @@ mod tests {
         client.tick_update();
         client.flush_to_server(&mut server);
 
-        server.maps.set_current_tick(GameTick::new(2));
-        server.players.set_current_tick(GameTick::new(2));
-        assert!(server.maps.set_tile(
-            &mut server.entities.inner,
+        server.set_replication_tick(GameTick::new(2));
+        assert!(server.set_tile(
             grid_id,
             Vector2i::new(4, 0),
             sekai::Tile::new(9, sekai::TileRenderFlag(0), 0),
         ));
         server.tick_update(0.016);
-        let changed = server.network.take_outbox("u1");
+        let changed = server.take_outbox("u1");
         for message in changed {
             if let daikoku::OutboundMessage::State(state) = message {
                 client.network.receive_state(state);
@@ -599,15 +580,10 @@ mod tests {
         assert_eq!(grid.get_tile_ref(Vector2i::new(4, 0)).tile.type_id, 9);
         assert_eq!(grid.get_tile_ref(Vector2i::new(0, 0)).tile.type_id, 1);
 
-        server.maps.set_current_tick(GameTick::new(3));
-        server.players.set_current_tick(GameTick::new(3));
-        assert!(
-            server
-                .maps
-                .remove_chunk(&mut server.entities.inner, grid_id, Vector2i::new(0, 0))
-        );
+        server.set_replication_tick(GameTick::new(3));
+        assert!(server.remove_chunk(grid_id, Vector2i::new(0, 0)));
         server.tick_update(0.016);
-        let deleted = server.network.take_outbox("u1");
+        let deleted = server.take_outbox("u1");
         for message in deleted {
             if let daikoku::OutboundMessage::State(state) = message {
                 client.network.receive_state(state);
@@ -631,24 +607,18 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(2)));
-        let grid_id =
-            server
-                .maps
-                .create_grid(&mut server.entities.inner, map_id, Some(GridId::new(9)), 4);
-        let grid_uid = server.maps.get_grid_euid(grid_id).unwrap();
-        server.maps.set_current_tick(GameTick::new(1));
-        assert!(server.maps.set_tile(
-            &mut server.entities.inner,
+        let map_id = server.create_map(Some(MapId::new(2)));
+        let grid_id = server.create_grid(map_id, Some(GridId::new(9)), 4);
+        let grid_uid = server.grid_entity_for(grid_id).unwrap();
+        server.set_map_tick(GameTick::new(1));
+        assert!(server.set_tile(
             grid_id,
             Vector2i::new(0, 0),
             sekai::Tile::new(5, sekai::TileRenderFlag(0), 0),
         ));
 
-        let controlled = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(controlled);
+        let controlled = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(controlled);
         assert!(
             server
                 .entities
@@ -658,12 +628,12 @@ mod tests {
                 })
         );
         server.attach_player("u1", controlled, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
-        let child = server.entities.inner.create_entity_uninitialized(Some("item"));
-        server.entities.inner.initialize_entity(child);
-        let _ = server.entities.inner.apply_transform_state(
+        let child = server.create_entity_uninitialized(Some("item"));
+        server.initialize_entity(child);
+        let _ = server.apply_transform_state(
             child,
             TransformComponentState {
                 local_position: Vector2::new(0.5, 0.5),
@@ -712,20 +682,9 @@ mod tests {
         );
         assert!(client.entities.inner.transforms.contains_key(&child));
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        assert!(
-            server
-                .entities
-                .remove_component_by_net_id(grid_uid, MAP_GRID_NET_ID)
-        );
-        assert!(
-            server
-                .entities
-                .remove_component_by_net_id(child, TRANSFORM_NET_ID)
-        );
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.remove_component_by_net_id(grid_uid, MAP_GRID_NET_ID));
+        assert!(server.remove_component_by_net_id(child, TRANSFORM_NET_ID));
 
         server.tick_update(0.016);
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -753,25 +712,19 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(4)));
-        let map_uid = server.maps.get_map_entity_id(map_id);
-        let grid_id =
-            server
-                .maps
-                .create_grid(&mut server.entities.inner, map_id, Some(GridId::new(12)), 4);
+        let map_id = server.create_map(Some(MapId::new(4)));
+        let map_uid = server.map_entity_for(map_id).unwrap();
+        let grid_id = server.create_grid(map_id, Some(GridId::new(12)), 4);
 
-        server.maps.set_current_tick(GameTick::new(1));
-        assert!(server.maps.set_tile(
-            &mut server.entities.inner,
+        server.set_map_tick(GameTick::new(1));
+        assert!(server.set_tile(
             grid_id,
             Vector2i::new(0, 0),
             sekai::Tile::new(3, sekai::TileRenderFlag(0), 0),
         ));
 
-        let controlled = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(controlled);
+        let controlled = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(controlled);
         assert!(
             server
                 .entities
@@ -781,8 +734,8 @@ mod tests {
                 })
         );
         server.attach_player("u1", controlled, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
         server.tick_update(0.016);
 
         let mut client = BaseClient::new(ClientOptions {
@@ -808,15 +761,8 @@ mod tests {
             client_map_uid
         );
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        assert!(
-            server
-                .entities
-                .remove_component_by_net_id(map_uid, MAP_NET_ID)
-        );
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.remove_component_by_net_id(map_uid, MAP_NET_ID));
 
         server.tick_update(0.016);
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -881,13 +827,11 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(5)));
+        let map_id = server.create_map(Some(MapId::new(5)));
 
-        let controlled = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(controlled);
-        let _ = server.entities.inner.apply_transform_state(
+        let controlled = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(controlled);
+        let _ = server.apply_transform_state(
             controlled,
             TransformComponentState {
                 local_position: Vector2::ZERO,
@@ -899,27 +843,27 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             controlled,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             controlled,
             Fixture::new(
                 "controlled",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
         server.attach_player("u1", controlled, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
-        let other = server.entities.inner.create_entity_uninitialized(Some("other"));
-        server.entities.inner.initialize_entity(other);
-        let _ = server.entities.inner.apply_transform_state(
+        let other = server.create_entity_uninitialized(Some("other"));
+        server.initialize_entity(other);
+        let _ = server.apply_transform_state(
             other,
             TransformComponentState {
                 local_position: Vector2::new(0.5, 0.0),
@@ -931,20 +875,20 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             other,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             other,
             Fixture::new(
                 "other",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
 
         server.tick_update(0.016);
 
@@ -959,12 +903,9 @@ mod tests {
 
         assert_eq!(client.entities.inner.map_contact_count(map_id), 1);
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        assert!(server.entities.remove_component_by_net_id(controlled, 5));
-        assert!(server.entities.remove_component_by_net_id(other, 7));
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.remove_component_by_net_id(controlled, 5));
+        assert!(server.remove_component_by_net_id(other, 7));
 
         server.tick_update(0.016);
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -989,13 +930,11 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(6)));
+        let map_id = server.create_map(Some(MapId::new(6)));
 
-        let controlled = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(controlled);
-        let _ = server.entities.inner.apply_transform_state(
+        let controlled = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(controlled);
+        let _ = server.apply_transform_state(
             controlled,
             TransformComponentState {
                 local_position: Vector2::ZERO,
@@ -1007,27 +946,27 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             controlled,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             controlled,
             Fixture::new(
                 "controlled",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
         server.attach_player("u1", controlled, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
-        let other = server.entities.inner.create_entity_uninitialized(Some("other"));
-        server.entities.inner.initialize_entity(other);
-        let _ = server.entities.inner.apply_transform_state(
+        let other = server.create_entity_uninitialized(Some("other"));
+        server.initialize_entity(other);
+        let _ = server.apply_transform_state(
             other,
             TransformComponentState {
                 local_position: Vector2::new(0.5, 0.0),
@@ -1039,25 +978,25 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             other,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             other,
             Fixture::new(
                 "other",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
 
         let mut joint = Joint::new(controlled.raw(), other.raw(), JointType::Distance);
         joint.id = "rope".to_string();
         joint.collide_connected = false;
-        assert!(server.entities.inner.add_joint_between(joint));
+        assert!(server.add_joint_between(joint));
 
         server.tick_update(0.016);
 
@@ -1072,11 +1011,8 @@ mod tests {
 
         assert_eq!(client.entities.inner.map_contact_count(map_id), 0);
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        assert!(server.entities.remove_component_by_net_id(controlled, 8));
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.remove_component_by_net_id(controlled, 8));
 
         server.tick_update(0.016);
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -1110,13 +1046,11 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(7)));
+        let map_id = server.create_map(Some(MapId::new(7)));
 
-        let controlled = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(controlled);
-        let _ = server.entities.inner.apply_transform_state(
+        let controlled = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(controlled);
+        let _ = server.apply_transform_state(
             controlled,
             TransformComponentState {
                 local_position: Vector2::ZERO,
@@ -1128,27 +1062,27 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             controlled,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             controlled,
             Fixture::new(
                 "controlled",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
         server.attach_player("u1", controlled, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
-        let other = server.entities.inner.create_entity_uninitialized(Some("other"));
-        server.entities.inner.initialize_entity(other);
-        let _ = server.entities.inner.apply_transform_state(
+        let other = server.create_entity_uninitialized(Some("other"));
+        server.initialize_entity(other);
+        let _ = server.apply_transform_state(
             other,
             TransformComponentState {
                 local_position: Vector2::new(0.5, 0.0),
@@ -1160,25 +1094,25 @@ mod tests {
                 anchored: false,
             },
         );
-        assert!(server.entities.inner.configure_physics_body(
+        assert!(server.configure_physics_body(
             other,
             Some(sekai::BodyType::Dynamic),
             Some(true),
             Some(true),
             None,
         ));
-        let _ = server.entities.inner.insert_fixture_and_reconcile(
+        assert!(server.insert_fixture(
             other,
             Fixture::new(
                 "other",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
             ),
-        );
+        ));
 
         let mut joint = Joint::new(controlled.raw(), other.raw(), JointType::Distance);
         joint.id = "rope".to_string();
         joint.collide_connected = false;
-        assert!(server.entities.inner.add_joint_between(joint));
+        assert!(server.add_joint_between(joint));
 
         server.tick_update(0.016);
 
@@ -1208,11 +1142,8 @@ mod tests {
             1
         );
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        assert!(server.entities.remove_component_by_net_id(controlled, 5));
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.remove_component_by_net_id(controlled, 5));
 
         server.tick_update(0.016);
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -1243,8 +1174,8 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
         let mut client = BaseClient::new(ClientOptions {
             username: "pedel".to_string(),
@@ -1261,7 +1192,7 @@ mod tests {
         ));
         assert_eq!(seq, 1);
         server.tick_update(0.016);
-        for message in server.network.take_outbox("u1") {
+        for message in server.take_outbox("u1") {
             if let daikoku::OutboundMessage::State(state) = message {
                 client.network.receive_state(state);
             }
@@ -1269,14 +1200,7 @@ mod tests {
         client.tick_update();
         client.flush_to_server(&mut server);
         server.tick_update(0.016);
-        assert_eq!(
-            server
-                .players
-                .get_session("u1")
-                .unwrap()
-                .last_processed_input,
-            1
-        );
+        assert_eq!(server.last_processed_input("u1"), Some(1));
     }
 
     #[test]
@@ -1287,11 +1211,7 @@ mod tests {
         client.startup("u1");
         let uid = client.entities.create_entity(None, EntityUid::new(40));
         client.entities.inner.initialize_entity(uid);
-        client
-            .players
-            .local_player_mut()
-            .unwrap()
-            .attach_entity(uid);
+        assert!(client.players.attach_local_entity(uid));
 
         let seq = client.dispatch_input(FullInputCmdMessage::new(
             GameTick::FIRST,
@@ -1368,11 +1288,7 @@ mod tests {
         client.startup("u1");
         let uid = client.entities.create_entity(None, EntityUid::new(41));
         client.entities.inner.initialize_entity(uid);
-        client
-            .players
-            .local_player_mut()
-            .unwrap()
-            .attach_entity(uid);
+        assert!(client.players.attach_local_entity(uid));
 
         assert!(!client.handle_local_input("MoveRight", BoundKeyState::Down));
         assert_eq!(
@@ -1393,7 +1309,7 @@ mod tests {
                 .get(&uid)
                 .unwrap()
                 .linear_velocity,
-            Vector2::new(crate::InputSystem::MOVE_SPEED, 0.0)
+            Vector2::new(crate::input_system::InputSystem::MOVE_SPEED, 0.0)
         );
         assert_eq!(client.network.take_outbound_batch().inputs.len(), 1);
     }
@@ -1406,11 +1322,7 @@ mod tests {
         client.startup("u1");
         let uid = client.entities.create_entity(None, EntityUid::new(42));
         client.entities.inner.initialize_entity(uid);
-        client
-            .players
-            .local_player_mut()
-            .unwrap()
-            .attach_entity(uid);
+        assert!(client.players.attach_local_entity(uid));
 
         assert!(!client.handle_local_input("MoveRight", BoundKeyState::Down));
         assert_eq!(
@@ -1442,18 +1354,19 @@ mod tests {
         server.start();
         assert!(server.connect_player("u1", "pedel"));
 
-        let uid = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(uid);
-        {
-            let physics = server.entities.inner.ensure_physics(uid);
-            physics.can_collide = true;
-            physics.set_body_type(sekai::BodyType::Dynamic);
-            physics.awake = true;
-            physics.linear_velocity = Vector2::new(3.0, 0.0);
-        }
+        let uid = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(uid);
+        assert!(server.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        assert!(server.set_body_linear_velocity(uid, Vector2::new(3.0, 0.0)));
         server.attach_player("u1", uid, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
         server.tick_update(0.0);
 
         let mut client = BaseClient::new(ClientOptions {
@@ -1476,12 +1389,8 @@ mod tests {
         );
         assert!(client.entities.inner.physics.get(&uid).unwrap().awake);
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        let physics = daikoku::PhysicsSystem::new();
-        assert!(physics.set_awake(&mut server.entities, uid, false));
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.set_body_awake(uid, false));
         server.tick_update(0.0);
 
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -1516,19 +1425,20 @@ mod tests {
         server.start();
         assert!(server.connect_player("u1", "pedel"));
 
-        let uid = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(uid);
-        {
-            let physics = server.entities.inner.ensure_physics(uid);
-            physics.can_collide = true;
-            physics.set_body_type(sekai::BodyType::Dynamic);
-            physics.awake = false;
-            physics.sleeping_allowed = true;
-            physics.angular_velocity = 4.0;
-        }
+        let uid = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(uid);
+        assert!(server.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(false),
+            Some(true),
+            None,
+        ));
+        let _ = server.set_body_sleeping_allowed(uid, true);
+        assert!(server.set_body_angular_velocity(uid, 4.0));
         server.attach_player("u1", uid, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
 
         server.tick_update(0.0);
 
@@ -1540,14 +1450,10 @@ mod tests {
         client.tick_update();
         client.flush_to_server(&mut server);
 
-        server.current_tick = GameTick::new(2);
-        server.entities.inner.current_tick = GameTick::new(2);
-        server.players.set_current_tick(GameTick::new(2));
-        server.maps.set_current_tick(GameTick::new(2));
-        let physics = daikoku::PhysicsSystem::new();
-        assert!(physics.set_sleeping_allowed(&mut server.entities, uid, false));
-        assert!(physics.set_fixed_rotation(&mut server.entities, uid, true));
-        assert!(physics.set_body_status(&mut server.entities, uid, sekai::BodyStatus::InAir));
+        server.set_current_tick(GameTick::new(2));
+        assert!(server.set_body_sleeping_allowed(uid, false));
+        assert!(server.set_body_fixed_rotation(uid, true));
+        assert!(server.set_body_status(uid, sekai::BodyStatus::InAir));
         server.tick_update(0.0);
 
         feed_server_states_to_client(&mut client, &mut server, "u1");
@@ -1566,18 +1472,13 @@ mod tests {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         assert!(server.connect_player("u1", "pedel"));
-        let map_id = server
-            .maps
-            .create_map(&mut server.entities.inner, Some(MapId::new(18)));
-        let grid_id =
-            server
-                .maps
-                .create_grid(&mut server.entities.inner, map_id, Some(GridId::new(44)), 8);
+        let map_id = server.create_map(Some(MapId::new(18)));
+        let grid_id = server.create_grid(map_id, Some(GridId::new(44)), 8);
 
-        let uid = server.entities.inner.create_entity_uninitialized(Some("mob"));
-        server.entities.inner.initialize_entity(uid);
-        let grid_uid = server.entities.inner.grid_entity_for(grid_id).unwrap();
-        let _ = server.entities.inner.apply_transform_state(
+        let uid = server.create_entity_uninitialized(Some("mob"));
+        server.initialize_entity(uid);
+        let grid_uid = server.grid_entity_for(grid_id).unwrap();
+        let _ = server.apply_transform_state(
             uid,
             TransformComponentState {
                 local_position: Vector2::ZERO,
@@ -1589,17 +1490,17 @@ mod tests {
                 anchored: false,
             },
         );
-        {
-            let physics = server.entities.inner.ensure_physics(uid);
-            physics.set_body_type(sekai::BodyType::Dynamic);
-            physics.can_collide = true;
-            physics.set_awake(false);
-        }
-        server.entities.inner.ensure_collision_wake(uid);
-        server.entities.inner.refresh_entity_physics_runtime(uid);
+        assert!(server.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(false),
+            Some(true),
+            None,
+        ));
+        assert!(server.set_collision_wake_enabled(uid, true));
         server.attach_player("u1", uid, false);
-        server.players.set_current_tick(GameTick::FIRST);
-        assert!(server.players.join_game("u1"));
+        server.set_replication_tick(GameTick::FIRST);
+        assert!(server.join_player("u1"));
         server.tick_update(0.0);
 
         let mut client = BaseClient::new(ClientOptions {
@@ -1644,7 +1545,7 @@ mod tests {
         client.flush_to_server(&mut server);
         server.tick_update(0.016);
         assert_eq!(
-            server.entities.received_system_messages,
+            server.received_system_messages(),
             vec![("u1".to_string(), "wave".to_string())]
         );
 
@@ -1673,7 +1574,7 @@ mod tests {
         client.startup("u1");
         client.flush_to_server(&mut server);
         server.tick_update(0.016);
-        for message in server.network.take_outbox("u1") {
+        for message in server.take_outbox("u1") {
             if let daikoku::OutboundMessage::PlayerList(list) = message {
                 client.network.receive_player_list(list);
             }

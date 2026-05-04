@@ -3,7 +3,9 @@ use keisan::{Angle, Vector2};
 use sekai::{EntityCoordinates, ScreenCoordinates};
 use std::collections::HashMap;
 
-use crate::{PlayerManager, ServerEntityManager, TransformSystem};
+use crate::{
+    ServerEntityManager, player_manager::PlayerManager, transform_system::TransformSystem,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundKeyFunction {
@@ -92,7 +94,7 @@ impl FullInputCmdMessage {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct InputSystem {
+pub(crate) struct InputSystem {
     player_inputs: HashMap<String, PlayerCommandStates>,
     last_processed_input_cmd: HashMap<String, u32>,
 }
@@ -101,22 +103,22 @@ impl InputSystem {
     pub const MOVE_STEP: f32 = 1.0;
     pub const MOVE_SPEED: f32 = 62.5;
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn handle_player_connected(&mut self, user_id: impl Into<String>) {
+    pub(crate) fn handle_player_connected(&mut self, user_id: impl Into<String>) {
         let user_id = user_id.into();
         self.player_inputs.entry(user_id.clone()).or_default();
         self.last_processed_input_cmd.entry(user_id).or_insert(0);
     }
 
-    pub fn handle_player_disconnected(&mut self, user_id: &str) {
+    pub(crate) fn handle_player_disconnected(&mut self, user_id: &str) {
         self.player_inputs.remove(user_id);
         self.last_processed_input_cmd.remove(user_id);
     }
 
-    pub fn handle_input(
+    pub(crate) fn handle_input(
         &mut self,
         players: &mut PlayerManager,
         user_id: &str,
@@ -184,7 +186,7 @@ impl InputSystem {
         self.player_inputs.get(user_id).map(Self::desired_velocity)
     }
 
-    pub fn apply_movement_command(
+    pub(crate) fn apply_movement_command(
         &self,
         entities: &mut ServerEntityManager,
         players: &PlayerManager,
@@ -207,11 +209,11 @@ impl InputSystem {
         transforms.offset_local_transform(entities, controlled, delta, Angle::ZERO)
     }
 
-    pub fn apply_movement_state(
+    pub(crate) fn apply_movement_state(
         &self,
         entities: &mut ServerEntityManager,
         players: &PlayerManager,
-        physics: &crate::PhysicsSystem,
+        physics: &crate::physics_system::PhysicsSystem,
         user_id: &str,
     ) -> bool {
         let Some(controlled) = players
@@ -232,7 +234,9 @@ impl InputSystem {
 #[cfg(test)]
 mod tests {
     use super::{BoundKeyState, FullInputCmdMessage, InputSystem};
-    use crate::{PlayerManager, ServerEntityManager, TransformSystem};
+    use crate::{
+        ServerEntityManager, player_manager::PlayerManager, transform_system::TransformSystem,
+    };
     use jikan::GameTick;
     use keisan::Vector2;
     use sekai::{EntityCoordinates, EntityUid, ScreenCoordinates, WindowId};

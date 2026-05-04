@@ -1,21 +1,21 @@
-use crate::{ActorComponent, PlayerManager, ServerEntityManager};
+use crate::{ServerEntityManager, actor_component::ActorComponent, player_manager::PlayerManager};
 use sekai::EntityUid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ActorAttachResult {
-    pub result: bool,
-    pub force_kicked: Option<String>,
+pub(crate) struct ActorAttachResult {
+    pub(crate) result: bool,
+    pub(crate) force_kicked: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct ActorSystem;
+pub(crate) struct ActorSystem;
 
 impl ActorSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
-    pub fn attach(
+    pub(crate) fn attach(
         &self,
         entities: &mut ServerEntityManager,
         players: &mut PlayerManager,
@@ -70,7 +70,7 @@ impl ActorSystem {
         true
     }
 
-    pub fn detach_player(
+    pub(crate) fn detach_player(
         &self,
         entities: &mut ServerEntityManager,
         players: &mut PlayerManager,
@@ -89,7 +89,7 @@ impl ActorSystem {
 #[cfg(test)]
 mod tests {
     use super::ActorSystem;
-    use crate::{PlayerManager, ServerEntityManager};
+    use crate::{ServerEntityManager, player_manager::PlayerManager};
 
     #[test]
     fn actor_system_attaches_forces_and_detaches_players() {

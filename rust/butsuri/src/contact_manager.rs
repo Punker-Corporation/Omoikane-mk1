@@ -28,10 +28,6 @@ impl ContactManager {
         index
     }
 
-    pub fn add_pair(&mut self, fixture_a: &Fixture, fixture_b: &Fixture) -> Option<usize> {
-        self.add_pair_with_keys(&fixture_a.id, fixture_a, &fixture_b.id, fixture_b)
-    }
-
     pub fn add_pair_with_keys(
         &mut self,
         fixture_a_key: &str,
@@ -67,10 +63,7 @@ impl ContactManager {
         Some(self.active_contacts.len() - 1)
     }
 
-    pub fn destroy(&mut self, index: usize) -> Option<Contact> {
-        (index < self.active_contacts.len()).then(|| self.active_contacts.swap_remove(index))
-    }
-
+    #[cfg(test)]
     pub fn destroy_fixture_contacts(&mut self, fixture_id: &str) -> usize {
         let before = self.active_contacts.len();
         self.active_contacts
@@ -106,7 +99,9 @@ mod tests {
             PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
         );
         let mut manager = ContactManager::new();
-        let index = manager.add_pair(&fixture_a, &fixture_b).unwrap();
+        let index = manager
+            .add_pair_with_keys("a", &fixture_a, "b", &fixture_b)
+            .unwrap();
         assert_eq!(manager.contact_count(), 1);
         assert!(manager.update_touching(index, true).is_some());
         assert_eq!(manager.destroy_fixture_contacts("a"), 1);

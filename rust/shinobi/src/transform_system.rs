@@ -2,23 +2,23 @@ use keisan::{Angle, Vector2};
 use sekai::EntityUid;
 use std::collections::HashMap;
 
-use crate::{ClientEntityManager, client_entity_manager::PendingTransformLerp};
+use crate::client_entity_manager::{ClientEntityManager, PendingTransformLerp};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TransformLerp {
-    pub source: Vector2,
-    pub destination: Vector2,
-    pub source_angle: Angle,
-    pub destination_angle: Angle,
-    pub parent: EntityUid,
-    pub progress: f32,
+struct TransformLerp {
+    source: Vector2,
+    destination: Vector2,
+    source_angle: Angle,
+    destination_angle: Angle,
+    parent: EntityUid,
+    progress: f32,
 }
 
 #[derive(Debug, Clone)]
-pub struct TransformSystem {
+pub(crate) struct TransformSystem {
     lerps: HashMap<EntityUid, TransformLerp>,
-    pub max_interpolation_distance: f32,
-    pub max_interpolation_angle: f32,
+    max_interpolation_distance: f32,
+    max_interpolation_angle: f32,
 }
 
 impl Default for TransformSystem {
@@ -32,11 +32,11 @@ impl Default for TransformSystem {
 }
 
 impl TransformSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn queue_snapshot_lerp(
+    fn queue_snapshot_lerp(
         &mut self,
         uid: EntityUid,
         source: Vector2,
@@ -73,7 +73,7 @@ impl TransformSystem {
         }
     }
 
-    pub fn queue_pending_snapshot_lerps<I>(&mut self, lerps: I, skip_uid: Option<EntityUid>)
+    pub(crate) fn queue_pending_snapshot_lerps<I>(&mut self, lerps: I, skip_uid: Option<EntityUid>)
     where
         I: IntoIterator<Item = PendingTransformLerp>,
     {
@@ -95,7 +95,7 @@ impl TransformSystem {
         }
     }
 
-    pub fn frame_update(&mut self, entities: &mut ClientEntityManager, step: f32) {
+    pub(crate) fn frame_update(&mut self, entities: &mut ClientEntityManager, step: f32) {
         let mut finished = Vec::new();
         for (uid, lerp) in &mut self.lerps {
             let Some(transform) = entities.inner.transforms.get(uid) else {
@@ -125,7 +125,7 @@ impl TransformSystem {
 #[cfg(test)]
 mod tests {
     use super::TransformSystem;
-    use crate::{ClientEntityManager, client_entity_manager::PendingTransformLerp};
+    use crate::client_entity_manager::{ClientEntityManager, PendingTransformLerp};
     use butsuri::{AabbShape, Fixture, PhysShape};
     use keisan::{Angle, Box2, Vector2};
     use sekai::{EntityUid, MapId};

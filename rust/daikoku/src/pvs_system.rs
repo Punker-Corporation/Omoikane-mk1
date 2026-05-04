@@ -1,17 +1,17 @@
-use crate::{PlayerSession, ServerEntityManager};
+use crate::{ServerEntityManager, player_manager::PlayerSession};
 use sekai::{EntityUid, TransformResolver};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
-pub struct PvsSystem {
-    pub culling_enabled: bool,
-    pub view_size: f32,
+pub(crate) struct PvsSystem {
+    pub(crate) culling_enabled: bool,
+    pub(crate) view_size: f32,
     player_visible_sets: HashMap<String, HashSet<EntityUid>>,
     player_seen_sets: HashMap<String, HashSet<EntityUid>>,
 }
 
 impl PvsSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             culling_enabled: true,
             view_size: 16.0,
@@ -20,13 +20,13 @@ impl PvsSystem {
         }
     }
 
-    pub fn add_session(&mut self, user_id: impl Into<String>) {
+    pub(crate) fn add_session(&mut self, user_id: impl Into<String>) {
         let user_id = user_id.into();
         self.player_visible_sets.entry(user_id.clone()).or_default();
         self.player_seen_sets.entry(user_id).or_default();
     }
 
-    pub fn remove_session(&mut self, user_id: &str) {
+    pub(crate) fn remove_session(&mut self, user_id: &str) {
         self.player_visible_sets.remove(user_id);
         self.player_seen_sets.remove(user_id);
     }
@@ -68,7 +68,7 @@ impl PvsSystem {
         }
     }
 
-    pub fn calculate_visible_entities(
+    pub(crate) fn calculate_visible_entities(
         &mut self,
         entities: &ServerEntityManager,
         session: &PlayerSession,
@@ -130,7 +130,7 @@ impl Default for PvsSystem {
 #[cfg(test)]
 mod tests {
     use super::PvsSystem;
-    use crate::{PlayerManager, ServerEntityManager};
+    use crate::{ServerEntityManager, player_manager::PlayerManager};
 
     #[test]
     fn pvs_system_tracks_visible_entities_per_player() {

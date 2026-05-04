@@ -3,14 +3,14 @@ use sekai::{EntityUid, PlayerState, SessionStatus};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlayerSession {
-    pub user_id: String,
-    pub username: String,
-    pub status: SessionStatus,
-    pub ping: i16,
-    pub controlled_entity: Option<EntityUid>,
-    pub last_processed_input: u32,
-    pub last_modified_tick: GameTick,
+pub(crate) struct PlayerSession {
+    pub(crate) user_id: String,
+    pub(crate) username: String,
+    pub(crate) status: SessionStatus,
+    pub(crate) ping: i16,
+    pub(crate) controlled_entity: Option<EntityUid>,
+    pub(crate) last_processed_input: u32,
+    pub(crate) last_modified_tick: GameTick,
 }
 
 impl PlayerSession {
@@ -65,7 +65,7 @@ struct DisconnectedPlayerState {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct PlayerManager {
+pub(crate) struct PlayerManager {
     sessions: HashMap<String, PlayerSession>,
     disconnected_states: HashMap<String, DisconnectedPlayerState>,
     max_players: usize,
@@ -73,7 +73,7 @@ pub struct PlayerManager {
 }
 
 impl PlayerManager {
-    pub fn new(max_players: usize) -> Self {
+    pub(crate) fn new(max_players: usize) -> Self {
         Self {
             sessions: HashMap::new(),
             disconnected_states: HashMap::new(),
@@ -82,21 +82,25 @@ impl PlayerManager {
         }
     }
 
-    pub fn initialize(&mut self, max_players: usize) {
+    pub(crate) fn initialize(&mut self, max_players: usize) {
         self.max_players = max_players;
         self.current_tick = GameTick::ZERO;
     }
 
-    pub fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) {
         self.sessions.clear();
         self.disconnected_states.clear();
     }
 
-    pub fn set_current_tick(&mut self, current_tick: GameTick) {
+    pub(crate) fn set_current_tick(&mut self, current_tick: GameTick) {
         self.current_tick = current_tick;
     }
 
-    pub fn connect(&mut self, user_id: impl Into<String>, username: impl Into<String>) -> bool {
+    pub(crate) fn connect(
+        &mut self,
+        user_id: impl Into<String>,
+        username: impl Into<String>,
+    ) -> bool {
         if self.sessions.len() >= self.max_players {
             return false;
         }
@@ -113,7 +117,7 @@ impl PlayerManager {
         true
     }
 
-    pub fn disconnect(&mut self, user_id: &str) {
+    pub(crate) fn disconnect(&mut self, user_id: &str) {
         if let Some(mut session) = self.sessions.remove(user_id) {
             session.on_disconnect(self.current_tick);
             self.disconnected_states.insert(
@@ -126,11 +130,11 @@ impl PlayerManager {
         }
     }
 
-    pub fn get_session(&self, user_id: &str) -> Option<&PlayerSession> {
+    pub(crate) fn get_session(&self, user_id: &str) -> Option<&PlayerSession> {
         self.sessions.get(user_id)
     }
 
-    pub fn join_game(&mut self, user_id: &str) -> bool {
+    pub(crate) fn join_game(&mut self, user_id: &str) -> bool {
         let Some(session) = self.sessions.get_mut(user_id) else {
             return false;
         };
@@ -138,7 +142,7 @@ impl PlayerManager {
         true
     }
 
-    pub fn set_attached_entity(&mut self, user_id: &str, entity: Option<EntityUid>) -> bool {
+    pub(crate) fn set_attached_entity(&mut self, user_id: &str, entity: Option<EntityUid>) -> bool {
         let Some(session) = self.sessions.get_mut(user_id) else {
             return false;
         };
@@ -146,7 +150,7 @@ impl PlayerManager {
         true
     }
 
-    pub fn set_last_processed_input(&mut self, user_id: &str, input_sequence: u32) -> bool {
+    pub(crate) fn set_last_processed_input(&mut self, user_id: &str, input_sequence: u32) -> bool {
         let Some(session) = self.sessions.get_mut(user_id) else {
             return false;
         };
@@ -155,7 +159,8 @@ impl PlayerManager {
         true
     }
 
-    pub fn set_ping(&mut self, user_id: &str, ping: i16) -> bool {
+    #[cfg(test)]
+    pub(crate) fn set_ping(&mut self, user_id: &str, ping: i16) -> bool {
         let Some(session) = self.sessions.get_mut(user_id) else {
             return false;
         };
@@ -164,24 +169,24 @@ impl PlayerManager {
         true
     }
 
-    pub fn sessions(&self) -> impl Iterator<Item = &PlayerSession> {
+    pub(crate) fn sessions(&self) -> impl Iterator<Item = &PlayerSession> {
         self.sessions.values()
     }
 
-    pub fn in_game_sessions(&self) -> impl Iterator<Item = &PlayerSession> {
+    pub(crate) fn in_game_sessions(&self) -> impl Iterator<Item = &PlayerSession> {
         self.sessions
             .values()
             .filter(|session| session.status == SessionStatus::InGame)
     }
 
-    pub fn get_player_states(&self) -> Vec<PlayerState> {
+    pub(crate) fn get_player_states(&self) -> Vec<PlayerState> {
         self.sessions
             .values()
             .map(PlayerSession::to_player_state)
             .collect()
     }
 
-    pub fn get_player_states_since(&self, from_tick: GameTick) -> Vec<PlayerState> {
+    pub(crate) fn get_player_states_since(&self, from_tick: GameTick) -> Vec<PlayerState> {
         let mut states = Vec::new();
 
         for session in self.sessions.values() {
@@ -201,7 +206,7 @@ impl PlayerManager {
         states
     }
 
-    pub fn cull_disconnected_history(&mut self, before_or_at: GameTick) {
+    pub(crate) fn cull_disconnected_history(&mut self, before_or_at: GameTick) {
         self.disconnected_states
             .retain(|_, state| state.last_modified_tick > before_or_at);
     }
@@ -221,7 +226,10 @@ mod tests {
         assert!(manager.set_attached_entity("u1", Some(EntityUid::new(7))));
         assert_eq!(manager.sessions().count(), 1);
         assert_eq!(manager.get_player_states()[0].status, SessionStatus::InGame);
-        assert_eq!(manager.get_session("u1").unwrap().status, SessionStatus::InGame);
+        assert_eq!(
+            manager.get_session("u1").unwrap().status,
+            SessionStatus::InGame
+        );
     }
 
     #[test]

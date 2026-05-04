@@ -1,18 +1,18 @@
-use crate::{PlayerManager, PvsSystem, ServerEntityManager};
+use crate::{ServerEntityManager, player_manager::PlayerManager, pvs_system::PvsSystem};
 use jikan::GameTick;
 use sekai::{GameState, MapManager, RobustSerializer};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub struct ServerGameStateManager {
+pub(crate) struct ServerGameStateManager {
     acked_states: HashMap<String, GameTick>,
     last_oldest_ack: GameTick,
     serializer: RobustSerializer,
-    pub pvs: PvsSystem,
+    pvs: PvsSystem,
 }
 
 impl ServerGameStateManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut serializer = RobustSerializer::new();
         serializer.initialize();
 
@@ -35,7 +35,7 @@ impl ServerGameStateManager {
         self.pvs.remove_session(user_id);
     }
 
-    pub fn ack(&mut self, user_id: &str, state_acked: GameTick) {
+    pub(crate) fn ack(&mut self, user_id: &str, state_acked: GameTick) {
         let last = self
             .acked_states
             .entry(user_id.to_string())
@@ -150,7 +150,9 @@ impl Default for ServerGameStateManager {
 #[cfg(test)]
 mod tests {
     use super::ServerGameStateManager;
-    use crate::{PlayerManager, ServerEntityManager};
+    use crate::{
+        ServerEntityManager, player_manager::PlayerManager, transform_system::TransformSystem,
+    };
     use jikan::GameTick;
     use sekai::{GridId, MapId, MapManager};
 
@@ -769,7 +771,7 @@ mod tests {
         entities.inner.current_tick = GameTick::new(2);
         players.set_current_tick(GameTick::new(2));
         maps.set_current_tick(GameTick::new(2));
-        let physics = crate::PhysicsSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
         assert!(physics.set_awake(&mut entities, controlled, false));
 
         let updates =
@@ -836,7 +838,7 @@ mod tests {
         entities.inner.current_tick = GameTick::new(2);
         players.set_current_tick(GameTick::new(2));
         maps.set_current_tick(GameTick::new(2));
-        let physics = crate::PhysicsSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
         assert!(physics.set_linear_velocity(
             &mut entities,
             controlled,
@@ -893,7 +895,7 @@ mod tests {
         entities.inner.current_tick = GameTick::new(2);
         players.set_current_tick(GameTick::new(2));
         maps.set_current_tick(GameTick::new(2));
-        let physics = crate::PhysicsSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
         assert!(physics.set_map_gravity(
             &mut entities,
             &maps,
@@ -962,8 +964,8 @@ mod tests {
         entities.inner.current_tick = GameTick::new(2);
         players.set_current_tick(GameTick::new(2));
         maps.set_current_tick(GameTick::new(2));
-        let physics = crate::PhysicsSystem::new();
-        let mut transforms = crate::TransformSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
+        let mut transforms = TransformSystem::new();
         assert_eq!(
             physics.step_simulation(&mut entities, &mut transforms, 0.1),
             0
@@ -1018,7 +1020,7 @@ mod tests {
         entities.inner.current_tick = GameTick::new(2);
         players.set_current_tick(GameTick::new(2));
         maps.set_current_tick(GameTick::new(2));
-        let physics = crate::PhysicsSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
         assert!(physics.apply_force(&mut entities, controlled, keisan::Vector2::new(2.0, 0.0)));
         assert!(physics.apply_torque(&mut entities, controlled, 4.0));
 
@@ -1064,9 +1066,9 @@ mod tests {
         entities.inner.current_tick = GameTick::new(2);
         players.set_current_tick(GameTick::new(2));
         maps.set_current_tick(GameTick::new(2));
-        let physics = crate::PhysicsSystem::new();
+        let physics = crate::physics_system::PhysicsSystem::new();
         assert!(physics.apply_force(&mut entities, controlled, keisan::Vector2::new(2.0, 0.0)));
-        let mut transforms = crate::TransformSystem::new();
+        let mut transforms = TransformSystem::new();
         assert_eq!(
             physics.step_simulation(&mut entities, &mut transforms, 0.5),
             1

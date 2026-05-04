@@ -3,7 +3,7 @@ use sekai::MsgPlayerList;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Default)]
-pub struct ClientNetManager {
+pub(crate) struct ClientNetManager {
     connected: bool,
     inbound_states: VecDeque<MsgState>,
     inbound_entities: VecDeque<MsgEntity>,
@@ -15,30 +15,31 @@ pub struct ClientNetManager {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ClientInboundBatch {
-    pub states: Vec<MsgState>,
-    pub entities: Vec<MsgEntity>,
-    pub player_lists: Vec<MsgPlayerList>,
+pub(crate) struct ClientInboundBatch {
+    pub(crate) states: Vec<MsgState>,
+    pub(crate) entities: Vec<MsgEntity>,
+    pub(crate) player_lists: Vec<MsgPlayerList>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
-pub struct ClientOutboundBatch {
-    pub acks: Vec<MsgStateAck>,
-    pub inputs: Vec<FullInputCmdMessage>,
-    pub entities: Vec<MsgEntity>,
-    pub player_list_requests: usize,
+pub(crate) struct ClientOutboundBatch {
+    pub(crate) acks: Vec<MsgStateAck>,
+    pub(crate) inputs: Vec<FullInputCmdMessage>,
+    pub(crate) entities: Vec<MsgEntity>,
+    pub(crate) player_list_requests: usize,
 }
 
 impl ClientNetManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn connect(&mut self) {
+    pub(crate) fn connect(&mut self) {
         self.connected = true;
     }
 
-    pub fn disconnect(&mut self) {
+    pub(crate) fn disconnect(&mut self) {
         self.connected = false;
         self.inbound_states.clear();
         self.inbound_entities.clear();
@@ -49,29 +50,33 @@ impl ClientNetManager {
         self.outbound_player_list_requests = 0;
     }
 
-    pub fn receive_state(&mut self, state: MsgState) {
+    #[cfg(test)]
+    pub(crate) fn receive_state(&mut self, state: MsgState) {
         if self.connected {
             self.inbound_states.push_back(state);
         }
     }
 
-    pub fn next_state(&mut self) -> Option<MsgState> {
+    #[cfg(test)]
+    pub(crate) fn next_state(&mut self) -> Option<MsgState> {
         self.inbound_states.pop_front()
     }
 
-    pub fn receive_entity(&mut self, message: MsgEntity) {
+    #[cfg(test)]
+    pub(crate) fn receive_entity(&mut self, message: MsgEntity) {
         if self.connected {
             self.inbound_entities.push_back(message);
         }
     }
 
-    pub fn receive_player_list(&mut self, message: MsgPlayerList) {
+    #[cfg(test)]
+    pub(crate) fn receive_player_list(&mut self, message: MsgPlayerList) {
         if self.connected {
             self.inbound_player_lists.push_back(message);
         }
     }
 
-    pub fn take_inbound_batch(&mut self) -> ClientInboundBatch {
+    pub(crate) fn take_inbound_batch(&mut self) -> ClientInboundBatch {
         ClientInboundBatch {
             states: self.inbound_states.drain(..).collect(),
             entities: self.inbound_entities.drain(..).collect(),
@@ -79,31 +84,33 @@ impl ClientNetManager {
         }
     }
 
-    pub fn send_ack(&mut self, ack: MsgStateAck) {
+    pub(crate) fn send_ack(&mut self, ack: MsgStateAck) {
         if self.connected {
             self.outbound_acks.push(ack);
         }
     }
 
-    pub fn dispatch_input(&mut self, input: FullInputCmdMessage) {
+    pub(crate) fn dispatch_input(&mut self, input: FullInputCmdMessage) {
         if self.connected {
             self.outbound_inputs.push(input);
         }
     }
 
-    pub fn send_entity(&mut self, message: MsgEntity) {
+    #[cfg(test)]
+    pub(crate) fn send_entity(&mut self, message: MsgEntity) {
         if self.connected {
             self.outbound_entities.push(message);
         }
     }
 
-    pub fn request_player_list(&mut self) {
+    pub(crate) fn request_player_list(&mut self) {
         if self.connected {
             self.outbound_player_list_requests += 1;
         }
     }
 
-    pub fn take_outbound_batch(&mut self) -> ClientOutboundBatch {
+    #[cfg(test)]
+    pub(crate) fn take_outbound_batch(&mut self) -> ClientOutboundBatch {
         ClientOutboundBatch {
             acks: std::mem::take(&mut self.outbound_acks),
             inputs: std::mem::take(&mut self.outbound_inputs),

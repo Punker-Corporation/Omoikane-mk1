@@ -25,10 +25,10 @@ pub struct PhysicsStepState {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SharedPhysicsSystem;
+pub(crate) struct SharedPhysicsSystem;
 
 impl SharedPhysicsSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
@@ -36,7 +36,7 @@ impl SharedPhysicsSystem {
     const SLEEP_ANGULAR_TOLERANCE: f32 = 0.01;
     const SLEEP_TIME_THRESHOLD: f32 = 0.5;
 
-    pub fn step_body(
+    pub(crate) fn step_body(
         &self,
         manager: &mut EntityManager,
         uid: EntityUid,
@@ -127,14 +127,18 @@ impl SharedPhysicsSystem {
         Some(state)
     }
 
-    pub fn get_world_aabb(&self, manager: &EntityManager, uid: EntityUid) -> Option<Box2> {
+    pub(crate) fn get_world_aabb(&self, manager: &EntityManager, uid: EntityUid) -> Option<Box2> {
         let body = manager.physics.get(&uid)?;
         let xform = manager.transforms.get(&uid)?;
         let fixtures = manager.fixtures.get(&uid)?;
         body.get_aabb(xform, fixtures, manager)
     }
 
-    pub fn get_map_velocities(&self, manager: &EntityManager, uid: EntityUid) -> (Vector2, f32) {
+    pub(crate) fn get_map_velocities(
+        &self,
+        manager: &EntityManager,
+        uid: EntityUid,
+    ) -> (Vector2, f32) {
         let Some(component) = manager.physics.get(&uid) else {
             return (Vector2::ZERO, 0.0);
         };
@@ -177,7 +181,7 @@ impl SharedPhysicsSystem {
         )
     }
 
-    pub fn sync_broadphase(
+    pub(crate) fn sync_broadphase(
         &self,
         manager: &mut EntityManager,
         broadphase_owner: EntityUid,
@@ -220,7 +224,7 @@ impl SharedPhysicsSystem {
         pending.len()
     }
 
-    pub fn sync_contacts(
+    pub(crate) fn sync_contacts(
         &self,
         manager: &mut EntityManager,
         map_owner: EntityUid,
@@ -415,7 +419,7 @@ impl SharedPhysicsSystem {
         count
     }
 
-    pub fn query_aabb_entities(
+    pub(crate) fn query_aabb_entities(
         &self,
         manager: &EntityManager,
         broadphase_owner: EntityUid,
@@ -432,7 +436,7 @@ impl SharedPhysicsSystem {
         entities.into_iter().collect()
     }
 
-    pub fn intersect_ray(
+    pub(crate) fn intersect_ray(
         &self,
         manager: &EntityManager,
         broadphase_owner: EntityUid,

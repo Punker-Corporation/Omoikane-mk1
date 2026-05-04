@@ -1,33 +1,32 @@
 use daikoku::{EntityMessageType, MsgEntity};
 use keisan::{Angle, Vector2};
 use sekai::{
-    EntityManager, EntityUid, NetworkComponentMessage, RobustSerializer, SerializedEntityState,
-    TransformComponentState,
+    EntityManager, EntityUid, NetworkComponentMessage, RobustSerializer, TransformComponentState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PendingTransformLerp {
-    pub uid: EntityUid,
-    pub source: Vector2,
-    pub destination: Vector2,
-    pub source_angle: Angle,
-    pub destination_angle: Angle,
-    pub parent: EntityUid,
-    pub source_anchored: bool,
-    pub destination_anchored: bool,
+pub(crate) struct PendingTransformLerp {
+    pub(crate) uid: EntityUid,
+    pub(crate) source: Vector2,
+    pub(crate) destination: Vector2,
+    pub(crate) source_angle: Angle,
+    pub(crate) destination_angle: Angle,
+    pub(crate) parent: EntityUid,
+    pub(crate) source_anchored: bool,
+    pub(crate) destination_anchored: bool,
 }
 
-pub struct ClientEntityManager {
-    pub inner: EntityManager,
+pub(crate) struct ClientEntityManager {
+    pub(crate) inner: EntityManager,
     queued_messages: Vec<(u32, MsgEntity)>,
     incoming_sequence: u32,
     pending_transform_lerps: Vec<PendingTransformLerp>,
-    pub received_component_messages: Vec<NetworkComponentMessage<(), (), String>>,
-    pub received_system_messages: Vec<String>,
+    pub(crate) received_component_messages: Vec<NetworkComponentMessage<(), (), String>>,
+    pub(crate) received_system_messages: Vec<String>,
 }
 
 impl ClientEntityManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: EntityManager::new(),
             queued_messages: Vec::new(),
@@ -38,12 +37,14 @@ impl ClientEntityManager {
         }
     }
 
-    pub fn create_entity(&mut self, prototype: Option<&str>, uid: EntityUid) -> EntityUid {
+    #[cfg(test)]
+    pub(crate) fn create_entity(&mut self, prototype: Option<&str>, uid: EntityUid) -> EntityUid {
         self.inner.alloc_entity_external(uid, prototype);
         uid
     }
 
-    pub fn ensure_map_entity(&mut self, map_id: sekai::MapId) -> EntityUid {
+    #[cfg(test)]
+    pub(crate) fn ensure_map_entity(&mut self, map_id: sekai::MapId) -> EntityUid {
         if let Some(uid) = self.inner.map_entity_for(map_id) {
             return uid;
         }
@@ -51,7 +52,7 @@ impl ClientEntityManager {
         self.inner.create_entity_uninitialized_as_map(None, map_id)
     }
 
-    pub fn handle_entity_network_message(
+    pub(crate) fn handle_entity_network_message(
         &mut self,
         cur_server_tick: jikan::GameTick,
         message: MsgEntity,
@@ -70,7 +71,7 @@ impl ClientEntityManager {
         }
     }
 
-    pub fn tick_update(&mut self, cur_server_tick: jikan::GameTick) {
+    pub(crate) fn tick_update(&mut self, cur_server_tick: jikan::GameTick) {
         let mut ready = Vec::new();
         let mut pending = Vec::new();
         for entry in self.queued_messages.drain(..) {
@@ -92,14 +93,15 @@ impl ClientEntityManager {
         }
     }
 
-    pub fn take_pending_transform_lerps(&mut self) -> Vec<PendingTransformLerp> {
+    pub(crate) fn take_pending_transform_lerps(&mut self) -> Vec<PendingTransformLerp> {
         std::mem::take(&mut self.pending_transform_lerps)
     }
 
-    pub fn apply_serialized_entity_state(
+    #[cfg(test)]
+    pub(crate) fn apply_serialized_entity_state(
         &mut self,
         serializer: &mut RobustSerializer,
-        state: &SerializedEntityState,
+        state: &sekai::SerializedEntityState,
     ) -> Option<EntityUid> {
         let pending_transform_lerps = &mut self.pending_transform_lerps;
         self.inner.apply_serialized_entity_state_with(
@@ -116,7 +118,7 @@ impl ClientEntityManager {
         )
     }
 
-    pub fn apply_game_state(
+    pub(crate) fn apply_game_state(
         &mut self,
         serializer: &mut RobustSerializer,
         state: &sekai::GameState,

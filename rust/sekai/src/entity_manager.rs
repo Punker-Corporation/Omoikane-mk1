@@ -151,8 +151,8 @@ impl EntityManager {
         "MetaDataComponent",
     ];
 
-    fn shared_physics() -> crate::SharedPhysicsSystem {
-        crate::SharedPhysicsSystem::new()
+    fn shared_physics() -> crate::shared_physics_system::SharedPhysicsSystem {
+        crate::shared_physics_system::SharedPhysicsSystem::new()
     }
 
     pub fn map_transform_state(map_id: MapId) -> TransformComponentState {
@@ -322,20 +322,6 @@ impl EntityManager {
         if metadata.entity_last_modified_tick != self.current_tick {
             metadata.entity_last_modified_tick = self.current_tick;
         }
-    }
-
-    pub fn dirty_component(&mut self, component: &mut Component) {
-        let owner = component.owner;
-        if !owner.is_valid() || component.deleted() || !component.net_sync_enabled {
-            return;
-        }
-        self.dirty_entity(owner);
-        component.last_modified_tick = self.current_tick;
-    }
-
-    pub fn stamp_component_created(&self, component: &mut Component) {
-        component.creation_tick = self.current_tick;
-        component.last_modified_tick = self.current_tick;
     }
 
     pub fn set_entity_paused(&mut self, uid: EntityUid, paused: bool) -> bool {
@@ -723,11 +709,11 @@ impl EntityManager {
         self.refresh_map_physics_runtime_many(map_ids);
     }
 
-    pub fn refresh_transform_map_runtime(&mut self, uid: EntityUid, previous_map: MapId) {
+    fn refresh_transform_map_runtime(&mut self, uid: EntityUid, previous_map: MapId) {
         self.reconcile_transform_runtime(uid, Some(previous_map));
     }
 
-    pub fn apply_transform_move_event(&mut self, event: &mut crate::MoveEvent) {
+    fn apply_transform_move_event(&mut self, event: &mut crate::MoveEvent) {
         self.raise_component_event(event.sender, "TransformComponent", event);
     }
 
@@ -1248,15 +1234,17 @@ impl EntityManager {
         Self::shared_physics().get_world_aabb(self, entity)
     }
 
-    pub fn map_linear_velocity(&self, uid: EntityUid) -> Vector2 {
+    #[cfg(test)]
+    fn map_linear_velocity(&self, uid: EntityUid) -> Vector2 {
         self.map_velocities(uid).0
     }
 
-    pub fn map_angular_velocity(&self, uid: EntityUid) -> f32 {
+    #[cfg(test)]
+    fn map_angular_velocity(&self, uid: EntityUid) -> f32 {
         self.map_velocities(uid).1
     }
 
-    pub fn map_velocities(&self, uid: EntityUid) -> (Vector2, f32) {
+    fn map_velocities(&self, uid: EntityUid) -> (Vector2, f32) {
         Self::shared_physics().get_map_velocities(self, uid)
     }
 
@@ -1264,7 +1252,7 @@ impl EntityManager {
         &mut self,
         uid: EntityUid,
         frame_time: f32,
-    ) -> Option<crate::shared_physics_system::PhysicsStepState> {
+    ) -> Option<crate::PhysicsStepState> {
         Self::shared_physics().step_body(self, uid, frame_time)
     }
 
@@ -1308,7 +1296,8 @@ impl EntityManager {
             .is_some_and(|owner| self.broadphases.contains_key(&owner))
     }
 
-    pub fn has_broadphase_owner(&self, owner: EntityUid) -> bool {
+    #[cfg(test)]
+    fn has_broadphase_owner(&self, owner: EntityUid) -> bool {
         self.broadphases.contains_key(&owner)
     }
 
@@ -1328,11 +1317,6 @@ impl EntityManager {
         Some(owner)
     }
 
-    pub fn ensure_owner_physics_runtime(&mut self, owner: EntityUid) {
-        self.ensure_broadphase(owner);
-        self.ensure_physics_map(owner);
-    }
-
     pub fn map_contact_count(&self, map_id: MapId) -> usize {
         self.map_entity_for(map_id)
             .and_then(|owner| self.physics_maps.get(&owner))
@@ -1340,7 +1324,8 @@ impl EntityManager {
             .unwrap_or(0)
     }
 
-    pub fn owner_contact_count(&self, owner: EntityUid) -> usize {
+    #[cfg(test)]
+    pub(crate) fn owner_contact_count(&self, owner: EntityUid) -> usize {
         self.physics_maps
             .get(&owner)
             .map(|map| map.contact_count())
@@ -1354,7 +1339,8 @@ impl EntityManager {
             .unwrap_or_default()
     }
 
-    pub fn owner_contacts_snapshot(&self, owner: EntityUid) -> Vec<butsuri::Contact> {
+    #[cfg(test)]
+    pub(crate) fn owner_contacts_snapshot(&self, owner: EntityUid) -> Vec<butsuri::Contact> {
         self.physics_maps
             .get(&owner)
             .map(|map| map.contacts().to_vec())
@@ -1364,12 +1350,6 @@ impl EntityManager {
     pub fn map_has_touching_contact(&self, map_id: MapId) -> bool {
         self.map_entity_for(map_id)
             .and_then(|owner| self.physics_maps.get(&owner))
-            .is_some_and(|map| map.contacts().iter().any(|contact| contact.is_touching))
-    }
-
-    pub fn owner_has_touching_contact(&self, owner: EntityUid) -> bool {
-        self.physics_maps
-            .get(&owner)
             .is_some_and(|map| map.contacts().iter().any(|contact| contact.is_touching))
     }
 
@@ -2638,7 +2618,7 @@ impl EntityManager {
         uid: EntityUid,
         milliseconds: i32,
         on_fired: impl FnMut() + Send + Sync + 'static,
-    ) -> crate::timer_component::TimerHandle {
+    ) -> crate::TimerHandle {
         self.ensure_timer(uid).spawn(milliseconds, on_fired)
     }
 
@@ -2647,7 +2627,7 @@ impl EntityManager {
         uid: EntityUid,
         milliseconds: i32,
         on_fired: impl FnMut() + Send + Sync + 'static,
-    ) -> crate::timer_component::TimerHandle {
+    ) -> crate::TimerHandle {
         self.ensure_timer(uid)
             .spawn_repeating(milliseconds, on_fired)
     }
@@ -5964,12 +5944,16 @@ mod tests {
             crate::EntityLifeStage::MapInitialized
         );
         let events = manager.drain_entity_runtime_events();
-        assert!(events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
-            entity: map_uid,
-        })));
-        assert!(events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
-            entity: grid_uid,
-        })));
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: map_uid,
+            }))
+        );
+        assert!(
+            events.contains(&EntityRuntimeEvent::MapInit(crate::MapInitEvent {
+                entity: grid_uid,
+            }))
+        );
         assert_eq!(
             manager.map_grids.get(&grid_uid).unwrap().parent_map_id,
             MapId::new(9)

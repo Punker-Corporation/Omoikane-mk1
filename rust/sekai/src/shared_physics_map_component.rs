@@ -34,11 +34,11 @@ pub struct SharedPhysicsMapComponentState {
 
 #[derive(Debug, Clone)]
 pub struct SharedPhysicsMapComponent {
-    pub base: Component,
-    pub auto_clear_forces: bool,
-    pub gravity: Vector2,
-    pub bodies: HashSet<EntityUid>,
-    pub awake_bodies: HashSet<EntityUid>,
+    pub(crate) base: Component,
+    pub(crate) auto_clear_forces: bool,
+    pub(crate) gravity: Vector2,
+    pub(crate) bodies: HashSet<EntityUid>,
+    pub(crate) awake_bodies: HashSet<EntityUid>,
     contact_manager: ContactManager,
     contact_events: VecDeque<PhysicsContactEvent>,
     runtime_events: VecDeque<PhysicsRuntimeEvent>,
@@ -66,14 +66,16 @@ impl SharedPhysicsMapComponent {
         }
     }
 
-    pub fn add_body(&mut self, body: EntityUid, awake: bool) {
+    #[cfg(test)]
+    pub(crate) fn add_body(&mut self, body: EntityUid, awake: bool) {
         self.bodies.insert(body);
         if awake {
             self.awake_bodies.insert(body);
         }
     }
 
-    pub fn remove_body(&mut self, body: EntityUid) {
+    #[cfg(test)]
+    pub(crate) fn remove_body(&mut self, body: EntityUid) {
         self.bodies.remove(&body);
         self.awake_bodies.remove(&body);
         self.queued_wake.remove(&body);
@@ -82,60 +84,66 @@ impl SharedPhysicsMapComponent {
             .retain(|(queued_body, _)| *queued_body != body);
     }
 
-    pub fn replace_contacts(&mut self, contacts: ContactManager) {
+    pub(crate) fn replace_contacts(&mut self, contacts: ContactManager) {
         self.contact_manager = contacts;
     }
 
-    pub fn contacts(&self) -> &[Contact] {
+    pub(crate) fn contacts(&self) -> &[Contact] {
         self.contact_manager.contacts()
     }
 
-    pub fn contact_mut(&mut self, index: usize) -> Option<&mut Contact> {
+    #[cfg(test)]
+    pub(crate) fn contact_mut(&mut self, index: usize) -> Option<&mut Contact> {
         self.contact_manager.contact_mut(index)
     }
 
-    pub fn contact_count(&self) -> usize {
+    pub(crate) fn contact_count(&self) -> usize {
         self.contact_manager.contact_count()
     }
 
-    pub fn queue_contact_event(&mut self, status: ContactStatus, contact: Contact) {
+    pub(crate) fn queue_contact_event(&mut self, status: ContactStatus, contact: Contact) {
         if status != ContactStatus::NoContact {
             self.contact_events
                 .push_back(PhysicsContactEvent { status, contact });
         }
     }
 
-    pub fn drain_contact_events(&mut self) -> Vec<PhysicsContactEvent> {
+    pub(crate) fn drain_contact_events(&mut self) -> Vec<PhysicsContactEvent> {
         self.contact_events.drain(..).collect()
     }
 
-    pub fn queue_runtime_event(&mut self, event: PhysicsRuntimeEvent) {
+    pub(crate) fn queue_runtime_event(&mut self, event: PhysicsRuntimeEvent) {
         self.runtime_events.push_back(event);
     }
 
-    pub fn drain_runtime_events(&mut self) -> Vec<PhysicsRuntimeEvent> {
+    pub(crate) fn drain_runtime_events(&mut self) -> Vec<PhysicsRuntimeEvent> {
         self.runtime_events.drain(..).collect()
     }
 
-    pub fn add_awake_body(&mut self, body: EntityUid) {
+    #[cfg(test)]
+    pub(crate) fn add_awake_body(&mut self, body: EntityUid) {
         self.queued_sleep.remove(&body);
         self.queued_wake.insert(body);
     }
 
-    pub fn remove_sleep_body(&mut self, body: EntityUid) {
+    #[cfg(test)]
+    pub(crate) fn remove_sleep_body(&mut self, body: EntityUid) {
         self.queued_wake.remove(&body);
         self.queued_sleep.insert(body);
     }
 
-    pub fn queue_collision_change(&mut self, body: EntityUid, can_collide: bool) {
+    #[cfg(test)]
+    pub(crate) fn queue_collision_change(&mut self, body: EntityUid, can_collide: bool) {
         self.queued_collision_changes.push_back((body, can_collide));
     }
 
-    pub fn queue_deferred_update(&mut self, entity: EntityUid) {
+    #[cfg(test)]
+    pub(crate) fn queue_deferred_update(&mut self, entity: EntityUid) {
         self.deferred_updates.insert(entity);
     }
 
-    pub fn process_changes(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn process_changes(&mut self) {
         while let Some((body, can_collide)) = self.queued_collision_changes.pop_front() {
             if can_collide {
                 self.bodies.insert(body);
@@ -155,7 +163,8 @@ impl SharedPhysicsMapComponent {
         }
     }
 
-    pub fn process_queue(&mut self) -> Vec<EntityUid> {
+    #[cfg(test)]
+    pub(crate) fn process_queue(&mut self) -> Vec<EntityUid> {
         self.deferred_updates.drain().collect()
     }
 

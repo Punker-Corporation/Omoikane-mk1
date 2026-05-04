@@ -4,23 +4,26 @@ use jikan::GameTick;
 use keisan::Vector2;
 use sekai::{EntityCoordinates, EntityUid, MapCoordinates, ScreenCoordinates, WindowId};
 
-use crate::{ClientEntityManager, ClientGameStateManager, ClientNetManager, PlayerManager};
+use crate::{
+    client_entity_manager::ClientEntityManager, client_game_state_manager::ClientGameStateManager,
+    client_net_manager::ClientNetManager, player_manager::PlayerManager,
+};
 
 #[derive(Debug, Clone, Default)]
-pub struct InputSystem {
+pub(crate) struct InputSystem {
     cmd_states: PlayerCommandStates,
-    pub predicted: bool,
+    predicted: bool,
 }
 
 impl InputSystem {
     pub const MOVE_STEP: f32 = 1.0;
     pub const MOVE_SPEED: f32 = 62.5;
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn handle_input_command(
+    pub(crate) fn handle_input_command(
         &mut self,
         entities: &mut ClientEntityManager,
         players: &PlayerManager,
@@ -52,7 +55,7 @@ impl InputSystem {
         false
     }
 
-    pub fn predict_input_command(
+    pub(crate) fn predict_input_command(
         &mut self,
         entities: &mut ClientEntityManager,
         players: &PlayerManager,
@@ -65,7 +68,7 @@ impl InputSystem {
         self.predicted = false;
     }
 
-    pub fn replay_pending_inputs(
+    pub(crate) fn replay_pending_inputs(
         &mut self,
         entities: &mut ClientEntityManager,
         players: &PlayerManager,
@@ -110,7 +113,7 @@ impl InputSystem {
                 .offset_local_transform_immediate(controlled, delta, keisan::Angle::ZERO);
     }
 
-    pub fn apply_held_movement_state(
+    pub(crate) fn apply_held_movement_state(
         &self,
         entities: &mut ClientEntityManager,
         players: &PlayerManager,
@@ -185,12 +188,12 @@ impl InputSystem {
         velocity
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.cmd_states = PlayerCommandStates::default();
         self.predicted = false;
     }
 
-    pub fn build_local_input(
+    pub(crate) fn build_local_input(
         &self,
         tick: GameTick,
         input_sequence: u32,
@@ -217,7 +220,9 @@ impl InputSystem {
 mod tests {
     use super::InputSystem;
     use crate::{
-        ClientEntityManager, ClientGameStateManager, ClientNetManager, PhysicsSystem, PlayerManager,
+        client_entity_manager::ClientEntityManager,
+        client_game_state_manager::ClientGameStateManager, client_net_manager::ClientNetManager,
+        physics_system::PhysicsSystem, player_manager::PlayerManager,
     };
     use daikoku::{BoundKeyState, FullInputCmdMessage};
     use jikan::GameTick;
@@ -234,7 +239,7 @@ mod tests {
         players.startup("u1", "pedel");
         let uid = entities.create_entity(None, EntityUid::new(4));
         entities.inner.initialize_entity(uid);
-        players.local_player_mut().unwrap().attach_entity(uid);
+        assert!(players.attach_local_entity(uid));
         let mut state = ClientGameStateManager::new();
         let mut net = ClientNetManager::new();
         net.connect();
@@ -281,7 +286,7 @@ mod tests {
         players.startup("u1", "pedel");
         let uid = entities.create_entity(None, EntityUid::new(6));
         entities.inner.initialize_entity(uid);
-        players.local_player_mut().unwrap().attach_entity(uid);
+        assert!(players.attach_local_entity(uid));
         let mut input = InputSystem::new();
 
         input.predict_input_command(
@@ -316,7 +321,7 @@ mod tests {
 
         let uid = entities.create_entity(None, EntityUid::new(14));
         entities.inner.initialize_entity(uid);
-        players.local_player_mut().unwrap().attach_entity(uid);
+        assert!(players.attach_local_entity(uid));
         let _ = entities.inner.apply_transform_state(
             uid,
             sekai::TransformComponentState {
@@ -405,7 +410,7 @@ mod tests {
 
         let uid = entities.create_entity(None, EntityUid::new(15));
         entities.inner.initialize_entity(uid);
-        players.local_player_mut().unwrap().attach_entity(uid);
+        assert!(players.attach_local_entity(uid));
         let _ = entities.inner.apply_transform_state(
             uid,
             sekai::TransformComponentState {
@@ -485,7 +490,7 @@ mod tests {
         players.startup("u1", "pedel");
         let uid = entities.create_entity(None, EntityUid::new(24));
         entities.inner.initialize_entity(uid);
-        players.local_player_mut().unwrap().attach_entity(uid);
+        assert!(players.attach_local_entity(uid));
         let grid_uid = entities.inner.grid_entity_for(GridId::new(6)).unwrap();
         let _ = entities.inner.apply_transform_state(
             uid,
@@ -568,7 +573,7 @@ mod tests {
         players.startup("u1", "pedel");
         let first = entities.create_entity(None, EntityUid::new(25));
         entities.inner.initialize_entity(first);
-        players.local_player_mut().unwrap().attach_entity(first);
+        assert!(players.attach_local_entity(first));
         let _ = entities.inner.apply_transform_state(
             first,
             sekai::TransformComponentState {

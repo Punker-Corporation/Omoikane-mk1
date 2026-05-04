@@ -3,8 +3,9 @@ use jikan::GameTick;
 use sekai::{EntityUid, GameState, MsgPlayerList};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeliveryMethod {
+pub(crate) enum DeliveryMethod {
     Unreliable,
     ReliableUnordered,
 }
@@ -23,7 +24,8 @@ pub struct MsgState {
 }
 
 impl MsgState {
-    pub const RELIABLE_THRESHOLD: usize = 1300;
+    #[cfg(test)]
+    pub(crate) const RELIABLE_THRESHOLD: usize = 1300;
 
     pub fn new(state: GameState) -> Self {
         let payload_size = bincode::serialize(&state)
@@ -35,11 +37,13 @@ impl MsgState {
         }
     }
 
-    pub fn should_send_reliably(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn should_send_reliably(&self) -> bool {
         self.payload_size > Self::RELIABLE_THRESHOLD
     }
 
-    pub fn delivery_method(&self) -> DeliveryMethod {
+    #[cfg(test)]
+    pub(crate) fn delivery_method(&self) -> DeliveryMethod {
         if self.should_send_reliably() {
             DeliveryMethod::ReliableUnordered
         } else {
@@ -72,7 +76,7 @@ pub enum OutboundMessage {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ServerNetManager {
+pub(crate) struct ServerNetManager {
     channels: HashSet<String>,
     outbox: HashMap<String, Vec<OutboundMessage>>,
     inbound_inputs: HashMap<String, Vec<FullInputCmdMessage>>,
@@ -81,18 +85,18 @@ pub struct ServerNetManager {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct SessionInboundBatch {
-    pub player_list_requests: usize,
-    pub inputs: Vec<FullInputCmdMessage>,
-    pub entities: Vec<MsgEntity>,
+pub(crate) struct SessionInboundBatch {
+    pub(crate) player_list_requests: usize,
+    pub(crate) inputs: Vec<FullInputCmdMessage>,
+    pub(crate) entities: Vec<MsgEntity>,
 }
 
 impl ServerNetManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn connect(&mut self, user_id: impl Into<String>) -> bool {
+    pub(crate) fn connect(&mut self, user_id: impl Into<String>) -> bool {
         let user_id = user_id.into();
         let newly_connected = !self.channels.contains(&user_id);
         self.channels.insert(user_id.clone());
@@ -105,7 +109,7 @@ impl ServerNetManager {
         newly_connected
     }
 
-    pub fn disconnect(&mut self, user_id: &str) {
+    pub(crate) fn disconnect(&mut self, user_id: &str) {
         self.channels.remove(user_id);
         self.outbox.remove(user_id);
         self.inbound_inputs.remove(user_id);
@@ -117,7 +121,7 @@ impl ServerNetManager {
         self.channels.contains(user_id)
     }
 
-    pub fn send_state(&mut self, user_id: &str, state: GameState) -> bool {
+    pub(crate) fn send_state(&mut self, user_id: &str, state: GameState) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -128,7 +132,8 @@ impl ServerNetManager {
         true
     }
 
-    pub fn send_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
+    #[cfg(test)]
+    pub(crate) fn send_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -139,11 +144,11 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_outbox(&mut self, user_id: &str) -> Vec<OutboundMessage> {
+    pub(crate) fn take_outbox(&mut self, user_id: &str) -> Vec<OutboundMessage> {
         self.outbox.remove(user_id).unwrap_or_default()
     }
 
-    pub fn queue_input(&mut self, user_id: &str, message: FullInputCmdMessage) -> bool {
+    pub(crate) fn queue_input(&mut self, user_id: &str, message: FullInputCmdMessage) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -154,7 +159,7 @@ impl ServerNetManager {
         true
     }
 
-    pub fn queue_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
+    pub(crate) fn queue_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -165,7 +170,7 @@ impl ServerNetManager {
         true
     }
 
-    pub fn queue_player_list_request(&mut self, user_id: &str) -> bool {
+    pub(crate) fn queue_player_list_request(&mut self, user_id: &str) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -176,7 +181,7 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_session_inbound(&mut self, user_id: &str) -> SessionInboundBatch {
+    pub(crate) fn take_session_inbound(&mut self, user_id: &str) -> SessionInboundBatch {
         SessionInboundBatch {
             player_list_requests: self
                 .inbound_player_list_requests
@@ -187,7 +192,7 @@ impl ServerNetManager {
         }
     }
 
-    pub fn send_player_list(&mut self, user_id: &str, list: MsgPlayerList) -> bool {
+    pub(crate) fn send_player_list(&mut self, user_id: &str, list: MsgPlayerList) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }

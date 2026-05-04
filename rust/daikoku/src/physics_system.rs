@@ -1,13 +1,13 @@
-use crate::{ServerEntityManager, TransformSystem};
+use crate::{ServerEntityManager, transform_system::TransformSystem};
 use sekai::{
     BodyType, CollisionChangeMessage, EntityUid, MapId, MapManager, PhysicsRuntimeEvent,
     PhysicsSleepMessage, PhysicsWakeMessage,
 };
 #[derive(Debug, Clone, Default)]
-pub struct PhysicsSystem;
+pub(crate) struct PhysicsSystem;
 
 impl PhysicsSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -41,7 +41,12 @@ impl PhysicsSystem {
         }
     }
 
-    pub fn handle_grid_init(&self, entities: &mut ServerEntityManager, uid: EntityUid) -> bool {
+    #[cfg(test)]
+    pub(crate) fn handle_grid_init(
+        &self,
+        entities: &mut ServerEntityManager,
+        uid: EntityUid,
+    ) -> bool {
         if !entities.inner.entity_exists(uid) {
             return false;
         }
@@ -54,7 +59,11 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn handle_dynamic_init(&self, entities: &mut ServerEntityManager, uid: EntityUid) -> bool {
+    pub(crate) fn handle_dynamic_init(
+        &self,
+        entities: &mut ServerEntityManager,
+        uid: EntityUid,
+    ) -> bool {
         if !entities.inner.entity_exists(uid) {
             return false;
         }
@@ -68,7 +77,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_body_type(
+    #[cfg(test)]
+    pub(crate) fn set_body_type(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -88,7 +98,7 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_linear_velocity(
+    pub(crate) fn set_linear_velocity(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -113,7 +123,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_angular_velocity(
+    #[cfg(test)]
+    pub(crate) fn set_angular_velocity(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -138,7 +149,7 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_sleeping_allowed(
+    pub(crate) fn set_sleeping_allowed(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -163,7 +174,7 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_fixed_rotation(
+    pub(crate) fn set_fixed_rotation(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -182,7 +193,7 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_body_status(
+    pub(crate) fn set_body_status(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -201,7 +212,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_ignore_gravity(
+    #[cfg(test)]
+    pub(crate) fn set_ignore_gravity(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -217,7 +229,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_linear_damping(
+    #[cfg(test)]
+    pub(crate) fn set_linear_damping(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -231,7 +244,8 @@ impl PhysicsSystem {
         body.linear_damping != previous
     }
 
-    pub fn set_angular_damping(
+    #[cfg(test)]
+    pub(crate) fn set_angular_damping(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -245,7 +259,8 @@ impl PhysicsSystem {
         body.angular_damping != previous
     }
 
-    pub fn apply_force(
+    #[cfg(test)]
+    pub(crate) fn apply_force(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -270,7 +285,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn apply_torque(
+    #[cfg(test)]
+    pub(crate) fn apply_torque(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -295,7 +311,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn apply_linear_impulse(
+    #[cfg(test)]
+    pub(crate) fn apply_linear_impulse(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -320,7 +337,8 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn apply_angular_impulse(
+    #[cfg(test)]
+    pub(crate) fn apply_angular_impulse(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -345,7 +363,7 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_map_gravity(
+    pub(crate) fn set_map_gravity(
         &self,
         entities: &mut ServerEntityManager,
         maps: &MapManager,
@@ -359,7 +377,7 @@ impl PhysicsSystem {
         entities.inner.set_map_gravity(map_id, gravity)
     }
 
-    pub fn set_auto_clear_forces(
+    pub(crate) fn set_auto_clear_forces(
         &self,
         entities: &mut ServerEntityManager,
         maps: &MapManager,
@@ -373,7 +391,7 @@ impl PhysicsSystem {
         entities.inner.set_map_auto_clear_forces(map_id, enabled)
     }
 
-    pub fn set_awake(
+    pub(crate) fn set_awake(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -394,7 +412,7 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn set_can_collide(
+    pub(crate) fn set_can_collide(
         &self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -423,14 +441,19 @@ impl PhysicsSystem {
         true
     }
 
-    pub fn update(&self, entities: &mut ServerEntityManager, broadphase_owner: EntityUid) -> usize {
+    #[cfg(test)]
+    pub(crate) fn update(
+        &self,
+        entities: &mut ServerEntityManager,
+        broadphase_owner: EntityUid,
+    ) -> usize {
         let bodies = entities.inner.physics_body_entities(true);
         entities
             .inner
             .refresh_broadphase_runtime(broadphase_owner, &bodies)
     }
 
-    pub fn step_simulation(
+    pub(crate) fn step_simulation(
         &self,
         entities: &mut ServerEntityManager,
         transforms: &mut TransformSystem,
@@ -471,7 +494,11 @@ impl PhysicsSystem {
         moved
     }
 
-    pub fn sync_map_physics(&self, entities: &mut ServerEntityManager, maps: &MapManager) -> usize {
+    pub(crate) fn sync_map_physics(
+        &self,
+        entities: &mut ServerEntityManager,
+        maps: &MapManager,
+    ) -> usize {
         let mut total = 0;
         let mut refreshed_maps = Vec::new();
 
@@ -497,7 +524,7 @@ impl PhysicsSystem {
 #[cfg(test)]
 mod tests {
     use super::PhysicsSystem;
-    use crate::{ServerEntityManager, TransformSystem};
+    use crate::{ServerEntityManager, transform_system::TransformSystem};
     use butsuri::{AabbShape, BodyType, CircleShape, CollisionRay, Fixture, PhysShape};
     use keisan::{Box2, Vector2};
     use sekai::{BroadphaseComponent, MapId, MapManager};

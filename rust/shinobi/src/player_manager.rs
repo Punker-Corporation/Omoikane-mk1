@@ -2,16 +2,16 @@ use sekai::{EntityUid, PlayerState, SessionStatus};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientSession {
-    pub user_id: String,
-    pub name: String,
-    pub status: SessionStatus,
-    pub ping: i16,
-    pub attached_entity: Option<EntityUid>,
+pub(crate) struct ClientSession {
+    pub(crate) user_id: String,
+    pub(crate) name: String,
+    pub(crate) status: SessionStatus,
+    pub(crate) ping: i16,
+    pub(crate) attached_entity: Option<EntityUid>,
 }
 
 impl ClientSession {
-    pub fn new(user_id: impl Into<String>) -> Self {
+    fn new(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
             name: String::new(),
@@ -23,15 +23,15 @@ impl ClientSession {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalPlayer {
-    pub controlled_entity: Option<EntityUid>,
-    pub user_id: String,
-    pub name: String,
-    pub session: ClientSession,
+pub(crate) struct LocalPlayer {
+    pub(crate) controlled_entity: Option<EntityUid>,
+    pub(crate) user_id: String,
+    pub(crate) name: String,
+    pub(crate) session: ClientSession,
 }
 
 impl LocalPlayer {
-    pub fn new(user_id: impl Into<String>, name: impl Into<String>) -> Self {
+    fn new(user_id: impl Into<String>, name: impl Into<String>) -> Self {
         let user_id = user_id.into();
         let name = name.into();
         Self {
@@ -48,19 +48,19 @@ impl LocalPlayer {
         }
     }
 
-    pub fn attach_entity(&mut self, entity: EntityUid) {
+    fn attach_entity(&mut self, entity: EntityUid) {
         self.detach_entity();
         self.controlled_entity = Some(entity);
         self.session.attached_entity = Some(entity);
     }
 
-    pub fn detach_entity(&mut self) {
+    fn detach_entity(&mut self) {
         if self.controlled_entity.take().is_some() {
             self.session.attached_entity = None;
         }
     }
 
-    pub fn switch_state(&mut self, new_status: SessionStatus) {
+    fn switch_state(&mut self, new_status: SessionStatus) {
         let old = self.session.status;
         if old != new_status {
             self.session.status = new_status;
@@ -69,46 +69,52 @@ impl LocalPlayer {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PlayerManager {
+pub(crate) struct PlayerManager {
     sessions: HashMap<String, ClientSession>,
-    pub local_player: Option<LocalPlayer>,
+    local_player: Option<LocalPlayer>,
 }
 
 impl PlayerManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn startup(&mut self, user_id: impl Into<String>, name: impl Into<String>) {
+    pub(crate) fn startup(&mut self, user_id: impl Into<String>, name: impl Into<String>) {
         let user_id = user_id.into();
         let name = name.into();
         self.local_player = Some(LocalPlayer::new(user_id, name));
     }
 
-    pub fn shutdown(&mut self) {
+    pub(crate) fn shutdown(&mut self) {
         self.local_player = None;
         self.sessions.clear();
     }
 
-    pub fn local_player(&self) -> Option<&LocalPlayer> {
+    pub(crate) fn local_player(&self) -> Option<&LocalPlayer> {
         self.local_player.as_ref()
     }
 
-    pub fn local_player_mut(&mut self) -> Option<&mut LocalPlayer> {
-        self.local_player.as_mut()
-    }
-
-    pub fn controlled_entity(&self) -> Option<EntityUid> {
+    pub(crate) fn controlled_entity(&self) -> Option<EntityUid> {
         self.local_player
             .as_ref()
             .and_then(|player| player.controlled_entity)
     }
 
-    pub fn session(&self, user_id: &str) -> Option<&ClientSession> {
+    #[cfg(test)]
+    pub(crate) fn attach_local_entity(&mut self, entity: EntityUid) -> bool {
+        let Some(player) = self.local_player.as_mut() else {
+            return false;
+        };
+        player.attach_entity(entity);
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session(&self, user_id: &str) -> Option<&ClientSession> {
         self.sessions.get(user_id)
     }
 
-    pub fn apply_player_states(&mut self, states: &[PlayerState], full_snapshot: bool) {
+    pub(crate) fn apply_player_states(&mut self, states: &[PlayerState], full_snapshot: bool) {
         if states.is_empty() {
             return;
         }

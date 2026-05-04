@@ -1,16 +1,20 @@
 use crate::ServerEntityManager;
-use keisan::{Angle, Vector2, Vector2i};
-use sekai::{EntityUid, GridId, MoveEvent};
+#[cfg(test)]
+use keisan::Vector2i;
+use keisan::{Angle, Vector2};
+#[cfg(test)]
+use sekai::GridId;
+use sekai::{EntityUid, MoveEvent};
 
 #[derive(Debug, Default, Clone)]
-pub struct TransformSystem;
+pub(crate) struct TransformSystem;
 
 impl TransformSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
-    pub fn process_deferred_moves(
+    pub(crate) fn process_deferred_moves(
         &mut self,
         entities: &mut ServerEntityManager,
         maps: &mut sekai::MapManager,
@@ -49,7 +53,8 @@ impl TransformSystem {
         processed
     }
 
-    pub fn set_local_transform(
+    #[cfg(test)]
+    pub(crate) fn set_local_transform(
         &mut self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -66,7 +71,7 @@ impl TransformSystem {
         true
     }
 
-    pub fn offset_local_transform(
+    pub(crate) fn offset_local_transform(
         &mut self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -83,7 +88,8 @@ impl TransformSystem {
         true
     }
 
-    pub fn anchor_entity(
+    #[cfg(test)]
+    pub(crate) fn anchor_entity(
         &mut self,
         entities: &mut ServerEntityManager,
         uid: EntityUid,
@@ -121,7 +127,12 @@ impl TransformSystem {
         true
     }
 
-    pub fn unanchor_entity(&mut self, entities: &mut ServerEntityManager, uid: EntityUid) -> bool {
+    #[cfg(test)]
+    pub(crate) fn unanchor_entity(
+        &mut self,
+        entities: &mut ServerEntityManager,
+        uid: EntityUid,
+    ) -> bool {
         let Some(event) = entities.inner.set_anchored_with_move_event(uid, false) else {
             return false;
         };
