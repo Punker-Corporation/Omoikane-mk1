@@ -6,17 +6,18 @@ The Authors retain all copyright to their respective work here submitted.
 
 ## License
 
-All images, models, and rigging files in this repository are licensed under the Creative Commons Attribution-ShareAlike 3.0 United States license, unless otherwise stated. See `LICENSE-ASSETS`.
+All images, models, and rigging files in this repository are licensed under the
+Creative Commons Attribution-ShareAlike 3.0 United States license, unless
+otherwise stated. See `LICENSE-ASSETS.TXT`.
 
 ## Code license
 
-All human-readable source code materials in this repository contributed **before** 13 March, 2019 at 12:00:00 UTC are licensed under the GPL version 3, unless otherwise stated. See `LICENSE-GPLv3.TXT`.
+The Omoikane Rust crates are licensed under the MIT license unless otherwise
+stated. See `LICENSE-MIT.TXT`.
 
-All human-readable source code materials in this repository contributed **after** 13 March, 2019 at 12:00:00 UTC are licensed under the MIT license, unless otherwise stated. See `LICENSE-MIT.TXT`.
-
-Furthermore, the following contributors have agreed to retroactively relicense their contributions to MIT:
-
-* PJB3005
+Historical license notices are preserved for inherited assets and repository
+history. See `LICENSE-GPLv3.TXT` where it applies to older inherited source
+materials in history.
 
 ## Warranty
 
