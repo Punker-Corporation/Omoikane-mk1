@@ -45,7 +45,7 @@ pub struct DaikokuServer {
     pub(crate) input: InputSystem,
     pub(crate) physics: PhysicsSystem,
     pub(crate) transforms: TransformSystem,
-    pub maps: MapManager,
+    pub(crate) maps: MapManager,
     current_tick: GameTick,
     shutdown_reason: Option<String>,
 }

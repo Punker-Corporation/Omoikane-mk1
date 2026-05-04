@@ -5,8 +5,8 @@ use sekai::{
 };
 use std::collections::HashMap;
 
-pub struct ServerEntityManager {
-    pub inner: EntityManager,
+pub(crate) struct ServerEntityManager {
+    pub(crate) inner: EntityManager,
     pub(crate) actors: HashMap<EntityUid, ActorComponent>,
     component_deletion_history: HashMap<EntityUid, Vec<(GameTick, u16)>>,
     pub(crate) received_component_messages: Vec<NetworkComponentMessage<(), String, String>>,
@@ -14,7 +14,7 @@ pub struct ServerEntityManager {
 }
 
 impl ServerEntityManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: EntityManager::new(),
             actors: HashMap::new(),
