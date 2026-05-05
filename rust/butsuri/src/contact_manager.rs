@@ -62,12 +62,6 @@ impl ContactManager {
         before - self.active_contacts.len()
     }
 
-    pub fn update_touching(&mut self, index: usize, touching: bool) -> Option<ContactStatus> {
-        self.active_contacts
-            .get_mut(index)
-            .map(|contact| contact.update_touching(touching))
-    }
-
     pub fn refresh_contact_manifold(
         &mut self,
         index: usize,
@@ -125,7 +119,11 @@ mod tests {
             .add_pair_with_keys("a", &fixture_a, "b", &fixture_b)
             .unwrap();
         assert_eq!(manager.contact_count(), 1);
-        assert!(manager.update_touching(index, true).is_some());
+        assert!(
+            manager
+                .refresh_contact_manifold(index, crate::ContactManifold::default())
+                .is_some()
+        );
         assert_eq!(manager.destroy_fixture_contacts("a"), 1);
         assert_eq!(manager.contact_count(), 0);
     }
