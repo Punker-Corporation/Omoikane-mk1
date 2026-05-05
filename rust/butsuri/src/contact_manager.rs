@@ -44,6 +44,17 @@ impl ContactManager {
         index
     }
 
+    pub fn insert_refreshed_contact(
+        &mut self,
+        mut contact: Contact,
+        manifold: crate::ContactManifold,
+    ) -> (usize, ContactStatus, Contact) {
+        let status = contact.refresh_manifold(manifold);
+        let snapshot = contact.clone();
+        let index = self.insert_contact(contact);
+        (index, status, snapshot)
+    }
+
     pub fn add_pair_with_keys(
         &mut self,
         fixture_a_key: &str,
@@ -62,6 +73,19 @@ impl ContactManager {
         let contact = Contact::from_fixtures(fixture_a_key, fixture_a, fixture_b_key, fixture_b);
         self.active_contacts.push(contact);
         Some(self.active_contacts.len() - 1)
+    }
+
+    pub fn add_pair_with_manifold(
+        &mut self,
+        fixture_a_key: &str,
+        fixture_a: &Fixture,
+        fixture_b_key: &str,
+        fixture_b: &Fixture,
+        manifold: crate::ContactManifold,
+    ) -> Option<(usize, ContactStatus, Contact)> {
+        let index = self.add_pair_with_keys(fixture_a_key, fixture_a, fixture_b_key, fixture_b)?;
+        self.refresh_contact_manifold(index, manifold)
+            .map(|(status, contact)| (index, status, contact))
     }
 
     #[cfg(test)]
@@ -161,6 +185,28 @@ mod tests {
             Some(crate::ContactStatus::StartTouching),
         );
         assert!(manager.contact(index).unwrap().is_touching);
+    }
+
+    #[test]
+    fn contact_manager_inserts_refreshed_contact() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let contact = crate::Contact::from_fixtures("a", &fixture_a, "b", &fixture_b);
+        let mut manager = ContactManager::new();
+
+        let (index, status, snapshot) =
+            manager.insert_refreshed_contact(contact, crate::ContactManifold::default());
+
+        assert_eq!(index, 0);
+        assert_eq!(status, crate::ContactStatus::StartTouching);
+        assert!(snapshot.is_touching);
+        assert_eq!(manager.contact_count(), 1);
     }
 
     #[test]
@@ -278,5 +324,43 @@ mod tests {
                 .is_some()
         );
         assert_eq!(manager.contact_count(), 1);
+    }
+
+    #[test]
+    fn contact_manager_adds_pair_with_manifold() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let mut manager = ContactManager::new();
+
+        let (index, status, snapshot) = manager
+            .add_pair_with_manifold(
+                "body_a:a",
+                &fixture_a,
+                "body_b:b",
+                &fixture_b,
+                crate::ContactManifold::default(),
+            )
+            .unwrap();
+
+        assert_eq!(index, 0);
+        assert_eq!(status, crate::ContactStatus::StartTouching);
+        assert!(snapshot.is_touching);
+        assert!(
+            manager
+                .add_pair_with_manifold(
+                    "body_b:b",
+                    &fixture_b,
+                    "body_a:a",
+                    &fixture_a,
+                    crate::ContactManifold::default(),
+                )
+                .is_none()
+        );
     }
 }

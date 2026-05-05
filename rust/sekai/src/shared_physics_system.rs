@@ -337,32 +337,29 @@ impl SharedPhysicsSystem {
                                 fixture_b_key,
                                 ordered_fixture_b,
                             );
-                            let status = contact.refresh_manifold(Self::merge_manifold_impulses(
-                                &previous.manifold,
-                                manifold,
-                            ));
-                            let cloned = contact.clone();
-                            let index = contact_manager.insert_contact(contact);
+                            let (index, status, contact) = contact_manager
+                                .insert_refreshed_contact(
+                                    contact,
+                                    Self::merge_manifold_impulses(&previous.manifold, manifold),
+                                );
                             if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
-                                physics_map.queue_contact_event(status, cloned);
+                                physics_map.queue_contact_event(status, contact);
                             }
                             index
                         } else {
-                            let Some(index) = contact_manager.add_pair_with_keys(
-                                &fixture_a_key,
-                                ordered_fixture_a,
-                                &fixture_b_key,
-                                ordered_fixture_b,
-                            ) else {
+                            let Some((index, status, contact)) = contact_manager
+                                .add_pair_with_manifold(
+                                    &fixture_a_key,
+                                    ordered_fixture_a,
+                                    &fixture_b_key,
+                                    ordered_fixture_b,
+                                    manifold,
+                                )
+                            else {
                                 continue;
                             };
-                            if let Some((status, contact)) =
-                                contact_manager.refresh_contact_manifold(index, manifold)
-                            {
-                                if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner)
-                                {
-                                    physics_map.queue_contact_event(status, contact);
-                                }
+                            if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
+                                physics_map.queue_contact_event(status, contact);
                             }
                             index
                         };
