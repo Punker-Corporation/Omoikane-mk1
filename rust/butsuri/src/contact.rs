@@ -124,6 +124,11 @@ impl Contact {
             || (self.fixture_a == fixture_b && self.fixture_b == fixture_a)
     }
 
+    pub fn refresh_manifold(&mut self, manifold: ContactManifold) -> ContactStatus {
+        self.manifold = manifold;
+        self.update_touching(true)
+    }
+
     pub fn update_touching(&mut self, touching: bool) -> ContactStatus {
         let previous = self.is_touching;
         self.is_touching = touching;
@@ -165,6 +170,26 @@ mod tests {
         assert!(contact.matches_pair("body_a:main", "body_b:main"));
         assert!(contact.matches_pair("body_b:main", "body_a:main"));
         assert!(!contact.matches_pair("body_a:main", "body_c:main"));
+    }
+
+    #[test]
+    fn contact_refreshes_manifold_and_touching_state_together() {
+        let mut contact = Contact::new("a", "b", ContactType::Aabb);
+        let manifold = super::ContactManifold {
+            normal: Vector2::new(1.0, 0.0),
+            points: Vec::new(),
+        };
+
+        assert_eq!(
+            contact.refresh_manifold(manifold.clone()),
+            ContactStatus::StartTouching
+        );
+        assert!(contact.is_touching);
+        assert_eq!(contact.manifold, manifold);
+        assert_eq!(
+            contact.refresh_manifold(super::ContactManifold::default()),
+            ContactStatus::NoContact
+        );
     }
 
     #[test]

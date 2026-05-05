@@ -333,9 +333,10 @@ impl SharedPhysicsSystem {
                             contact.fixture_a = fixture_a_key;
                             contact.fixture_b = fixture_b_key;
                             contact.reset_material(ordered_fixture_a, ordered_fixture_b);
-                            contact.manifold =
-                                Self::merge_manifold_impulses(&previous.manifold, manifold);
-                            let status = contact.update_touching(true);
+                            let status = contact.refresh_manifold(Self::merge_manifold_impulses(
+                                &previous.manifold,
+                                manifold,
+                            ));
                             let cloned = contact.clone();
                             let index = contact_manager.insert_contact(contact);
                             if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
@@ -351,10 +352,9 @@ impl SharedPhysicsSystem {
                             ) else {
                                 continue;
                             };
-                            if let Some(contact) = contact_manager.contact_mut(index) {
-                                contact.manifold = manifold;
-                            }
-                            if let Some(status) = contact_manager.update_touching(index, true) {
+                            if let Some(status) =
+                                contact_manager.refresh_contact_manifold(index, manifold)
+                            {
                                 if let Some(contact) = contact_manager.contact_mut(index).cloned() {
                                     if let Some(physics_map) =
                                         manager.physics_maps.get_mut(&map_owner)

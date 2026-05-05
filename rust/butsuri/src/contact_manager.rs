@@ -68,6 +68,16 @@ impl ContactManager {
             .map(|contact| contact.update_touching(touching))
     }
 
+    pub fn refresh_contact_manifold(
+        &mut self,
+        index: usize,
+        manifold: crate::ContactManifold,
+    ) -> Option<ContactStatus> {
+        self.active_contacts
+            .get_mut(index)
+            .map(|contact| contact.refresh_manifold(manifold))
+    }
+
     pub fn clear(&mut self) {
         self.active_contacts.clear();
     }
@@ -97,6 +107,28 @@ mod tests {
         assert!(manager.update_touching(index, true).is_some());
         assert_eq!(manager.destroy_fixture_contacts("a"), 1);
         assert_eq!(manager.contact_count(), 0);
+    }
+
+    #[test]
+    fn contact_manager_refreshes_contact_manifold() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let mut manager = ContactManager::new();
+        let index = manager
+            .add_pair_with_keys("a", &fixture_a, "b", &fixture_b)
+            .unwrap();
+
+        assert_eq!(
+            manager.refresh_contact_manifold(index, crate::ContactManifold::default()),
+            Some(crate::ContactStatus::StartTouching)
+        );
+        assert!(manager.contact_mut(index).unwrap().is_touching);
     }
 
     #[test]
