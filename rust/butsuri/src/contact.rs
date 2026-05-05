@@ -124,6 +124,18 @@ impl Contact {
             || (self.fixture_a == fixture_b && self.fixture_b == fixture_a)
     }
 
+    pub fn retarget_pair(
+        &mut self,
+        fixture_a_key: impl Into<String>,
+        fixture_a: &Fixture,
+        fixture_b_key: impl Into<String>,
+        fixture_b: &Fixture,
+    ) {
+        self.fixture_a = fixture_a_key.into();
+        self.fixture_b = fixture_b_key.into();
+        self.reset_material(fixture_a, fixture_b);
+    }
+
     pub fn refresh_manifold(&mut self, manifold: ContactManifold) -> ContactStatus {
         self.manifold = manifold;
         self.update_touching(true)
@@ -188,6 +200,25 @@ mod tests {
         assert!(contact.matches_pair("body_a:main", "body_b:main"));
         assert!(contact.matches_pair("body_b:main", "body_a:main"));
         assert!(!contact.matches_pair("body_a:main", "body_c:main"));
+    }
+
+    #[test]
+    fn contact_retargets_pair_and_material() {
+        let mut fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        fixture_a.friction = 0.25;
+        let mut fixture_b =
+            Fixture::new("b", PhysShape::Circle(CircleShape::new(Vector2::ZERO, 0.5)));
+        fixture_b.friction = 1.0;
+
+        let mut contact = Contact::new("old:a", "old:b", ContactType::Aabb);
+        contact.retarget_pair("new:a", &fixture_a, "new:b", &fixture_b);
+
+        assert!(contact.matches_pair("new:a", "new:b"));
+        assert_eq!(contact.contact_type, ContactType::Mixed);
+        assert_eq!(contact.friction, 0.5);
     }
 
     #[test]

@@ -331,9 +331,12 @@ impl SharedPhysicsSystem {
                             previous_contact_manager.contact_pair(&fixture_a_key, &fixture_b_key)
                         {
                             let mut contact = previous.clone();
-                            contact.fixture_a = fixture_a_key;
-                            contact.fixture_b = fixture_b_key;
-                            contact.reset_material(ordered_fixture_a, ordered_fixture_b);
+                            contact.retarget_pair(
+                                fixture_a_key,
+                                ordered_fixture_a,
+                                fixture_b_key,
+                                ordered_fixture_b,
+                            );
                             let status = contact.refresh_manifold(Self::merge_manifold_impulses(
                                 &previous.manifold,
                                 manifold,
