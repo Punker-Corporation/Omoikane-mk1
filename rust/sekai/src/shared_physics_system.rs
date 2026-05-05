@@ -356,15 +356,12 @@ impl SharedPhysicsSystem {
                             ) else {
                                 continue;
                             };
-                            if let Some(status) =
+                            if let Some((status, contact)) =
                                 contact_manager.refresh_contact_manifold(index, manifold)
                             {
-                                if let Some(contact) = contact_manager.contact(index).cloned() {
-                                    if let Some(physics_map) =
-                                        manager.physics_maps.get_mut(&map_owner)
-                                    {
-                                        physics_map.queue_contact_event(status, contact);
-                                    }
+                                if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner)
+                                {
+                                    physics_map.queue_contact_event(status, contact);
                                 }
                             }
                             index

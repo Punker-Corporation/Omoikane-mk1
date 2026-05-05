@@ -76,10 +76,11 @@ impl ContactManager {
         &mut self,
         index: usize,
         manifold: crate::ContactManifold,
-    ) -> Option<ContactStatus> {
-        self.active_contacts
-            .get_mut(index)
-            .map(|contact| contact.refresh_manifold(manifold))
+    ) -> Option<(ContactStatus, Contact)> {
+        self.active_contacts.get_mut(index).map(|contact| {
+            let status = contact.refresh_manifold(manifold);
+            (status, contact.clone())
+        })
     }
 
     pub fn set_contact_enabled(&mut self, index: usize, enabled: bool) -> bool {
@@ -132,7 +133,7 @@ mod tests {
         assert!(
             manager
                 .refresh_contact_manifold(index, crate::ContactManifold::default())
-                .is_some()
+                .is_some_and(|(status, _)| status == crate::ContactStatus::StartTouching)
         );
         assert_eq!(manager.destroy_fixture_contacts("a"), 1);
         assert_eq!(manager.contact_count(), 0);
@@ -154,8 +155,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            manager.refresh_contact_manifold(index, crate::ContactManifold::default()),
-            Some(crate::ContactStatus::StartTouching)
+            manager
+                .refresh_contact_manifold(index, crate::ContactManifold::default())
+                .map(|(status, _)| status),
+            Some(crate::ContactStatus::StartTouching),
         );
         assert!(manager.contact(index).unwrap().is_touching);
     }
