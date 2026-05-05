@@ -129,6 +129,10 @@ impl Contact {
         self.update_touching(true)
     }
 
+    pub fn end_touching(&mut self) -> ContactStatus {
+        self.update_touching(false)
+    }
+
     pub fn set_point_impulse(
         &mut self,
         point_index: usize,
@@ -204,6 +208,19 @@ mod tests {
             contact.refresh_manifold(super::ContactManifold::default()),
             ContactStatus::NoContact
         );
+    }
+
+    #[test]
+    fn contact_ends_touching_state_semantically() {
+        let mut contact = Contact::new("a", "b", ContactType::Aabb);
+        assert_eq!(
+            contact.refresh_manifold(super::ContactManifold::default()),
+            ContactStatus::StartTouching
+        );
+
+        assert_eq!(contact.end_touching(), ContactStatus::EndTouching);
+        assert!(!contact.is_touching);
+        assert_eq!(contact.end_touching(), ContactStatus::NoContact);
     }
 
     #[test]

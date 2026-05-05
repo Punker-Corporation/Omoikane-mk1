@@ -383,7 +383,7 @@ impl SharedPhysicsSystem {
                 continue;
             }
             let mut ended = previous.clone();
-            let status = ended.update_touching(false);
+            let status = ended.end_touching();
             physics_map.queue_contact_event(status, ended);
         }
         physics_map.replace_contacts(contact_manager);
