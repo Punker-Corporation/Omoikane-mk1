@@ -92,13 +92,24 @@ impl SharedPhysicsMapComponent {
         self.contact_manager.contacts()
     }
 
-    #[cfg(test)]
-    pub(crate) fn contact_mut(&mut self, index: usize) -> Option<&mut Contact> {
-        self.contact_manager.contact_mut(index)
-    }
-
     pub(crate) fn contact_count(&self) -> usize {
         self.contact_manager.contact_count()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_contact_point_impulse(
+        &mut self,
+        index: usize,
+        point_index: usize,
+        normal_impulse: f32,
+        tangent_impulse: f32,
+    ) -> bool {
+        self.contact_manager.set_contact_point_impulse(
+            index,
+            point_index,
+            normal_impulse,
+            tangent_impulse,
+        )
     }
 
     pub(crate) fn queue_contact_event(&mut self, status: ContactStatus, contact: Contact) {

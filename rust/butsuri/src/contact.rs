@@ -129,6 +129,20 @@ impl Contact {
         self.update_touching(true)
     }
 
+    pub fn set_point_impulse(
+        &mut self,
+        point_index: usize,
+        normal_impulse: f32,
+        tangent_impulse: f32,
+    ) -> bool {
+        let Some(point) = self.manifold.points.get_mut(point_index) else {
+            return false;
+        };
+        point.normal_impulse = normal_impulse;
+        point.tangent_impulse = tangent_impulse;
+        true
+    }
+
     pub fn update_touching(&mut self, touching: bool) -> ContactStatus {
         let previous = self.is_touching;
         self.is_touching = touching;
@@ -190,6 +204,21 @@ mod tests {
             contact.refresh_manifold(super::ContactManifold::default()),
             ContactStatus::NoContact
         );
+    }
+
+    #[test]
+    fn contact_updates_manifold_point_impulses_by_index() {
+        let mut contact = Contact::new("a", "b", ContactType::Aabb);
+        contact.manifold.points.push(super::ContactManifoldPoint {
+            local_point: Vector2::ZERO,
+            normal_impulse: 0.0,
+            tangent_impulse: 0.0,
+        });
+
+        assert!(contact.set_point_impulse(0, 3.5, 1.25));
+        assert_eq!(contact.manifold.points[0].normal_impulse, 3.5);
+        assert_eq!(contact.manifold.points[0].tangent_impulse, 1.25);
+        assert!(!contact.set_point_impulse(1, 1.0, 1.0));
     }
 
     #[test]

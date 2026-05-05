@@ -1362,9 +1362,7 @@ mod tests {
         );
         {
             let physics_map = manager.physics_maps.get_mut(&map_owner).unwrap();
-            let contact = physics_map.contact_mut(0).unwrap();
-            contact.manifold.points[0].normal_impulse = 3.5;
-            contact.manifold.points[0].tangent_impulse = 1.25;
+            assert!(physics_map.set_contact_point_impulse(0, 0, 3.5, 1.25));
         }
 
         assert_eq!(

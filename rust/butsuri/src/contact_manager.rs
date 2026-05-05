@@ -22,10 +22,6 @@ impl ContactManager {
         self.active_contacts.get(index)
     }
 
-    pub fn contact_mut(&mut self, index: usize) -> Option<&mut Contact> {
-        self.active_contacts.get_mut(index)
-    }
-
     pub fn has_contact_pair(&self, fixture_a_key: &str, fixture_b_key: &str) -> bool {
         self.active_contacts
             .iter()
@@ -90,6 +86,19 @@ impl ContactManager {
         true
     }
 
+    pub fn set_contact_point_impulse(
+        &mut self,
+        index: usize,
+        point_index: usize,
+        normal_impulse: f32,
+        tangent_impulse: f32,
+    ) -> bool {
+        let Some(contact) = self.active_contacts.get_mut(index) else {
+            return false;
+        };
+        contact.set_point_impulse(point_index, normal_impulse, tangent_impulse)
+    }
+
     pub fn clear(&mut self) {
         self.active_contacts.clear();
     }
@@ -140,7 +149,7 @@ mod tests {
             manager.refresh_contact_manifold(index, crate::ContactManifold::default()),
             Some(crate::ContactStatus::StartTouching)
         );
-        assert!(manager.contact_mut(index).unwrap().is_touching);
+        assert!(manager.contact(index).unwrap().is_touching);
     }
 
     #[test]
@@ -162,6 +171,35 @@ mod tests {
         assert!(manager.set_contact_enabled(index, false));
         assert!(!manager.contact(index).unwrap().enabled);
         assert!(!manager.set_contact_enabled(index + 1, true));
+    }
+
+    #[test]
+    fn contact_manager_updates_contact_point_impulses() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let mut manager = ContactManager::new();
+        let index = manager
+            .add_pair_with_keys("a", &fixture_a, "b", &fixture_b)
+            .unwrap();
+        let mut manifold = crate::ContactManifold::default();
+        manifold.points.push(crate::ContactManifoldPoint {
+            local_point: keisan::Vector2::ZERO,
+            normal_impulse: 0.0,
+            tangent_impulse: 0.0,
+        });
+        let _ = manager.refresh_contact_manifold(index, manifold);
+
+        assert!(manager.set_contact_point_impulse(index, 0, 3.5, 1.25));
+        let point = &manager.contact(index).unwrap().manifold.points[0];
+        assert_eq!(point.normal_impulse, 3.5);
+        assert_eq!(point.tangent_impulse, 1.25);
+        assert!(!manager.set_contact_point_impulse(index, 1, 1.0, 1.0));
     }
 
     #[test]
