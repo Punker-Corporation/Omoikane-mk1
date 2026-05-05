@@ -18,6 +18,10 @@ impl ContactManager {
         &self.active_contacts
     }
 
+    pub fn contact(&self, index: usize) -> Option<&Contact> {
+        self.active_contacts.get(index)
+    }
+
     pub fn contact_mut(&mut self, index: usize) -> Option<&mut Contact> {
         self.active_contacts.get_mut(index)
     }
@@ -78,6 +82,14 @@ impl ContactManager {
             .map(|contact| contact.refresh_manifold(manifold))
     }
 
+    pub fn set_contact_enabled(&mut self, index: usize, enabled: bool) -> bool {
+        let Some(contact) = self.active_contacts.get_mut(index) else {
+            return false;
+        };
+        contact.enabled = enabled;
+        true
+    }
+
     pub fn clear(&mut self) {
         self.active_contacts.clear();
     }
@@ -129,6 +141,27 @@ mod tests {
             Some(crate::ContactStatus::StartTouching)
         );
         assert!(manager.contact_mut(index).unwrap().is_touching);
+    }
+
+    #[test]
+    fn contact_manager_exposes_indexed_contact_state() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let mut manager = ContactManager::new();
+        let index = manager
+            .add_pair_with_keys("a", &fixture_a, "b", &fixture_b)
+            .unwrap();
+
+        assert_eq!(manager.contact(index).unwrap().fixture_a, "a");
+        assert!(manager.set_contact_enabled(index, false));
+        assert!(!manager.contact(index).unwrap().enabled);
+        assert!(!manager.set_contact_enabled(index + 1, true));
     }
 
     #[test]

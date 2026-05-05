@@ -355,7 +355,7 @@ impl SharedPhysicsSystem {
                             if let Some(status) =
                                 contact_manager.refresh_contact_manifold(index, manifold)
                             {
-                                if let Some(contact) = contact_manager.contact_mut(index).cloned() {
+                                if let Some(contact) = contact_manager.contact(index).cloned() {
                                     if let Some(physics_map) =
                                         manager.physics_maps.get_mut(&map_owner)
                                     {
@@ -366,9 +366,7 @@ impl SharedPhysicsSystem {
                             index
                         };
 
-                        if let Some(contact) = contact_manager.contact_mut(index) {
-                            contact.enabled = true;
-                        }
+                        let _ = contact_manager.set_contact_enabled(index, true);
                     }
                 }
             }
