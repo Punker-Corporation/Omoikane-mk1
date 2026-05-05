@@ -231,11 +231,14 @@ impl SharedPhysicsSystem {
         bodies: &[EntityUid],
     ) -> usize {
         let mut contact_manager = ContactManager::new();
-        let previous_contacts = manager
-            .physics_maps
-            .get(&map_owner)
-            .map(|map| map.contacts().to_vec())
-            .unwrap_or_default();
+        let previous_contact_manager = ContactManager::from_contacts(
+            manager
+                .physics_maps
+                .get(&map_owner)
+                .map(|map| map.contacts().to_vec())
+                .unwrap_or_default(),
+        );
+        let previous_contacts = previous_contact_manager.contacts();
         let mut body_fixtures = Vec::new();
         let body_set = bodies.iter().copied().collect::<HashSet<_>>();
 
@@ -324,11 +327,9 @@ impl SharedPhysicsSystem {
                         if manifold.points.is_empty() {
                             continue;
                         }
-                        let index = if let Some(previous) = Self::find_previous_contact(
-                            &previous_contacts,
-                            &fixture_a_key,
-                            &fixture_b_key,
-                        ) {
+                        let index = if let Some(previous) =
+                            previous_contact_manager.contact_pair(&fixture_a_key, &fixture_b_key)
+                        {
                             let mut contact = previous.clone();
                             contact.fixture_a = fixture_a_key;
                             contact.fixture_b = fixture_b_key;
@@ -376,7 +377,7 @@ impl SharedPhysicsSystem {
         let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) else {
             return 0;
         };
-        for previous in &previous_contacts {
+        for previous in previous_contacts {
             let still_present =
                 contact_manager.has_contact_pair(&previous.fixture_a, &previous.fixture_b);
             if still_present {
@@ -464,16 +465,6 @@ impl SharedPhysicsSystem {
             }
         }
         current
-    }
-
-    fn find_previous_contact<'a>(
-        contacts: &'a [butsuri::Contact],
-        fixture_a: &str,
-        fixture_b: &str,
-    ) -> Option<&'a butsuri::Contact> {
-        contacts
-            .iter()
-            .find(|contact| contact.matches_pair(fixture_a, fixture_b))
     }
 
     fn compute_contact_manifold(

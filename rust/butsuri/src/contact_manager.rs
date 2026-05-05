@@ -10,6 +10,12 @@ impl ContactManager {
         Self::default()
     }
 
+    pub fn from_contacts(contacts: Vec<Contact>) -> Self {
+        Self {
+            active_contacts: contacts,
+        }
+    }
+
     pub fn contact_count(&self) -> usize {
         self.active_contacts.len()
     }
@@ -22,10 +28,14 @@ impl ContactManager {
         self.active_contacts.get(index)
     }
 
-    pub fn has_contact_pair(&self, fixture_a_key: &str, fixture_b_key: &str) -> bool {
+    pub fn contact_pair(&self, fixture_a_key: &str, fixture_b_key: &str) -> Option<&Contact> {
         self.active_contacts
             .iter()
-            .any(|contact| contact.matches_pair(fixture_a_key, fixture_b_key))
+            .find(|contact| contact.matches_pair(fixture_a_key, fixture_b_key))
+    }
+
+    pub fn has_contact_pair(&self, fixture_a_key: &str, fixture_b_key: &str) -> bool {
+        self.contact_pair(fixture_a_key, fixture_b_key).is_some()
     }
 
     pub fn insert_contact(&mut self, contact: Contact) -> usize {
@@ -169,6 +179,27 @@ mod tests {
         assert!(manager.set_contact_enabled(index, false));
         assert!(!manager.contact(index).unwrap().enabled);
         assert!(!manager.set_contact_enabled(index + 1, true));
+    }
+
+    #[test]
+    fn contact_manager_restores_snapshot_and_finds_pairs() {
+        let fixture_a = Fixture::new(
+            "a",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.0, 0.0, 1.0, 1.0), 0.0)),
+        );
+        let fixture_b = Fixture::new(
+            "b",
+            PhysShape::Aabb(AabbShape::new(Box2::new(0.5, 0.5, 1.5, 1.5), 0.0)),
+        );
+        let mut original = ContactManager::new();
+        let _ = original.add_pair_with_keys("body_a:a", &fixture_a, "body_b:b", &fixture_b);
+
+        let restored = ContactManager::from_contacts(original.contacts().to_vec());
+
+        assert_eq!(restored.contact_count(), 1);
+        assert!(restored.contact_pair("body_a:a", "body_b:b").is_some());
+        assert!(restored.contact_pair("body_b:b", "body_a:a").is_some());
+        assert!(restored.contact_pair("body_a:a", "body_c:c").is_none());
     }
 
     #[test]
