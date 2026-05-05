@@ -107,14 +107,6 @@ impl ContactManager {
         })
     }
 
-    pub fn set_contact_enabled(&mut self, index: usize, enabled: bool) -> bool {
-        let Some(contact) = self.active_contacts.get_mut(index) else {
-            return false;
-        };
-        contact.enabled = enabled;
-        true
-    }
-
     pub fn set_contact_point_impulse(
         &mut self,
         index: usize,
@@ -225,9 +217,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(manager.contact(index).unwrap().fixture_a, "a");
-        assert!(manager.set_contact_enabled(index, false));
-        assert!(!manager.contact(index).unwrap().enabled);
-        assert!(!manager.set_contact_enabled(index + 1, true));
+        assert!(manager.contact(index).unwrap().enabled);
+        assert!(manager.contact(index + 1).is_none());
     }
 
     #[test]

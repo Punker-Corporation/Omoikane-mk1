@@ -327,7 +327,7 @@ impl SharedPhysicsSystem {
                         if manifold.points.is_empty() {
                             continue;
                         }
-                        let index = if let Some(previous) =
+                        if let Some(previous) =
                             previous_contact_manager.contact_pair(&fixture_a_key, &fixture_b_key)
                         {
                             let mut contact = previous.clone();
@@ -337,17 +337,15 @@ impl SharedPhysicsSystem {
                                 fixture_b_key,
                                 ordered_fixture_b,
                             );
-                            let (index, status, contact) = contact_manager
-                                .insert_refreshed_contact(
-                                    contact,
-                                    Self::merge_manifold_impulses(&previous.manifold, manifold),
-                                );
+                            let (_, status, contact) = contact_manager.insert_refreshed_contact(
+                                contact,
+                                Self::merge_manifold_impulses(&previous.manifold, manifold),
+                            );
                             if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
                                 physics_map.queue_contact_event(status, contact);
                             }
-                            index
                         } else {
-                            let Some((index, status, contact)) = contact_manager
+                            let Some((_, status, contact)) = contact_manager
                                 .add_pair_with_manifold(
                                     &fixture_a_key,
                                     ordered_fixture_a,
@@ -361,10 +359,7 @@ impl SharedPhysicsSystem {
                             if let Some(physics_map) = manager.physics_maps.get_mut(&map_owner) {
                                 physics_map.queue_contact_event(status, contact);
                             }
-                            index
                         };
-
-                        let _ = contact_manager.set_contact_enabled(index, true);
                     }
                 }
             }

@@ -138,6 +138,7 @@ impl Contact {
 
     pub fn refresh_manifold(&mut self, manifold: ContactManifold) -> ContactStatus {
         self.manifold = manifold;
+        self.enabled = true;
         self.update_touching(true)
     }
 
@@ -224,6 +225,7 @@ mod tests {
     #[test]
     fn contact_refreshes_manifold_and_touching_state_together() {
         let mut contact = Contact::new("a", "b", ContactType::Aabb);
+        contact.enabled = false;
         let manifold = super::ContactManifold {
             normal: Vector2::new(1.0, 0.0),
             points: Vec::new(),
@@ -234,6 +236,7 @@ mod tests {
             ContactStatus::StartTouching
         );
         assert!(contact.is_touching);
+        assert!(contact.enabled);
         assert_eq!(contact.manifold, manifold);
         assert_eq!(
             contact.refresh_manifold(super::ContactManifold::default()),
