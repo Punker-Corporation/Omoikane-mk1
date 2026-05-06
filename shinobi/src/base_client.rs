@@ -3,10 +3,9 @@ use crate::{
     client_net_manager::ClientNetManager, input_system::InputSystem, physics_system::PhysicsSystem,
     player_manager::PlayerManager, transform_system::TransformSystem,
 };
-#[cfg(test)]
-use daikoku::DaikokuServer;
-use daikoku::{BoundKeyFunction, BoundKeyState, FullInputCmdMessage};
+use daikoku::{BoundKeyFunction, BoundKeyState, DaikokuServer, FullInputCmdMessage};
 use keisan::Vector2;
+use sekai::{EntityUid, FromAppearanceValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientOptions {
@@ -135,8 +134,53 @@ impl BaseClient {
         self.run_level
     }
 
-    #[cfg(test)]
-    fn flush_to_server(&mut self, server: &mut DaikokuServer) {
+    pub fn controlled_entity(&self) -> Option<EntityUid> {
+        self.players.controlled_entity()
+    }
+
+    pub fn entity_exists(&self, entity: EntityUid) -> bool {
+        self.entities.inner.entity_exists(entity)
+    }
+
+    pub fn entity_local_position(&self, entity: EntityUid) -> Option<Vector2> {
+        self.entities.inner.local_position(entity)
+    }
+
+    pub fn entity_local_rotation(&self, entity: EntityUid) -> Option<f32> {
+        self.entities
+            .inner
+            .transforms
+            .get(&entity)
+            .map(|transform| transform.local_rotation.theta as f32)
+    }
+
+    pub fn entity_appearance_data<T>(&self, entity: EntityUid, key: &str) -> Option<T>
+    where
+        T: FromAppearanceValue,
+    {
+        self.entities.inner.appearances.get(&entity)?.get_data(key)
+    }
+
+    pub fn receive_server_message(&mut self, message: daikoku::OutboundMessage) {
+        match message {
+            daikoku::OutboundMessage::State(state) => self.network.receive_state(state),
+            daikoku::OutboundMessage::Entity(entity) => self.network.receive_entity(entity),
+            daikoku::OutboundMessage::PlayerList(player_list) => {
+                self.network.receive_player_list(player_list);
+            }
+        }
+    }
+
+    pub fn receive_server_messages(
+        &mut self,
+        messages: impl IntoIterator<Item = daikoku::OutboundMessage>,
+    ) {
+        for message in messages {
+            self.receive_server_message(message);
+        }
+    }
+
+    pub fn flush_to_server(&mut self, server: &mut DaikokuServer) {
         let local_user = self
             .players
             .local_player()

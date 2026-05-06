@@ -21,7 +21,6 @@ pub(crate) struct ClientInboundBatch {
     pub(crate) player_lists: Vec<MsgPlayerList>,
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ClientOutboundBatch {
     pub(crate) acks: Vec<MsgStateAck>,
@@ -50,7 +49,6 @@ impl ClientNetManager {
         self.outbound_player_list_requests = 0;
     }
 
-    #[cfg(test)]
     pub(crate) fn receive_state(&mut self, state: MsgState) {
         if self.connected {
             self.inbound_states.push_back(state);
@@ -62,14 +60,12 @@ impl ClientNetManager {
         self.inbound_states.pop_front()
     }
 
-    #[cfg(test)]
     pub(crate) fn receive_entity(&mut self, message: MsgEntity) {
         if self.connected {
             self.inbound_entities.push_back(message);
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn receive_player_list(&mut self, message: MsgPlayerList) {
         if self.connected {
             self.inbound_player_lists.push_back(message);
@@ -109,7 +105,6 @@ impl ClientNetManager {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn take_outbound_batch(&mut self) -> ClientOutboundBatch {
         ClientOutboundBatch {
             acks: std::mem::take(&mut self.outbound_acks),

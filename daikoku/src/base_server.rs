@@ -8,8 +8,8 @@ use butsuri::{Fixture, Joint};
 use jikan::GameTick;
 use keisan::{Vector2, Vector2i};
 use sekai::{
-    BodyStatus, BodyType, EntityUid, GridId, MapId, MapManager, MsgPlayerList, Tile,
-    TransformComponentState,
+    BodyStatus, BodyType, EntityUid, GridId, IntoAppearanceValue, MapId, MapManager, MsgPlayerList,
+    Tile, TransformComponentState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +203,18 @@ impl DaikokuServer {
         self.entities.inner.apply_transform_state(uid, state)
     }
 
+    pub fn set_appearance_data<T>(
+        &mut self,
+        uid: EntityUid,
+        key: impl Into<String>,
+        value: T,
+    ) -> bool
+    where
+        T: IntoAppearanceValue,
+    {
+        self.entities.inner.set_appearance_data(uid, key, value)
+    }
+
     pub fn set_entity_map(&mut self, uid: EntityUid, map_id: MapId) -> bool {
         self.entities
             .inner
@@ -239,6 +251,15 @@ impl DaikokuServer {
             .inner
             .insert_fixture_and_reconcile(uid, fixture);
         true
+    }
+
+    pub fn fixture_count(&self, uid: EntityUid) -> usize {
+        self.entities
+            .inner
+            .fixtures
+            .get(&uid)
+            .map(|fixtures| fixtures.fixture_count())
+            .unwrap_or(0)
     }
 
     pub fn add_joint_between(&mut self, joint: Joint) -> bool {
