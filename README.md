@@ -13,11 +13,14 @@ The current crates are:
 - `sekai`: shared ECS, maps, transforms, serialization, physics state and game state.
 - `daikoku`: authoritative server systems, networking queues, PVS and prediction inputs.
 - `shinobi`: client-side state application, interpolation, prediction and local systems.
+- `hikari`: CPU-validated render graph, resource catalog, frame submissions, render/compute command lists, structural graphics handles and future graphics runtime boundary.
 - `xtask`: repository maintenance checks for the Rust-only layout.
 
 ## Commands
 
 ```bash
+cargo run -p xtask -- architecture-map
+cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- verify-layout
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

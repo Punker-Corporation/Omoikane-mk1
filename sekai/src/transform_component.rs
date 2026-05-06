@@ -63,6 +63,12 @@ pub struct TransformComponent {
     pub grid_id: GridId,
 }
 
+impl Default for TransformComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransformComponent {
     pub fn new() -> Self {
         Self {
@@ -98,10 +104,10 @@ impl TransformComponent {
     }
 
     pub fn world_position<R: TransformResolver>(&self, resolver: &R) -> Vector2 {
-        if self.parent.is_valid() {
-            if let Some(parent) = resolver.world_transform(self.parent) {
-                return parent.world_matrix * self.local_position;
-            }
+        if self.parent.is_valid()
+            && let Some(parent) = resolver.world_transform(self.parent)
+        {
+            return parent.world_matrix * self.local_position;
         }
         self.local_position
     }
@@ -190,16 +196,16 @@ impl TransformComponent {
         &self,
         resolver: &R,
     ) -> (Vector2, Angle, Matrix3) {
-        if self.parent.is_valid() {
-            if let Some(parent) = resolver.world_transform(self.parent) {
-                let matrix = self.local_matrix * parent.world_matrix;
-                let position = Vector2::new(matrix.r0c2, matrix.r1c2);
-                return (
-                    position,
-                    self.local_rotation + parent.world_rotation,
-                    matrix,
-                );
-            }
+        if self.parent.is_valid()
+            && let Some(parent) = resolver.world_transform(self.parent)
+        {
+            let matrix = self.local_matrix * parent.world_matrix;
+            let position = Vector2::new(matrix.r0c2, matrix.r1c2);
+            return (
+                position,
+                self.local_rotation + parent.world_rotation,
+                matrix,
+            );
         }
         (self.local_position, self.local_rotation, self.local_matrix)
     }

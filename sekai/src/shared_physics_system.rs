@@ -55,9 +55,7 @@ impl SharedPhysicsSystem {
                     .unwrap_or((Vector2::ZERO, false))
             })
             .unwrap_or((Vector2::ZERO, false));
-        let Some(body) = manager.physics.get_mut(&uid) else {
-            return None;
-        };
+        let body = manager.physics.get_mut(&uid)?;
         if (entity_paused || map_paused) && !body.ignore_paused {
             return None;
         }
@@ -265,10 +263,8 @@ impl SharedPhysicsSystem {
             body_fixtures.push((uid, body.body_type, fixture_data));
         }
 
-        for first in 0..body_fixtures.len() {
-            let (uid_a, body_type_a, fixtures_a) = &body_fixtures[first];
-            for second in first + 1..body_fixtures.len() {
-                let (uid_b, body_type_b, fixtures_b) = &body_fixtures[second];
+        for (first, (uid_a, body_type_a, fixtures_a)) in body_fixtures.iter().enumerate() {
+            for (uid_b, body_type_b, fixtures_b) in body_fixtures.iter().skip(first + 1) {
                 if *body_type_a == BodyType::Static && *body_type_b == BodyType::Static {
                     continue;
                 }
@@ -490,13 +486,13 @@ impl SharedPhysicsSystem {
         let corners_a = Self::aabb_world_corners(shape_a, transform_a);
         let corners_b = Self::aabb_world_corners(shape_b, transform_b);
         let axes = [
-            transform_a.rotation.mul(Vector2::UNIT_X),
-            transform_a.rotation.mul(Vector2::UNIT_Y),
-            transform_b.rotation.mul(Vector2::UNIT_X),
-            transform_b.rotation.mul(Vector2::UNIT_Y),
+            transform_a.rotation.rotate_vector(Vector2::UNIT_X),
+            transform_a.rotation.rotate_vector(Vector2::UNIT_Y),
+            transform_b.rotation.rotate_vector(Vector2::UNIT_X),
+            transform_b.rotation.rotate_vector(Vector2::UNIT_Y),
         ];
-        let center_a = transform_a.mul(shape_a.local_bounds.center());
-        let center_b = transform_b.mul(shape_b.local_bounds.center());
+        let center_a = transform_a.transform_point(shape_a.local_bounds.center());
+        let center_b = transform_b.transform_point(shape_b.local_bounds.center());
 
         let mut best_overlap = f32::MAX;
         let mut best_normal = Vector2::ZERO;
@@ -547,8 +543,8 @@ impl SharedPhysicsSystem {
         shape_b: CircleShape,
         transform_b: PhysicsTransform,
     ) -> ContactManifold {
-        let center_a = transform_a.mul(shape_a.position);
-        let center_b = transform_b.mul(shape_b.position);
+        let center_a = transform_a.transform_point(shape_a.position);
+        let center_b = transform_b.transform_point(shape_b.position);
         let delta = center_b - center_a;
         let distance = delta.length();
         let radius_sum = shape_a.radius + shape_b.radius;
@@ -578,7 +574,7 @@ impl SharedPhysicsSystem {
         shape_circle: CircleShape,
         transform_circle: PhysicsTransform,
     ) -> ContactManifold {
-        let center = transform_circle.mul(shape_circle.position);
+        let center = transform_circle.transform_point(shape_circle.position);
         let local_center = transform_aabb.mul_t(center);
         let bounds = shape_aabb.local_bounds.enlarged(shape_aabb.radius);
         let local_closest = bounds.closest_point(local_center);
@@ -591,8 +587,8 @@ impl SharedPhysicsSystem {
             }
             let local_normal = delta / distance;
             (
-                transform_aabb.rotation.mul(local_normal),
-                transform_aabb.mul(local_closest),
+                transform_aabb.rotation.rotate_vector(local_normal),
+                transform_aabb.transform_point(local_closest),
             )
         } else {
             let left = (local_center.x - bounds.left).abs();
@@ -622,8 +618,8 @@ impl SharedPhysicsSystem {
                 )
             };
             (
-                transform_aabb.rotation.mul(local_normal),
-                transform_aabb.mul(local_point),
+                transform_aabb.rotation.rotate_vector(local_normal),
+                transform_aabb.transform_point(local_point),
             )
         };
 
@@ -653,7 +649,7 @@ impl SharedPhysicsSystem {
             return manifold;
         }
 
-        let center = transform_circle.mul(shape_circle.position);
+        let center = transform_circle.transform_point(shape_circle.position);
         let world_point =
             center + (-manifold.normal) * shape_circle.radius.min(shape_circle.radius);
         ContactManifold {
@@ -668,10 +664,10 @@ impl SharedPhysicsSystem {
 
     fn aabb_world_corners(shape: AabbShape, transform: PhysicsTransform) -> [Vector2; 4] {
         [
-            transform.mul(shape.local_bounds.bottom_left()),
-            transform.mul(shape.local_bounds.bottom_right()),
-            transform.mul(shape.local_bounds.top_right()),
-            transform.mul(shape.local_bounds.top_left()),
+            transform.transform_point(shape.local_bounds.bottom_left()),
+            transform.transform_point(shape.local_bounds.bottom_right()),
+            transform.transform_point(shape.local_bounds.top_right()),
+            transform.transform_point(shape.local_bounds.top_left()),
         ]
     }
 
@@ -1639,6 +1635,6 @@ mod tests {
     #[test]
     fn physics_system_is_plain_utility_surface() {
         let _first = SharedPhysicsSystem::new();
-        let _second = SharedPhysicsSystem::default();
+        let _second = SharedPhysicsSystem;
     }
 }

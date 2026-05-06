@@ -45,6 +45,7 @@ impl OrderingData {
 
 type BroadcastCallback = dyn FnMut(&mut dyn Any) + Send;
 type LocalCallback = dyn FnMut(EntityUid, &str, &mut dyn Any) + Send;
+type AwaitCallback = dyn FnMut(&mut dyn Any) -> bool + Send;
 
 struct BroadcastSubscription {
     subscriber: String,
@@ -67,7 +68,7 @@ struct QueuedEvent {
 
 struct AwaitingEvent {
     source: EventSource,
-    notify: Box<dyn FnMut(&mut dyn Any) -> bool + Send>,
+    notify: Box<AwaitCallback>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -294,18 +295,18 @@ impl EntityEventBus {
         for target in ordered_targets {
             match target {
                 OrderedTarget::Local(idx) => {
-                    if let Some(subscriptions) = self.local_subscriptions.get_mut(&type_id) {
-                        if let Some(subscription) = subscriptions.get_mut(idx) {
-                            let component_name = subscription.component_name.clone();
-                            (subscription.callback)(uid, &component_name, event);
-                        }
+                    if let Some(subscriptions) = self.local_subscriptions.get_mut(&type_id)
+                        && let Some(subscription) = subscriptions.get_mut(idx)
+                    {
+                        let component_name = subscription.component_name.clone();
+                        (subscription.callback)(uid, &component_name, event);
                     }
                 }
                 OrderedTarget::Broadcast(idx) => {
-                    if let Some(subscriptions) = self.broadcast_subscriptions.get_mut(&type_id) {
-                        if let Some(subscription) = subscriptions.get_mut(idx) {
-                            (subscription.callback)(event);
-                        }
+                    if let Some(subscriptions) = self.broadcast_subscriptions.get_mut(&type_id)
+                        && let Some(subscription) = subscriptions.get_mut(idx)
+                    {
+                        (subscription.callback)(event);
                     }
                 }
             }
@@ -359,11 +360,11 @@ impl EntityEventBus {
             );
 
             for target in targets {
-                if let OrderedTarget::Local(idx) = target {
-                    if let Some(subscription) = subscriptions.get_mut(idx) {
-                        let component_name = subscription.component_name.clone();
-                        (subscription.callback)(uid, &component_name, event);
-                    }
+                if let OrderedTarget::Local(idx) = target
+                    && let Some(subscription) = subscriptions.get_mut(idx)
+                {
+                    let component_name = subscription.component_name.clone();
+                    (subscription.callback)(uid, &component_name, event);
                 }
             }
         }

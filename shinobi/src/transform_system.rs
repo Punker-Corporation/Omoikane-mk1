@@ -36,6 +36,7 @@ impl TransformSystem {
         Self::default()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn queue_snapshot_lerp(
         &mut self,
         uid: EntityUid,

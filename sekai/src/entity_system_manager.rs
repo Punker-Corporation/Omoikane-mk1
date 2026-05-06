@@ -15,6 +15,12 @@ pub struct EntitySystemManager {
     pub initialized: bool,
 }
 
+impl Default for EntitySystemManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EntitySystemManager {
     pub fn new() -> Self {
         Self {

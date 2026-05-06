@@ -1,0 +1,10 @@
+[package]
+name = "hikari"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+
+[lib]
+path = "src/lib.rs"

@@ -31,11 +31,11 @@ impl TransformSystem {
                     .transforms
                     .get(&move_event.sender)
                     .map(|transform| transform.get_world_position_rotation_matrix(&entities.inner));
-                if let Some(grid) = entities.inner.map_grids.get_mut(&move_event.sender) {
-                    if let Some((world_pos, world_rot, _)) = world_state {
-                        grid.world_position = world_pos;
-                        grid.world_rotation = world_rot;
-                    }
+                if let Some(grid) = entities.inner.map_grids.get_mut(&move_event.sender)
+                    && let Some((world_pos, world_rot, _)) = world_state
+                {
+                    grid.world_position = world_pos;
+                    grid.world_rotation = world_rot;
                 }
             }
             let previous_map = entities

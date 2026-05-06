@@ -21,6 +21,7 @@ pub struct PhysicsComponentState {
 }
 
 impl PhysicsComponentState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         can_collide: bool,
         awake: bool,

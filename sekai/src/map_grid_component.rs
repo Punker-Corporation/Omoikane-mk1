@@ -16,6 +16,12 @@ pub struct MapGridComponentState {
     pub chunk_size: u16,
 }
 
+impl Default for MapGridComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MapGridComponent {
     pub fn new() -> Self {
         Self {

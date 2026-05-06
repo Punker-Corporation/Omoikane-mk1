@@ -27,6 +27,7 @@ impl Matrix4 {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_values(
         m00: f32,
         m01: f32,

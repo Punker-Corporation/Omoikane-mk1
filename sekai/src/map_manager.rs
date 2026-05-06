@@ -181,10 +181,11 @@ impl MapManager {
             }
         }
 
-        if let Some(old) = previous {
-            if old.is_valid() && old != new_map_entity_id {
-                manager.queue_delete_entity(old);
-            }
+        if let Some(old) = previous
+            && old.is_valid()
+            && old != new_map_entity_id
+        {
+            manager.queue_delete_entity(old);
         }
     }
 

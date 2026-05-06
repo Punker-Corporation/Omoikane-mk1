@@ -35,16 +35,15 @@ impl ClientGameStateProcessor {
     }
 
     pub(crate) fn add_new_state(&mut self, state: GameState) {
-        if state.from_sequence == jikan::GameTick::ZERO {
-            if self
+        if state.from_sequence == jikan::GameTick::ZERO
+            && self
                 .last_full_state
                 .as_ref()
                 .map(|full| full.to_sequence < state.to_sequence)
                 .unwrap_or(true)
-            {
-                self.last_full_state = Some(state);
-                return;
-            }
+        {
+            self.last_full_state = Some(state);
+            return;
         }
 
         if self

@@ -31,6 +31,12 @@ pub struct TimerComponent {
     pub remove_on_empty: bool,
 }
 
+impl Default for TimerComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimerComponent {
     pub fn new() -> Self {
         Self {

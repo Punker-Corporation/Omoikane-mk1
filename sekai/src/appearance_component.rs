@@ -127,6 +127,12 @@ pub struct AppearanceComponent {
     pub appearance_data: HashMap<String, AppearanceValue>,
 }
 
+impl Default for AppearanceComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppearanceComponent {
     pub fn new() -> Self {
         Self {

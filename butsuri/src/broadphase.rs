@@ -69,17 +69,17 @@ impl Broadphase {
             if ray.intersects(aabb).is_none() {
                 continue;
             }
-            if let Some((distance, hit_pos)) = entry.fixture.ray_cast(entry.transform, ray) {
-                if distance <= max_length {
-                    results.push(RayCastHit::new(
-                        distance,
-                        hit_pos,
-                        BroadphaseHit {
-                            fixture_index: index,
-                            owner_id: entry.owner_id,
-                        },
-                    ));
-                }
+            if let Some((distance, hit_pos)) = entry.fixture.ray_cast(entry.transform, ray)
+                && distance <= max_length
+            {
+                results.push(RayCastHit::new(
+                    distance,
+                    hit_pos,
+                    BroadphaseHit {
+                        fixture_index: index,
+                        owner_id: entry.owner_id,
+                    },
+                ));
             }
         }
         results.sort_by(|a, b| {

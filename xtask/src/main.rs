@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env, fs, io,
     path::{Path, PathBuf},
 };
@@ -58,6 +59,18 @@ const BANNED_EXTENSIONS: &[&str] = &[
 fn main() {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("architecture-map") => {
+            if let Err(err) = architecture_map() {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
+        Some("verify-architecture") => {
+            if let Err(err) = verify_architecture() {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
         Some("verify-layout") => {
             if let Err(err) = verify_layout() {
                 eprintln!("{err}");
@@ -65,10 +78,353 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("usage: cargo run -p xtask -- verify-layout");
+            eprintln!(
+                "usage: cargo run -p xtask -- <architecture-map|verify-architecture|verify-layout>"
+            );
             std::process::exit(2);
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CrateInfo {
+    name: String,
+    path: PathBuf,
+    modules: Vec<String>,
+    internal_dependencies: Vec<String>,
+}
+
+fn architecture_map() -> Result<(), String> {
+    let root = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
+    let crates = collect_crates(&root).map_err(|err| format!("architecture scan failed: {err}"))?;
+
+    println!("Omoikane architecture map");
+    println!();
+    println!("crates:");
+    for krate in crates.values() {
+        println!("  - {} ({})", krate.name, krate.path.display());
+        println!("    modules: {}", display_list(&krate.modules));
+        println!(
+            "    internal deps: {}",
+            display_list(&krate.internal_dependencies)
+        );
+    }
+
+    println!();
+    println!("dependency edges:");
+    let mut has_edges = false;
+    for krate in crates.values() {
+        for dependency in &krate.internal_dependencies {
+            has_edges = true;
+            println!("  {} -> {dependency}", krate.name);
+        }
+    }
+    if !has_edges {
+        println!("  none");
+    }
+
+    Ok(())
+}
+
+fn verify_architecture() -> Result<(), String> {
+    let root = env::current_dir().map_err(|err| format!("failed to read cwd: {err}"))?;
+    let crates = collect_crates(&root).map_err(|err| format!("architecture scan failed: {err}"))?;
+    let violations = architecture_violations(&crates);
+
+    if violations.is_empty() {
+        println!("architecture ok: crate dependency boundaries are clean");
+        Ok(())
+    } else {
+        Err(format!(
+            "architecture violations:\n{}",
+            violations
+                .into_iter()
+                .map(|violation| format!("  - {violation}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ))
+    }
+}
+
+fn collect_crates(root: &Path) -> io::Result<BTreeMap<String, CrateInfo>> {
+    let mut crate_paths = Vec::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() && path.join("Cargo.toml").is_file() {
+            crate_paths.push(path);
+        }
+    }
+    crate_paths.sort();
+
+    let crate_names = crate_paths
+        .iter()
+        .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+
+    let mut crates = BTreeMap::new();
+    for path in crate_paths {
+        let Some(name) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let manifest = fs::read_to_string(path.join("Cargo.toml"))?;
+        let modules = collect_root_modules(&path)?;
+        let internal_dependencies = collect_internal_dependencies(&manifest, &crate_names, &name);
+        crates.insert(
+            name.clone(),
+            CrateInfo {
+                name,
+                path: path.strip_prefix(root).unwrap_or(&path).to_path_buf(),
+                modules,
+                internal_dependencies,
+            },
+        );
+    }
+
+    Ok(crates)
+}
+
+fn collect_root_modules(crate_path: &Path) -> io::Result<Vec<String>> {
+    let root_module = crate_path.join("src/lib.rs");
+    let root_module = if root_module.is_file() {
+        root_module
+    } else {
+        crate_path.join("src/main.rs")
+    };
+
+    if !root_module.is_file() {
+        return Ok(Vec::new());
+    }
+
+    let source = fs::read_to_string(root_module)?;
+    let mut modules = source
+        .lines()
+        .filter_map(parse_module_decl)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    modules.sort();
+    Ok(modules)
+}
+
+fn collect_internal_dependencies(
+    manifest: &str,
+    crate_names: &BTreeSet<String>,
+    own_name: &str,
+) -> Vec<String> {
+    crate_names
+        .iter()
+        .filter(|name| name.as_str() != own_name)
+        .filter(|name| {
+            manifest
+                .lines()
+                .any(|line| parse_dependency_name(line).as_deref() == Some(name.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
+fn parse_module_decl(line: &str) -> Option<String> {
+    let line = line.trim();
+    if !line.ends_with(';') {
+        return None;
+    }
+    let declaration = line
+        .strip_prefix("pub mod ")
+        .or_else(|| line.strip_prefix("mod "))?;
+    declaration
+        .trim_end_matches(';')
+        .split_whitespace()
+        .next()
+        .map(str::to_owned)
+}
+
+fn parse_dependency_name(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.starts_with('[') || line.starts_with('#') {
+        return None;
+    }
+    let (name, value) = line.split_once('=')?;
+    value.contains("path").then(|| name.trim().to_owned())
+}
+
+fn display_list(items: &[String]) -> String {
+    if items.is_empty() {
+        "none".to_string()
+    } else {
+        items.join(", ")
+    }
+}
+
+fn architecture_violations(crates: &BTreeMap<String, CrateInfo>) -> Vec<String> {
+    let mut violations = Vec::new();
+
+    for rule in architecture_rules() {
+        if has_internal_dependency(crates, rule.source, rule.target) {
+            violations.push(format!(
+                "{} must not depend on {} ({})",
+                rule.source, rule.target, rule.reason
+            ));
+        }
+    }
+
+    if let Some(hikari) = crates.get("hikari") {
+        let unexpected_deps = hikari
+            .internal_dependencies
+            .iter()
+            .filter(|dependency| dependency.as_str() != "keisan")
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unexpected_deps.is_empty() {
+            violations.push(format!(
+                "hikari has unexpected internal deps before extract integration: {} (only keisan is allowed)",
+                display_list(&unexpected_deps),
+            ));
+        }
+    }
+
+    for cycle in dependency_cycles(crates) {
+        violations.push(format!("dependency cycle detected: {}", cycle.join(" -> ")));
+    }
+
+    violations.sort();
+    violations.dedup();
+    violations
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ArchitectureRule {
+    source: &'static str,
+    target: &'static str,
+    reason: &'static str,
+}
+
+fn architecture_rules() -> &'static [ArchitectureRule] {
+    &[
+        ArchitectureRule {
+            source: "keisan",
+            target: "hikari",
+            reason: "math must stay renderer-agnostic",
+        },
+        ArchitectureRule {
+            source: "jikan",
+            target: "hikari",
+            reason: "time and loop primitives must stay renderer-agnostic",
+        },
+        ArchitectureRule {
+            source: "butsuri",
+            target: "hikari",
+            reason: "physics must not know presentation",
+        },
+        ArchitectureRule {
+            source: "sekai",
+            target: "hikari",
+            reason: "shared ECS must not know presentation",
+        },
+        ArchitectureRule {
+            source: "daikoku",
+            target: "hikari",
+            reason: "authoritative server must stay headless",
+        },
+        ArchitectureRule {
+            source: "daikoku",
+            target: "shinobi",
+            reason: "server must not depend on client code",
+        },
+        ArchitectureRule {
+            source: "sekai",
+            target: "daikoku",
+            reason: "shared state must not depend on server systems",
+        },
+        ArchitectureRule {
+            source: "sekai",
+            target: "shinobi",
+            reason: "shared state must not depend on client systems",
+        },
+        ArchitectureRule {
+            source: "butsuri",
+            target: "sekai",
+            reason: "physics primitives must stay below ECS",
+        },
+        ArchitectureRule {
+            source: "jikan",
+            target: "butsuri",
+            reason: "time primitives must stay below physics",
+        },
+    ]
+}
+
+fn has_internal_dependency(
+    crates: &BTreeMap<String, CrateInfo>,
+    source: &str,
+    target: &str,
+) -> bool {
+    crates
+        .get(source)
+        .is_some_and(|krate| krate.internal_dependencies.iter().any(|dep| dep == target))
+}
+
+fn dependency_cycles(crates: &BTreeMap<String, CrateInfo>) -> Vec<Vec<String>> {
+    let mut cycles = BTreeSet::new();
+    for name in crates.keys() {
+        let mut stack = Vec::new();
+        visit_dependency_cycles(name, name, crates, &mut stack, &mut cycles);
+    }
+    cycles.into_iter().collect()
+}
+
+fn visit_dependency_cycles(
+    start: &str,
+    current: &str,
+    crates: &BTreeMap<String, CrateInfo>,
+    stack: &mut Vec<String>,
+    cycles: &mut BTreeSet<Vec<String>>,
+) {
+    if stack.iter().any(|item| item == current) {
+        return;
+    }
+
+    stack.push(current.to_string());
+    let Some(krate) = crates.get(current) else {
+        stack.pop();
+        return;
+    };
+
+    for dependency in &krate.internal_dependencies {
+        if dependency == start {
+            let mut cycle = stack.clone();
+            cycle.push(start.to_string());
+            cycles.insert(canonical_cycle(cycle));
+        } else {
+            visit_dependency_cycles(start, dependency, crates, stack, cycles);
+        }
+    }
+
+    stack.pop();
+}
+
+fn canonical_cycle(mut cycle: Vec<String>) -> Vec<String> {
+    let Some(last) = cycle.pop() else {
+        return cycle;
+    };
+    if cycle.is_empty() {
+        return vec![last];
+    }
+
+    let min_index = cycle
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| left.cmp(right))
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    cycle.rotate_left(min_index);
+    cycle.push(cycle[0].clone());
+    cycle
 }
 
 fn verify_layout() -> Result<(), String> {
@@ -124,7 +480,7 @@ fn visit(root: &Path, dir: &Path, violations: &mut Vec<PathBuf>) -> io::Result<(
 }
 
 fn should_skip(file_name: &str) -> bool {
-    matches!(file_name, ".git" | "target")
+    matches!(file_name, ".git" | "target") || file_name.starts_with("target-")
 }
 
 fn has_banned_extension(path: &Path) -> bool {
@@ -138,4 +494,158 @@ fn has_banned_extension(path: &Path) -> bool {
                 .to_ascii_lowercase()
                 .ends_with(&format!(".{extension}"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CrateInfo, architecture_violations, collect_internal_dependencies, dependency_cycles,
+        display_list, parse_dependency_name, parse_module_decl, should_skip,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_module_decl_reads_root_modules() {
+        assert_eq!(
+            parse_module_decl("pub mod map_manager;").as_deref(),
+            Some("map_manager")
+        );
+        assert_eq!(
+            parse_module_decl("mod base_server;").as_deref(),
+            Some("base_server")
+        );
+        assert_eq!(parse_module_decl("pub use map_manager::MapManager;"), None);
+        assert_eq!(parse_module_decl("mod tests {"), None);
+    }
+
+    #[test]
+    fn parse_dependency_name_reads_path_dependencies_only() {
+        assert_eq!(
+            parse_dependency_name("sekai = { path = \"../sekai\" }").as_deref(),
+            Some("sekai")
+        );
+        assert_eq!(parse_dependency_name("serde = \"1\""), None);
+        assert_eq!(parse_dependency_name("[dependencies]"), None);
+    }
+
+    #[test]
+    fn collect_internal_dependencies_keeps_workspace_edges_sorted() {
+        let manifest = r#"
+[dependencies]
+sekai = { path = "../sekai" }
+keisan = { path = "../keisan" }
+serde = "1"
+"#;
+        let crate_names = ["keisan", "sekai", "shinobi"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(
+            collect_internal_dependencies(manifest, &crate_names, "shinobi"),
+            vec!["keisan".to_string(), "sekai".to_string()]
+        );
+    }
+
+    #[test]
+    fn display_list_and_skip_rules_are_stable() {
+        assert_eq!(display_list(&[]), "none");
+        assert_eq!(display_list(&["a".to_string(), "b".to_string()]), "a, b");
+        assert!(should_skip(".git"));
+        assert!(should_skip("target-msvc-lock"));
+        assert!(!should_skip("sekai"));
+    }
+
+    #[test]
+    fn architecture_violations_accept_current_layering() {
+        let crates = crates(vec![
+            ("keisan", vec![]),
+            ("jikan", vec!["keisan"]),
+            ("butsuri", vec!["jikan", "keisan"]),
+            ("sekai", vec!["butsuri", "jikan", "keisan"]),
+            ("daikoku", vec!["butsuri", "jikan", "keisan", "sekai"]),
+            (
+                "shinobi",
+                vec!["butsuri", "daikoku", "jikan", "keisan", "sekai"],
+            ),
+            ("hikari", vec![]),
+        ]);
+
+        assert!(architecture_violations(&crates).is_empty());
+    }
+
+    #[test]
+    fn architecture_violations_reject_renderer_back_edges() {
+        let crates = crates(vec![
+            ("keisan", vec![]),
+            ("hikari", vec![]),
+            ("sekai", vec!["hikari"]),
+            ("daikoku", vec!["sekai", "shinobi"]),
+        ]);
+
+        assert_eq!(
+            architecture_violations(&crates),
+            vec![
+                "daikoku must not depend on shinobi (server must not depend on client code)"
+                    .to_string(),
+                "sekai must not depend on hikari (shared ECS must not know presentation)"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn architecture_violations_reject_early_hikari_internal_deps() {
+        let crates = crates(vec![
+            ("keisan", vec![]),
+            ("sekai", vec![]),
+            ("hikari", vec!["keisan", "sekai"]),
+        ]);
+
+        assert_eq!(
+            architecture_violations(&crates),
+            vec![
+                "hikari has unexpected internal deps before extract integration: sekai (only keisan is allowed)"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_cycles_reports_canonical_cycles() {
+        let crates = crates(vec![
+            ("a", vec!["b"]),
+            ("b", vec!["c"]),
+            ("c", vec!["a"]),
+            ("d", vec![]),
+        ]);
+
+        assert_eq!(
+            dependency_cycles(&crates),
+            vec![vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "a".to_string()
+            ]]
+        );
+    }
+
+    fn crates(entries: Vec<(&str, Vec<&str>)>) -> BTreeMap<String, CrateInfo> {
+        entries
+            .into_iter()
+            .map(|(name, deps)| {
+                (
+                    name.to_string(),
+                    CrateInfo {
+                        name: name.to_string(),
+                        path: PathBuf::from(name),
+                        modules: Vec::new(),
+                        internal_dependencies: deps.into_iter().map(str::to_string).collect(),
+                    },
+                )
+            })
+            .collect()
+    }
 }

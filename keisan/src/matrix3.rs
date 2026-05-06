@@ -19,6 +19,7 @@ impl Matrix3 {
     pub const IDENTITY: Self = Self::new(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
     pub const ZERO: Self = Self::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         r0c0: f32,
         r0c1: f32,

@@ -17,6 +17,12 @@ pub struct MapComponentState {
     pub map_paused: bool,
 }
 
+impl Default for MapComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MapComponent {
     pub fn new() -> Self {
         Self {

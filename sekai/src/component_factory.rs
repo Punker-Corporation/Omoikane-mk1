@@ -36,6 +36,12 @@ pub struct ComponentFactory {
     networked_components: Option<Vec<ComponentRegistration>>,
 }
 
+impl Default for ComponentFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ComponentFactory {
     pub fn new() -> Self {
         Self {

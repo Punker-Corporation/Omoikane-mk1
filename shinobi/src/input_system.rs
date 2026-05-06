@@ -23,6 +23,7 @@ impl InputSystem {
         Self::default()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn handle_input_command(
         &mut self,
         entities: &mut ClientEntityManager,

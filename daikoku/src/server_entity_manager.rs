@@ -286,11 +286,7 @@ mod tests {
 
         let grid = entities.inner.create_entity_uninitialized(None);
         entities.inner.initialize_entity(grid);
-        let grid_component = entities
-            .inner
-            .map_grid_components
-            .entry(grid)
-            .or_insert_with(sekai::MapGridComponent::new);
+        let grid_component = entities.inner.map_grid_components.entry(grid).or_default();
         grid_component.base.owner = grid;
         grid_component.grid_index = GridId::new(3);
         let map_grid = grid_component
@@ -340,11 +336,7 @@ mod tests {
 
         let grid = entities.inner.create_entity_uninitialized(None);
         entities.inner.initialize_entity(grid);
-        let grid_component = entities
-            .inner
-            .map_grid_components
-            .entry(grid)
-            .or_insert_with(sekai::MapGridComponent::new);
+        let grid_component = entities.inner.map_grid_components.entry(grid).or_default();
         grid_component.base.owner = grid;
         grid_component.grid_index = GridId::new(5);
         let map_grid = grid_component

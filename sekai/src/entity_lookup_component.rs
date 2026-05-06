@@ -51,7 +51,7 @@ impl EntityLookupComponent {
                 bounds: *bounds,
             })
             .collect::<Vec<_>>();
-        entries.sort_by(|a, b| a.entity.cmp(&b.entity));
+        entries.sort_by_key(|a| a.entity);
         EntityLookupComponentState { entries }
     }
 

@@ -1,3 +1,4 @@
+use core::ops::Mul;
 use keisan::{Angle, Vector2};
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +24,7 @@ impl Quaternion2D {
         self.s.atan2(self.c)
     }
 
-    pub fn mul(self, vector: Vector2) -> Vector2 {
+    pub fn rotate_vector(self, vector: Vector2) -> Vector2 {
         Vector2::new(
             self.c * vector.x - self.s * vector.y,
             self.s * vector.x + self.c * vector.y,
@@ -35,6 +36,14 @@ impl Quaternion2D {
             self.c * vector.x + self.s * vector.y,
             -self.s * vector.x + self.c * vector.y,
         )
+    }
+}
+
+impl Mul<Vector2> for Quaternion2D {
+    type Output = Vector2;
+
+    fn mul(self, rhs: Vector2) -> Self::Output {
+        self.rotate_vector(rhs)
     }
 }
 
@@ -63,8 +72,8 @@ impl Transform {
         }
     }
 
-    pub fn mul(self, vector: Vector2) -> Vector2 {
-        self.rotation.mul(vector) + self.position
+    pub fn transform_point(self, vector: Vector2) -> Vector2 {
+        self.rotation.rotate_vector(vector) + self.position
     }
 
     pub fn mul_t(self, vector: Vector2) -> Vector2 {
@@ -82,6 +91,14 @@ impl Transform {
     }
 }
 
+impl Mul<Vector2> for Transform {
+    type Output = Vector2;
+
+    fn mul(self, rhs: Vector2) -> Self::Output {
+        self.transform_point(rhs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Transform;
@@ -90,7 +107,7 @@ mod tests {
     #[test]
     fn transform_roundtrips_vectors() {
         let transform = Transform::new(Vector2::new(5.0, 0.0), core::f32::consts::FRAC_PI_2);
-        let world = transform.mul(Vector2::UNIT_X);
+        let world = transform.transform_point(Vector2::UNIT_X);
         let local = transform.mul_t(world);
         assert!((local - Vector2::UNIT_X).length() < 0.0001);
     }

@@ -69,6 +69,12 @@ pub struct EntityManager {
     processing_subscription_side_effects: bool,
 }
 
+impl Default for EntityManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EntityManager {
     pub const METADATA_NET_ID: u16 = 1;
     pub const TRANSFORM_NET_ID: u16 = 2;
@@ -296,6 +302,7 @@ impl EntityManager {
         uid
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_entity_uninitialized_as_grid(
         &mut self,
         prototype_name: Option<&str>,
@@ -497,11 +504,11 @@ impl EntityManager {
         self.clear_transform_runtime_state(uid);
 
         for component_name in Self::DELETE_COMPONENT_ORDER {
-            if component_name == "MetaDataComponent" {
-                if let Some(meta) = self.metadata.get_mut(&uid) {
-                    meta.entity_life_stage = crate::EntityLifeStage::Deleted;
-                    meta.dirty(self.current_tick);
-                }
+            if component_name == "MetaDataComponent"
+                && let Some(meta) = self.metadata.get_mut(&uid)
+            {
+                meta.entity_life_stage = crate::EntityLifeStage::Deleted;
+                meta.dirty(self.current_tick);
             }
             self.remove_component_storage_with_lifecycle(uid, component_name);
         }
@@ -955,10 +962,10 @@ impl EntityManager {
             if self.refresh_entity_lookup(uid) {
                 updated += 1;
             }
-            if let Some(map_id) = self.transforms.get(&uid).map(|transform| transform.map_id) {
-                if map_id != MapId::NULLSPACE {
-                    maps.insert(map_id);
-                }
+            if let Some(map_id) = self.transforms.get(&uid).map(|transform| transform.map_id)
+                && map_id != MapId::NULLSPACE
+            {
+                maps.insert(map_id);
             }
         }
         self.refresh_map_physics_runtime_many(maps);
@@ -1121,35 +1128,33 @@ impl EntityManager {
             })
             .unwrap_or_default();
 
-        if include_anchored {
-            if let Some(grid) = self.map_grids.get(&lookup_owner) {
-                let tile_hits = grid
-                    .get_map_chunks_intersecting(world_aabb)
-                    .flat_map(|chunk_index| {
-                        let Some(chunk) = grid.try_get_chunk(chunk_index) else {
-                            return Vec::new().into_iter();
-                        };
-                        let mut anchored = Vec::new();
-                        for x in 0..chunk.chunk_size() {
-                            for y in 0..chunk.chunk_size() {
-                                let grid_tile = chunk
-                                    .chunk_tile_to_grid_tile(Vector2i::new(x as i32, y as i32));
-                                let bounds = self.lookup_local_bounds(grid_tile, grid.tile_size);
-                                let world = Box2::from_corners(
-                                    grid.local_to_world(bounds.bottom_left()),
-                                    grid.local_to_world(bounds.top_right()),
-                                );
-                                if !world.intersects(world_aabb) {
-                                    continue;
-                                }
-                                anchored.extend(chunk.get_snap_grid_cell(x, y).iter().copied());
+        if include_anchored && let Some(grid) = self.map_grids.get(&lookup_owner) {
+            let tile_hits = grid
+                .get_map_chunks_intersecting(world_aabb)
+                .flat_map(|chunk_index| {
+                    let Some(chunk) = grid.try_get_chunk(chunk_index) else {
+                        return Vec::new().into_iter();
+                    };
+                    let mut anchored = Vec::new();
+                    for x in 0..chunk.chunk_size() {
+                        for y in 0..chunk.chunk_size() {
+                            let grid_tile =
+                                chunk.chunk_tile_to_grid_tile(Vector2i::new(x as i32, y as i32));
+                            let bounds = self.lookup_local_bounds(grid_tile, grid.tile_size);
+                            let world = Box2::from_corners(
+                                grid.local_to_world(bounds.bottom_left()),
+                                grid.local_to_world(bounds.top_right()),
+                            );
+                            if !world.intersects(world_aabb) {
+                                continue;
                             }
+                            anchored.extend(chunk.get_snap_grid_cell(x, y).iter().copied());
                         }
-                        anchored.into_iter()
-                    })
-                    .collect::<Vec<_>>();
-                results.extend(tile_hits);
-            }
+                    }
+                    anchored.into_iter()
+                })
+                .collect::<Vec<_>>();
+            results.extend(tile_hits);
         }
 
         results.sort();
@@ -2170,10 +2175,10 @@ impl EntityManager {
 
         for uid in ids.iter().copied() {
             if newly_visible.contains(&uid) {
-                if let Some(state) = self.build_serialized_entity_state(serializer, uid) {
-                    if !state.component_changes.is_empty() {
-                        states.push(state);
-                    }
+                if let Some(state) = self.build_serialized_entity_state(serializer, uid)
+                    && !state.component_changes.is_empty()
+                {
+                    states.push(state);
                 }
                 continue;
             }
@@ -2187,10 +2192,9 @@ impl EntityManager {
                 uid,
                 from_tick,
                 &mut deleted_net_ids,
-            ) {
-                if !state.component_changes.is_empty() {
-                    states.push(state);
-                }
+            ) && !state.component_changes.is_empty()
+            {
+                states.push(state);
             }
         }
 
@@ -3222,10 +3226,9 @@ impl EntityManager {
                 |manager, uid, transform_state| {
                     apply_transform(manager, uid, transform_state);
                 },
-            ) {
-                if created {
-                    created_entities.push(uid);
-                }
+            ) && created
+            {
+                created_entities.push(uid);
             }
         }
         created_entities
@@ -3290,6 +3293,7 @@ impl EntityManager {
         transform_applied || map_applied
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn materialize_grid_entity(
         &mut self,
         uid: EntityUid,
@@ -3428,8 +3432,8 @@ impl EntityManager {
         if let Some(mut component) = removed_component {
             self.queue_component_shutdown_and_remove(uid, &mut component.base);
         }
-        let removed = removed_component_exists || map_id == MapId::NULLSPACE;
-        removed
+
+        removed_component_exists || map_id == MapId::NULLSPACE
     }
 
     pub fn remove_joint_component(&mut self, uid: EntityUid) -> bool {
@@ -3765,16 +3769,16 @@ impl EntityManager {
             return;
         }
 
-        if old_parent.is_valid() {
-            if let Some(transform) = self.transforms.get_mut(&old_parent) {
-                transform.children.remove(&uid);
-            }
+        if old_parent.is_valid()
+            && let Some(transform) = self.transforms.get_mut(&old_parent)
+        {
+            transform.children.remove(&uid);
         }
 
-        if new_parent.is_valid() {
-            if let Some(transform) = self.transforms.get_mut(&new_parent) {
-                transform.children.insert(uid);
-            }
+        if new_parent.is_valid()
+            && let Some(transform) = self.transforms.get_mut(&new_parent)
+        {
+            transform.children.insert(uid);
         }
     }
 
@@ -3975,10 +3979,10 @@ impl EntityManager {
 
     fn remove_from_parent_transform_tree(&mut self, uid: EntityUid) {
         let parent = self.transforms.get(&uid).map(|transform| transform.parent);
-        if let Some(parent) = parent.filter(|parent| parent.is_valid()) {
-            if let Some(parent_transform) = self.transforms.get_mut(&parent) {
-                parent_transform.children.remove(&uid);
-            }
+        if let Some(parent) = parent.filter(|parent| parent.is_valid())
+            && let Some(parent_transform) = self.transforms.get_mut(&parent)
+        {
+            parent_transform.children.remove(&uid);
         }
     }
 
@@ -4346,27 +4350,27 @@ impl EntityManager {
     {
         let event = event as &mut dyn std::any::Any;
         match component_name {
-            "EntityLookupComponent" if event.is::<crate::ComponentAdd>() => {
-                if self.transforms.contains_key(&uid) {
-                    self.refresh_entity_lookup_subtree(uid);
-                }
+            "EntityLookupComponent"
+                if event.is::<crate::ComponentAdd>() && self.transforms.contains_key(&uid) =>
+            {
+                self.refresh_entity_lookup_subtree(uid);
             }
             "TransformComponent" => {
                 if let Some(move_event) = event.downcast_ref::<crate::MoveEvent>() {
                     if self.transforms.contains_key(&move_event.sender) {
                         self.refresh_entity_lookup_subtree(move_event.sender);
                     }
-                } else if let Some(rotate_event) = event.downcast_ref::<crate::RotateEvent>() {
-                    if self.transforms.contains_key(&rotate_event.sender) {
-                        self.refresh_entity_lookup_subtree(rotate_event.sender);
-                    }
+                } else if let Some(rotate_event) = event.downcast_ref::<crate::RotateEvent>()
+                    && self.transforms.contains_key(&rotate_event.sender)
+                {
+                    self.refresh_entity_lookup_subtree(rotate_event.sender);
                 }
             }
             "MetaDataComponent" => {
-                if let Some(paused_event) = event.downcast_ref::<crate::EntityPausedEvent>() {
-                    if self.appearances.contains_key(&paused_event.entity) {
-                        let _ = self.mark_appearance_dirty(paused_event.entity);
-                    }
+                if let Some(paused_event) = event.downcast_ref::<crate::EntityPausedEvent>()
+                    && self.appearances.contains_key(&paused_event.entity)
+                {
+                    let _ = self.mark_appearance_dirty(paused_event.entity);
                 }
             }
             _ => {}
@@ -4375,18 +4379,16 @@ impl EntityManager {
 
     fn process_direct_runtime_event_side_effects(&mut self, event: &crate::EntityRuntimeEvent) {
         match event {
-            crate::EntityRuntimeEvent::EntityPaused(ev) => {
-                if self.appearances.contains_key(&ev.entity) {
-                    let _ = self.mark_appearance_dirty(ev.entity);
-                }
+            crate::EntityRuntimeEvent::EntityPaused(ev)
+                if self.appearances.contains_key(&ev.entity) =>
+            {
+                let _ = self.mark_appearance_dirty(ev.entity);
             }
             crate::EntityRuntimeEvent::EntityDeleted(ev) => {
                 self.appearance_dirty_components.remove(&ev.entity);
             }
-            crate::EntityRuntimeEvent::MapInit(ev) => {
-                if self.appearances.contains_key(&ev.entity) {
-                    let _ = self.mark_appearance_dirty(ev.entity);
-                }
+            crate::EntityRuntimeEvent::MapInit(ev) if self.appearances.contains_key(&ev.entity) => {
+                let _ = self.mark_appearance_dirty(ev.entity);
             }
             crate::EntityRuntimeEvent::ComponentLifecycle(ev)
                 if ev.component == "AppearanceComponent" =>
@@ -4394,10 +4396,10 @@ impl EntityManager {
                 match ev.stage {
                     crate::ComponentLifeStage::Added
                     | crate::ComponentLifeStage::Initialized
-                    | crate::ComponentLifeStage::Running => {
-                        if self.appearances.contains_key(&ev.owner) {
-                            let _ = self.mark_appearance_dirty(ev.owner);
-                        }
+                    | crate::ComponentLifeStage::Running
+                        if self.appearances.contains_key(&ev.owner) =>
+                    {
+                        let _ = self.mark_appearance_dirty(ev.owner);
                     }
                     crate::ComponentLifeStage::Stopped | crate::ComponentLifeStage::Deleted => {
                         self.appearance_dirty_components.remove(&ev.owner);
@@ -6422,10 +6424,7 @@ mod tests {
         manager.transforms.get_mut(&map).unwrap().map_id = MapId::new(1);
 
         let grid_uid = manager.create_entity_uninitialized(None);
-        let grid = manager
-            .map_grid_components
-            .entry(grid_uid)
-            .or_insert_with(crate::MapGridComponent::new);
+        let grid = manager.map_grid_components.entry(grid_uid).or_default();
         grid.base.owner = grid_uid;
         grid.grid_index = GridId::new(3);
         let map_grid = grid.alloc_map_grid(grid_uid, MapId::new(1), 1).clone();

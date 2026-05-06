@@ -8,7 +8,7 @@ pub(crate) struct PhysicsSystem;
 
 impl PhysicsSystem {
     pub(crate) fn new() -> Self {
-        Self::default()
+        Self
     }
 
     fn mark_body_changed(&self, entities: &mut ServerEntityManager, uid: EntityUid) {

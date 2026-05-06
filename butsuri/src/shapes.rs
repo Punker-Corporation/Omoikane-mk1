@@ -24,10 +24,10 @@ impl AabbShape {
 
     pub fn compute_aabb(self, transform: Transform) -> Box2 {
         let points = [
-            transform.mul(self.local_bounds.bottom_left()),
-            transform.mul(self.local_bounds.bottom_right()),
-            transform.mul(self.local_bounds.top_left()),
-            transform.mul(self.local_bounds.top_right()),
+            transform.transform_point(self.local_bounds.bottom_left()),
+            transform.transform_point(self.local_bounds.bottom_right()),
+            transform.transform_point(self.local_bounds.top_left()),
+            transform.transform_point(self.local_bounds.top_right()),
         ];
         points
             .into_iter()
@@ -44,7 +44,7 @@ impl AabbShape {
         );
         let local_bounds = self.local_bounds.enlarged(self.radius);
         let (distance, local_hit) = local_ray.intersects(local_bounds)?;
-        Some((distance, transform.mul(local_hit)))
+        Some((distance, transform.transform_point(local_hit)))
     }
 }
 
@@ -60,7 +60,7 @@ impl CircleShape {
     }
 
     pub fn compute_aabb(self, transform: Transform) -> Box2 {
-        let world = transform.mul(self.position);
+        let world = transform.transform_point(self.position);
         Box2::new(
             world.x - self.radius,
             world.y - self.radius,
@@ -90,7 +90,7 @@ impl CircleShape {
         }
 
         let local_hit = local_position + local_direction * distance;
-        Some((distance, transform.mul(local_hit)))
+        Some((distance, transform.transform_point(local_hit)))
     }
 }
 

@@ -45,8 +45,8 @@ pub enum DirectionFlag {
 }
 
 pub trait DirectionOps {
-    fn as_dir(self) -> Direction;
-    fn as_flag(self) -> DirectionFlag;
+    fn to_direction(self) -> Direction;
+    fn to_flag(self) -> DirectionFlag;
     fn get_opposite(self) -> Direction;
     fn get_clockwise_90_degrees(self) -> Direction;
     fn to_angle(self) -> Angle;
@@ -55,7 +55,7 @@ pub trait DirectionOps {
 }
 
 impl DirectionOps for DirectionFlag {
-    fn as_dir(self) -> Direction {
+    fn to_direction(self) -> Direction {
         match self {
             DirectionFlag::South => Direction::South,
             DirectionFlag::SouthEast => Direction::SouthEast,
@@ -69,37 +69,37 @@ impl DirectionOps for DirectionFlag {
         }
     }
 
-    fn as_flag(self) -> DirectionFlag {
+    fn to_flag(self) -> DirectionFlag {
         self
     }
 
     fn get_opposite(self) -> Direction {
-        self.as_dir().get_opposite()
+        self.to_direction().get_opposite()
     }
 
     fn get_clockwise_90_degrees(self) -> Direction {
-        self.as_dir().get_clockwise_90_degrees()
+        self.to_direction().get_clockwise_90_degrees()
     }
 
     fn to_angle(self) -> Angle {
-        self.as_dir().to_angle()
+        self.to_direction().to_angle()
     }
 
     fn to_vec(self) -> Vector2 {
-        self.as_dir().to_vec()
+        self.to_direction().to_vec()
     }
 
     fn to_int_vec(self) -> Vector2i {
-        self.as_dir().to_int_vec()
+        self.to_direction().to_int_vec()
     }
 }
 
 impl DirectionOps for Direction {
-    fn as_dir(self) -> Direction {
+    fn to_direction(self) -> Direction {
         self
     }
 
-    fn as_flag(self) -> DirectionFlag {
+    fn to_flag(self) -> DirectionFlag {
         match self {
             Direction::South => DirectionFlag::South,
             Direction::SouthEast => DirectionFlag::SouthEast,
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn direction_roundtrips_to_flags() {
         assert_eq!(
-            Direction::NorthWest.as_flag().as_dir(),
+            Direction::NorthWest.to_flag().to_direction(),
             Direction::NorthWest
         );
     }

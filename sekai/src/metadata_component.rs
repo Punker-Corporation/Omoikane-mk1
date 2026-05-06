@@ -43,6 +43,12 @@ pub struct MetaDataComponent {
     pub map_id: MapId,
 }
 
+impl Default for MetaDataComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetaDataComponent {
     pub fn new() -> Self {
         Self {

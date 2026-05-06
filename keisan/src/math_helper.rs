@@ -9,8 +9,8 @@ impl MathHelper {
     pub const TWO_PI: f32 = 2.0 * Self::PI;
     pub const THREE_PI_OVER_2: f32 = 3.0 * Self::PI / 2.0;
     pub const E: f32 = core::f32::consts::E;
-    pub const LOG10_E: f32 = 0.434294482;
-    pub const LOG2_E: f32 = 1.442695041;
+    pub const LOG10_E: f32 = core::f32::consts::LOG10_E;
+    pub const LOG2_E: f32 = core::f32::consts::LOG2_E;
 
     pub fn clamp<T>(value: T, min: T, max: T) -> T
     where
