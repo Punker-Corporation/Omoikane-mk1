@@ -11,6 +11,7 @@ pub enum BodyStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PhysicsComponentState {
     pub can_collide: bool,
+    pub awake: bool,
     pub sleeping_allowed: bool,
     pub fixed_rotation: bool,
     pub status: BodyStatus,
@@ -20,8 +21,10 @@ pub struct PhysicsComponentState {
 }
 
 impl PhysicsComponentState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         can_collide: bool,
+        awake: bool,
         sleeping_allowed: bool,
         fixed_rotation: bool,
         status: BodyStatus,
@@ -31,6 +34,7 @@ impl PhysicsComponentState {
     ) -> Self {
         Self {
             can_collide,
+            awake,
             sleeping_allowed,
             fixed_rotation,
             status,
@@ -51,6 +55,7 @@ mod tests {
         let state = PhysicsComponentState::new(
             true,
             false,
+            false,
             true,
             BodyStatus::OnGround,
             Vector2::new(1.0, -2.0),
@@ -58,6 +63,7 @@ mod tests {
             BodyType::Dynamic,
         );
         assert!(state.can_collide);
+        assert!(!state.awake);
         assert_eq!(state.status, BodyStatus::OnGround);
         assert_eq!(state.body_type, BodyType::Dynamic);
     }

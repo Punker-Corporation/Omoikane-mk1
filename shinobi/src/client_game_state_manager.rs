@@ -1,22 +1,27 @@
-use crate::{ClientEntityManager, ClientGameStateProcessor, ClientNetManager, PlayerManager};
+use crate::{
+    client_entity_manager::ClientEntityManager,
+    client_game_state_processor::ClientGameStateProcessor, client_net_manager::ClientNetManager,
+    player_manager::PlayerManager,
+};
 use daikoku::{FullInputCmdMessage, MsgState, MsgStateAck};
 use jikan::GameTick;
 use sekai::{EntityUid, GameState, RobustSerializer};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GameStateAppliedArgs {
-    pub applied_state: GameState,
+pub(crate) struct GameStateRuntimeApplyContext {
+    pub(crate) pending_inputs: Vec<FullInputCmdMessage>,
+    pub(crate) local_controlled: Option<EntityUid>,
+    pub(crate) pending_for_local: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct ClientGameStateManager {
+pub(crate) struct ClientGameStateManager {
     processor: ClientGameStateProcessor,
     serializer: RobustSerializer,
     next_input_cmd_seq: u32,
     pending_inputs: Vec<FullInputCmdMessage>,
-    pub applied_states: Vec<GameStateAppliedArgs>,
-    pub last_processed_seq: u32,
-    pub last_processed_tick: GameTick,
+    last_processed_seq: u32,
+    pub(crate) last_processed_tick: GameTick,
 }
 
 impl Default for ClientGameStateManager {
@@ -26,7 +31,6 @@ impl Default for ClientGameStateManager {
             serializer: RobustSerializer::new(),
             next_input_cmd_seq: 1,
             pending_inputs: Vec::new(),
-            applied_states: Vec::new(),
             last_processed_seq: 0,
             last_processed_tick: GameTick::ZERO,
         }
@@ -34,20 +38,19 @@ impl Default for ClientGameStateManager {
 }
 
 impl ClientGameStateManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.processor.reset();
         self.pending_inputs.clear();
-        self.applied_states.clear();
         self.last_processed_seq = 0;
         self.last_processed_tick = GameTick::ZERO;
         self.next_input_cmd_seq = 1;
     }
 
-    pub fn input_command_dispatched(
+    pub(crate) fn input_command_dispatched(
         &mut self,
         net: &mut ClientNetManager,
         mut message: FullInputCmdMessage,
@@ -59,75 +62,63 @@ impl ClientGameStateManager {
         self.next_input_cmd_seq - 1
     }
 
-    pub fn handle_state_message(&mut self, net: &mut ClientNetManager, message: MsgState) {
+    pub(crate) fn handle_state_message(&mut self, net: &mut ClientNetManager, message: MsgState) {
         let sequence = message.state.to_sequence;
         self.processor.add_new_state(message.state);
         net.send_ack(MsgStateAck { sequence });
     }
 
-    pub fn pump_network(&mut self, net: &mut ClientNetManager) {
-        while let Some(state) = net.next_state() {
-            self.handle_state_message(net, state);
-        }
-    }
-
-    pub fn apply_next_state(
+    pub(crate) fn apply_next_state_with_runtime_context(
         &mut self,
         entities: &mut ClientEntityManager,
         players: &mut PlayerManager,
-    ) -> Option<GameState> {
+    ) -> Option<(GameState, GameStateRuntimeApplyContext)> {
         let state = self.processor.pop_next_state()?;
-        let mut created_entities = Vec::new();
+        self.apply_state(entities, players, &state);
+        let context = self.runtime_apply_context(players);
+        Some((state, context))
+    }
 
-        for entity_state in &state.entity_states {
-            if !entities.entity_exists(entity_state.uid) {
-                created_entities.push(entity_state.uid);
-            }
-            let _ = entities.apply_serialized_entity_state(&mut self.serializer, entity_state);
+    fn has_pending_input_for(&self, entity: EntityUid) -> bool {
+        self.pending_inputs
+            .iter()
+            .any(|input| input.coordinates.entity_id == entity)
+    }
+
+    fn runtime_apply_context(&self, players: &PlayerManager) -> GameStateRuntimeApplyContext {
+        let pending_inputs = self.pending_inputs.clone();
+        let local_controlled = players.controlled_entity();
+        let pending_for_local =
+            local_controlled.is_some_and(|controlled| self.has_pending_input_for(controlled));
+        GameStateRuntimeApplyContext {
+            pending_inputs,
+            local_controlled,
+            pending_for_local,
         }
+    }
 
-        if let Some(map_data) = &state.map_data {
-            entities.apply_map_data(map_data);
-        }
-
-        for deleted in &state.entity_deletions {
-            entities.delete_entity(*deleted);
-        }
-
-        for created in created_entities {
-            entities.initialize_entity(created);
-        }
-
-        entities.rebuild_runtime_state();
-
+    fn apply_state(
+        &mut self,
+        entities: &mut ClientEntityManager,
+        players: &mut PlayerManager,
+        state: &GameState,
+    ) {
+        let _created_entities = entities.apply_game_state(&mut self.serializer, state);
         players.apply_player_states(&state.player_states, state.from_sequence == GameTick::ZERO);
         self.last_processed_tick = state.to_sequence;
         self.last_processed_seq = self.last_processed_seq.max(state.last_processed_input);
         self.pending_inputs
             .retain(|input| input.input_sequence > self.last_processed_seq);
-        self.applied_states.push(GameStateAppliedArgs {
-            applied_state: state.clone(),
-        });
-        Some(state)
-    }
-
-    pub fn pending_inputs(&self) -> &[FullInputCmdMessage] {
-        &self.pending_inputs
-    }
-
-    pub fn pending_inputs_snapshot(&self) -> Vec<FullInputCmdMessage> {
-        self.pending_inputs.clone()
-    }
-
-    pub fn applied_entity_exists(&self, entities: &ClientEntityManager, uid: EntityUid) -> bool {
-        entities.entity_exists(uid)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ClientGameStateManager;
-    use crate::{ClientEntityManager, ClientNetManager, PlayerManager};
+    use super::{ClientGameStateManager, GameStateRuntimeApplyContext};
+    use crate::{
+        client_entity_manager::ClientEntityManager, client_net_manager::ClientNetManager,
+        player_manager::PlayerManager,
+    };
     use daikoku::MsgState;
     use jikan::GameTick;
     use keisan::{Angle, Vector2, Vector2i};
@@ -229,24 +220,21 @@ mod tests {
             payload_size: 0,
         }));
 
-        manager.pump_network(&mut net);
-        assert_eq!(net.take_acks().len(), 3);
+        while let Some(state) = net.next_state() {
+            manager.handle_state_message(&mut net, state);
+        }
+        assert_eq!(net.take_outbound_batch().acks.len(), 3);
         let applied = manager
-            .apply_next_state(&mut entities, &mut players)
+            .apply_next_state_with_runtime_context(&mut entities, &mut players)
+            .map(|(state, _)| state)
             .unwrap();
         assert_eq!(applied.to_sequence, GameTick::new(3));
-        assert!(entities.entity_exists(EntityUid::new(55)));
+        assert!(entities.inner.entity_exists(EntityUid::new(55)));
         assert_eq!(
             players.local_player().unwrap().controlled_entity,
             Some(EntityUid::new(55))
         );
-        let grid_uid = entities
-            .inner
-            .map_grid_components
-            .iter()
-            .find(|(_, component)| component.grid_index == GridId::new(8))
-            .map(|(uid, _)| *uid)
-            .unwrap();
+        let grid_uid = entities.inner.grid_entity_for(GridId::new(8)).unwrap();
         assert_eq!(
             entities
                 .inner
@@ -257,6 +245,14 @@ mod tests {
                 .tile
                 .type_id,
             4
+        );
+        assert_eq!(
+            manager.runtime_apply_context(&players),
+            GameStateRuntimeApplyContext {
+                pending_inputs: Vec::new(),
+                local_controlled: Some(EntityUid::new(55)),
+                pending_for_local: false,
+            }
         );
     }
 
@@ -295,9 +291,11 @@ mod tests {
             extrapolated: false,
             payload_size: 0,
         }));
-        manager.pump_network(&mut net);
+        while let Some(state) = net.next_state() {
+            manager.handle_state_message(&mut net, state);
+        }
         let _ = manager
-            .apply_next_state(&mut entities, &mut players)
+            .apply_next_state_with_runtime_context(&mut entities, &mut players)
             .unwrap();
         assert!(players.session("u2").is_some());
 
@@ -318,9 +316,11 @@ mod tests {
             extrapolated: false,
             payload_size: 0,
         }));
-        manager.pump_network(&mut net);
+        while let Some(state) = net.next_state() {
+            manager.handle_state_message(&mut net, state);
+        }
         let _ = manager
-            .apply_next_state(&mut entities, &mut players)
+            .apply_next_state_with_runtime_context(&mut entities, &mut players)
             .unwrap();
         assert_eq!(players.session("u2").unwrap().name, "rika");
 
@@ -341,9 +341,11 @@ mod tests {
             extrapolated: false,
             payload_size: 0,
         }));
-        manager.pump_network(&mut net);
+        while let Some(state) = net.next_state() {
+            manager.handle_state_message(&mut net, state);
+        }
         let _ = manager
-            .apply_next_state(&mut entities, &mut players)
+            .apply_next_state_with_runtime_context(&mut entities, &mut players)
             .unwrap();
         assert!(players.session("u2").is_none());
     }

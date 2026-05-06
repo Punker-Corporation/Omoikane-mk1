@@ -2,16 +2,16 @@ use sekai::{EntityUid, PlayerState, SessionStatus};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientSession {
-    pub user_id: String,
-    pub name: String,
-    pub status: SessionStatus,
-    pub ping: i16,
-    pub attached_entity: Option<EntityUid>,
+pub(crate) struct ClientSession {
+    pub(crate) user_id: String,
+    pub(crate) name: String,
+    pub(crate) status: SessionStatus,
+    pub(crate) ping: i16,
+    pub(crate) attached_entity: Option<EntityUid>,
 }
 
 impl ClientSession {
-    pub fn new(user_id: impl Into<String>) -> Self {
+    fn new(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
             name: String::new(),
@@ -22,41 +22,16 @@ impl ClientSession {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EntityAttachedEventArgs {
-    pub new_entity: EntityUid,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EntityDetachedEventArgs {
-    pub old_entity: EntityUid,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatusEventArgs {
-    pub old_status: SessionStatus,
-    pub new_status: SessionStatus,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalPlayerChangedEventArgs {
-    pub old_user_id: Option<String>,
-    pub new_user_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalPlayer {
-    pub controlled_entity: Option<EntityUid>,
-    pub user_id: String,
-    pub name: String,
-    pub session: ClientSession,
-    pub status_events: Vec<StatusEventArgs>,
-    pub attach_events: Vec<EntityAttachedEventArgs>,
-    pub detach_events: Vec<EntityDetachedEventArgs>,
+pub(crate) struct LocalPlayer {
+    pub(crate) controlled_entity: Option<EntityUid>,
+    pub(crate) user_id: String,
+    pub(crate) name: String,
+    pub(crate) session: ClientSession,
 }
 
 impl LocalPlayer {
-    pub fn new(user_id: impl Into<String>, name: impl Into<String>) -> Self {
+    fn new(user_id: impl Into<String>, name: impl Into<String>) -> Self {
         let user_id = user_id.into();
         let name = name.into();
         Self {
@@ -70,97 +45,76 @@ impl LocalPlayer {
                 ping: 0,
                 attached_entity: None,
             },
-            status_events: Vec::new(),
-            attach_events: Vec::new(),
-            detach_events: Vec::new(),
         }
     }
 
-    pub fn attach_entity(&mut self, entity: EntityUid) {
+    fn attach_entity(&mut self, entity: EntityUid) {
         self.detach_entity();
         self.controlled_entity = Some(entity);
         self.session.attached_entity = Some(entity);
-        self.attach_events
-            .push(EntityAttachedEventArgs { new_entity: entity });
     }
 
-    pub fn detach_entity(&mut self) {
-        if let Some(previous) = self.controlled_entity.take() {
+    fn detach_entity(&mut self) {
+        if self.controlled_entity.take().is_some() {
             self.session.attached_entity = None;
-            self.detach_events.push(EntityDetachedEventArgs {
-                old_entity: previous,
-            });
         }
     }
 
-    pub fn switch_state(&mut self, new_status: SessionStatus) {
+    fn switch_state(&mut self, new_status: SessionStatus) {
         let old = self.session.status;
         if old != new_status {
             self.session.status = new_status;
-            self.status_events.push(StatusEventArgs {
-                old_status: old,
-                new_status,
-            });
         }
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PlayerManager {
+pub(crate) struct PlayerManager {
     sessions: HashMap<String, ClientSession>,
-    pub local_player: Option<LocalPlayer>,
-    pub local_player_events: Vec<LocalPlayerChangedEventArgs>,
+    local_player: Option<LocalPlayer>,
 }
 
 impl PlayerManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn startup(&mut self, user_id: impl Into<String>, name: impl Into<String>) {
+    pub(crate) fn startup(&mut self, user_id: impl Into<String>, name: impl Into<String>) {
         let user_id = user_id.into();
         let name = name.into();
-        let old_user_id = self
-            .local_player
-            .as_ref()
-            .map(|player| player.user_id.clone());
-        self.local_player = Some(LocalPlayer::new(user_id.clone(), name));
-        self.local_player_events.push(LocalPlayerChangedEventArgs {
-            old_user_id,
-            new_user_id: Some(user_id),
-        });
+        self.local_player = Some(LocalPlayer::new(user_id, name));
     }
 
-    pub fn shutdown(&mut self) {
-        let old_user_id = self
-            .local_player
-            .as_ref()
-            .map(|player| player.user_id.clone());
+    pub(crate) fn shutdown(&mut self) {
         self.local_player = None;
         self.sessions.clear();
-        self.local_player_events.push(LocalPlayerChangedEventArgs {
-            old_user_id,
-            new_user_id: None,
-        });
     }
 
-    pub fn local_player(&self) -> Option<&LocalPlayer> {
+    pub(crate) fn local_player(&self) -> Option<&LocalPlayer> {
         self.local_player.as_ref()
     }
 
-    pub fn local_player_mut(&mut self) -> Option<&mut LocalPlayer> {
-        self.local_player.as_mut()
+    pub(crate) fn controlled_entity(&self) -> Option<EntityUid> {
+        self.local_player
+            .as_ref()
+            .and_then(|player| player.controlled_entity)
     }
 
-    pub fn session(&self, user_id: &str) -> Option<&ClientSession> {
+    #[cfg(test)]
+    pub(crate) fn attach_local_entity(&mut self, entity: EntityUid) -> bool {
+        let Some(player) = self.local_player.as_mut() else {
+            return false;
+        };
+        player.attach_entity(entity);
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session(&self, user_id: &str) -> Option<&ClientSession> {
         self.sessions.get(user_id)
     }
 
-    pub fn sessions(&self) -> impl Iterator<Item = &ClientSession> {
-        self.sessions.values()
-    }
-
-    pub fn apply_player_states(&mut self, states: &[PlayerState], full_snapshot: bool) {
+    pub(crate) fn apply_player_states(&mut self, states: &[PlayerState], full_snapshot: bool) {
         if states.is_empty() {
             return;
         }
@@ -243,6 +197,7 @@ mod tests {
         );
         let local = manager.local_player().unwrap();
         assert_eq!(local.controlled_entity, Some(EntityUid::new(9)));
+        assert_eq!(manager.controlled_entity(), Some(EntityUid::new(9)));
         assert_eq!(local.session.status, SessionStatus::InGame);
         assert_eq!(manager.session("u2").unwrap().name, "rika");
     }

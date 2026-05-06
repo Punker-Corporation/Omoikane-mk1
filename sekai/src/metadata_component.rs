@@ -57,7 +57,7 @@ impl MetaDataComponent {
             entity_description: None,
             prototype_id: None,
             entity_last_modified_tick: GameTick::FIRST,
-            entity_life_stage: EntityLifeStage::Initializing,
+            entity_life_stage: EntityLifeStage::PreInit,
             flags: MetaDataFlags::NONE,
             visibility_mask: 0,
             entity_paused: false,

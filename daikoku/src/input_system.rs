@@ -1,9 +1,12 @@
 use jikan::GameTick;
-use keisan::Vector2;
+use keisan::{Angle, Vector2};
 use sekai::{EntityCoordinates, ScreenCoordinates};
 use std::collections::HashMap;
 
-use crate::{PlayerManager, ServerEntityManager, TransformSystem};
+use crate::{
+    player_manager::PlayerManager, server_entity_manager::ServerEntityManager,
+    transform_system::TransformSystem,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundKeyFunction {
@@ -92,7 +95,7 @@ impl FullInputCmdMessage {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct InputSystem {
+pub(crate) struct InputSystem {
     player_inputs: HashMap<String, PlayerCommandStates>,
     last_processed_input_cmd: HashMap<String, u32>,
 }
@@ -101,24 +104,22 @@ impl InputSystem {
     pub const MOVE_STEP: f32 = 1.0;
     pub const MOVE_SPEED: f32 = 62.5;
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn initialize(&mut self) {}
-
-    pub fn handle_player_connected(&mut self, user_id: impl Into<String>) {
+    pub(crate) fn handle_player_connected(&mut self, user_id: impl Into<String>) {
         let user_id = user_id.into();
         self.player_inputs.entry(user_id.clone()).or_default();
         self.last_processed_input_cmd.entry(user_id).or_insert(0);
     }
 
-    pub fn handle_player_disconnected(&mut self, user_id: &str) {
+    pub(crate) fn handle_player_disconnected(&mut self, user_id: &str) {
         self.player_inputs.remove(user_id);
         self.last_processed_input_cmd.remove(user_id);
     }
 
-    pub fn handle_input(
+    pub(crate) fn handle_input(
         &mut self,
         players: &mut PlayerManager,
         user_id: &str,
@@ -151,15 +152,7 @@ impl InputSystem {
         true
     }
 
-    pub fn get_input_states(&self, user_id: &str) -> Option<&PlayerCommandStates> {
-        self.player_inputs.get(user_id)
-    }
-
-    pub fn get_last_input_command(&self, user_id: &str) -> Option<u32> {
-        self.last_processed_input_cmd.get(user_id).copied()
-    }
-
-    pub fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
+    fn movement_delta(function: &BoundKeyFunction, state: BoundKeyState) -> Vector2 {
         if state != BoundKeyState::Down {
             return Vector2::ZERO;
         }
@@ -173,7 +166,7 @@ impl InputSystem {
         }
     }
 
-    pub fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
+    fn desired_velocity(states: &PlayerCommandStates) -> Vector2 {
         let mut velocity = Vector2::ZERO;
         if states.is_down(&"MoveUp".into()) {
             velocity.y += Self::MOVE_SPEED;
@@ -190,11 +183,11 @@ impl InputSystem {
         velocity
     }
 
-    pub fn desired_velocity_for(&self, user_id: &str) -> Option<Vector2> {
+    fn desired_velocity_for(&self, user_id: &str) -> Option<Vector2> {
         self.player_inputs.get(user_id).map(Self::desired_velocity)
     }
 
-    pub fn apply_movement_command(
+    pub(crate) fn apply_movement_command(
         &self,
         entities: &mut ServerEntityManager,
         players: &PlayerManager,
@@ -214,21 +207,14 @@ impl InputSystem {
             return false;
         }
 
-        let current = entities
-            .inner
-            .transforms
-            .get(&controlled)
-            .map(|transform| transform.local_position)
-            .unwrap_or(Vector2::ZERO);
-
-        transforms.set_local_position(entities, controlled, current + delta)
+        transforms.offset_local_transform(entities, controlled, delta, Angle::ZERO)
     }
 
-    pub fn apply_movement_state(
+    pub(crate) fn apply_movement_state(
         &self,
         entities: &mut ServerEntityManager,
         players: &PlayerManager,
-        physics: &crate::PhysicsSystem,
+        physics: &crate::physics_system::PhysicsSystem,
         user_id: &str,
     ) -> bool {
         let Some(controlled) = players
@@ -249,7 +235,10 @@ impl InputSystem {
 #[cfg(test)]
 mod tests {
     use super::{BoundKeyState, FullInputCmdMessage, InputSystem};
-    use crate::{PlayerManager, ServerEntityManager, TransformSystem};
+    use crate::{
+        player_manager::PlayerManager, server_entity_manager::ServerEntityManager,
+        transform_system::TransformSystem,
+    };
     use jikan::GameTick;
     use keisan::Vector2;
     use sekai::{EntityCoordinates, EntityUid, ScreenCoordinates, WindowId};
@@ -272,10 +261,11 @@ mod tests {
         );
 
         assert!(system.handle_input(&mut players, "u1", message));
-        assert_eq!(system.get_last_input_command("u1"), Some(9));
+        assert_eq!(system.last_processed_input_cmd.get("u1").copied(), Some(9));
         assert!(
             system
-                .get_input_states("u1")
+                .player_inputs
+                .get("u1")
                 .unwrap()
                 .is_down(&"MoveUp".into())
         );
@@ -289,8 +279,10 @@ mod tests {
         assert!(players.set_attached_entity("u1", Some(EntityUid::new(7))));
 
         let mut entities = ServerEntityManager::new();
-        entities.alloc_entity(None, EntityUid::new(7));
-        entities.initialize_entity(EntityUid::new(7));
+        entities
+            .inner
+            .alloc_entity_external(EntityUid::new(7), None);
+        entities.inner.initialize_entity(EntityUid::new(7));
 
         let system = InputSystem::new();
         let mut transforms = TransformSystem::new();

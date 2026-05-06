@@ -1,48 +1,24 @@
-use crate::{ActorComponent, PlayerManager, ServerEntityManager};
+use crate::{
+    actor_component::ActorComponent, player_manager::PlayerManager,
+    server_entity_manager::ServerEntityManager,
+};
 use sekai::EntityUid;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttachPlayerEvent {
-    pub uid: EntityUid,
-    pub player_user_id: String,
-    pub force: bool,
-    pub force_kicked: Option<String>,
-    pub result: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DetachPlayerEvent {
-    pub result: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlayerAttachedEvent {
-    pub entity: EntityUid,
-    pub player_user_id: String,
-    pub kicked_user_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlayerDetachedEvent {
-    pub entity: EntityUid,
-    pub player_user_id: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ActorAttachResult {
-    pub result: bool,
-    pub force_kicked: Option<String>,
+pub(crate) struct ActorAttachResult {
+    pub(crate) result: bool,
+    pub(crate) force_kicked: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct ActorSystem;
+pub(crate) struct ActorSystem;
 
 impl ActorSystem {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
-    pub fn attach(
+    pub(crate) fn attach(
         &self,
         entities: &mut ServerEntityManager,
         players: &mut PlayerManager,
@@ -84,21 +60,20 @@ impl ActorSystem {
         }
     }
 
-    pub fn detach_entity(
+    fn detach_entity(
         &self,
         entities: &mut ServerEntityManager,
         players: &mut PlayerManager,
         uid: EntityUid,
-    ) -> Option<PlayerDetachedEvent> {
-        let component = entities.actors.remove(&uid)?;
+    ) -> bool {
+        let Some(component) = entities.actors.remove(&uid) else {
+            return false;
+        };
         let _ = players.set_attached_entity(&component.player_user_id, None);
-        Some(PlayerDetachedEvent {
-            entity: uid,
-            player_user_id: component.player_user_id,
-        })
+        true
     }
 
-    pub fn detach_player(
+    pub(crate) fn detach_player(
         &self,
         entities: &mut ServerEntityManager,
         players: &mut PlayerManager,
@@ -110,25 +85,14 @@ impl ActorSystem {
         else {
             return true;
         };
-        self.detach_entity(entities, players, uid).is_some()
-    }
-
-    pub fn player_for_entity<'a>(
-        &self,
-        entities: &'a ServerEntityManager,
-        uid: EntityUid,
-    ) -> Option<&'a str> {
-        entities
-            .actors
-            .get(&uid)
-            .map(|actor| actor.player_user_id.as_str())
+        self.detach_entity(entities, players, uid)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::ActorSystem;
-    use crate::{PlayerManager, ServerEntityManager};
+    use crate::{player_manager::PlayerManager, server_entity_manager::ServerEntityManager};
 
     #[test]
     fn actor_system_attaches_forces_and_detaches_players() {
@@ -137,8 +101,8 @@ mod tests {
         players.connect("u2", "rika");
 
         let mut entities = ServerEntityManager::new();
-        let uid = entities.create_entity(Some("mob"));
-        entities.initialize_entity(uid);
+        let uid = entities.inner.create_entity_uninitialized(Some("mob"));
+        entities.inner.initialize_entity(uid);
 
         let system = ActorSystem::new();
         assert!(

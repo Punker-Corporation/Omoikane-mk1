@@ -19,6 +19,13 @@ Historical license notices are preserved for inherited assets and repository
 history. See `LICENSE-GPLv3.TXT` where it applies to older inherited source
 materials in history.
 
+## Dependency policy
+
+Rust dependencies are checked with `cargo-deny` using `deny.toml`. New direct
+dependencies should prefer permissive licenses such as MIT, Apache-2.0, BSD,
+Zlib or CC0, and must be reviewed before adding graphics backends, platform
+crates or asset pipeline tooling.
+
 ## Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR

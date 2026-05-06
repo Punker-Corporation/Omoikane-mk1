@@ -66,7 +66,10 @@ impl Broadphase {
                 continue;
             }
             let aabb = entry.fixture.compute_aabb(entry.transform);
-            if let Some((distance, hit_pos)) = ray.intersects(aabb)
+            if ray.intersects(aabb).is_none() {
+                continue;
+            }
+            if let Some((distance, hit_pos)) = entry.fixture.ray_cast(entry.transform, ray)
                 && distance <= max_length
             {
                 results.push(RayCastHit::new(
@@ -196,6 +199,26 @@ mod tests {
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].hit.owner_id, 55);
+    }
+
+    #[test]
+    fn broadphase_query_ray_uses_exact_shape_hits_after_aabb_prefilter() {
+        let mut broadphase = Broadphase::new();
+        broadphase.insert(
+            44,
+            Fixture::new(
+                "circle",
+                PhysShape::Circle(crate::CircleShape::new(Vector2::ZERO, 1.0)),
+            ),
+            Transform::new(Vector2::ZERO, 0.0),
+        );
+
+        let hits = broadphase.query_ray(
+            CollisionRay::new(Vector2::new(-2.0, 1.1), Vector2::UNIT_X, -1),
+            10.0,
+            false,
+        );
+        assert!(hits.is_empty());
     }
 
     #[test]

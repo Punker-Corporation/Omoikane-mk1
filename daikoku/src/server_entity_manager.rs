@@ -1,36 +1,20 @@
-use crate::ActorComponent;
+use crate::actor_component::ActorComponent;
 use jikan::GameTick;
 use sekai::{
-    AppearanceComponentState, BroadphaseComponentState, EntityLookupComponentState, EntityManager,
-    EntityUid, FixturesComponentState, JointComponentState, MapComponentState,
-    MapGridComponentState, MetaDataComponentState, NetworkComponentMessage, PhysicsComponentState,
-    RobustSerializer, SerializedComponentChange, SerializedEntityState,
-    SharedPhysicsMapComponentState, TransformComponentState,
+    EntityManager, EntityUid, NetworkComponentMessage, RobustSerializer, SerializedEntityState,
 };
 use std::collections::HashMap;
 
-pub struct ServerEntityManager {
-    pub inner: EntityManager,
-    pub actors: HashMap<EntityUid, ActorComponent>,
+pub(crate) struct ServerEntityManager {
+    pub(crate) inner: EntityManager,
+    pub(crate) actors: HashMap<EntityUid, ActorComponent>,
     component_deletion_history: HashMap<EntityUid, Vec<(GameTick, u16)>>,
-    pub received_component_messages: Vec<NetworkComponentMessage<(), String, String>>,
-    pub received_system_messages: Vec<(String, String)>,
+    pub(crate) received_component_messages: Vec<NetworkComponentMessage<(), String, String>>,
+    pub(crate) received_system_messages: Vec<(String, String)>,
 }
 
 impl ServerEntityManager {
-    const METADATA_NET_ID: u16 = 1;
-    const TRANSFORM_NET_ID: u16 = 2;
-    const MAP_NET_ID: u16 = 3;
-    const MAP_GRID_NET_ID: u16 = 4;
-    const PHYSICS_NET_ID: u16 = 5;
-    const APPEARANCE_NET_ID: u16 = 6;
-    const FIXTURES_NET_ID: u16 = 7;
-    const JOINTS_NET_ID: u16 = 8;
-    const LOOKUP_NET_ID: u16 = 9;
-    const BROADPHASE_NET_ID: u16 = 10;
-    const PHYSICS_MAP_NET_ID: u16 = 11;
-
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: EntityManager::new(),
             actors: HashMap::new(),
@@ -40,39 +24,15 @@ impl ServerEntityManager {
         }
     }
 
-    pub fn initialize(&mut self) {}
-
-    pub fn set_current_tick(&mut self, tick: GameTick) {
-        self.inner.current_tick = tick;
-    }
-
-    pub fn alloc_entity(&mut self, prototype_name: Option<&str>, uid: EntityUid) -> EntityUid {
-        self.inner.alloc_entity_external(uid, prototype_name);
-        uid
-    }
-
-    pub fn create_entity(&mut self, prototype_name: Option<&str>) -> EntityUid {
-        self.inner.create_entity_uninitialized(prototype_name)
-    }
-
-    pub fn initialize_entity(&mut self, entity: EntityUid) {
-        let _ = self.inner.initialize_entity(entity);
-    }
-
-    pub fn delete_entity(&mut self, entity: EntityUid) {
-        self.actors.remove(&entity);
-        self.inner.queue_delete_entity(entity);
-        self.inner.flush_queued_deletions();
-    }
-
-    pub fn note_component_removed(&mut self, uid: EntityUid, tick: GameTick, net_id: u16) {
+    fn note_component_removed(&mut self, uid: EntityUid, tick: GameTick, net_id: u16) {
         self.component_deletion_history
             .entry(uid)
             .or_default()
             .push((tick, net_id));
     }
 
-    pub fn get_deleted_components(&self, uid: EntityUid, from_tick: GameTick) -> Vec<u16> {
+    #[cfg(test)]
+    fn get_deleted_components(&self, uid: EntityUid, from_tick: GameTick) -> Vec<u16> {
         self.component_deletion_history
             .get(&uid)
             .map(|history| {
@@ -84,24 +44,22 @@ impl ServerEntityManager {
             .unwrap_or_default()
     }
 
-    pub fn remove_component_by_net_id(&mut self, uid: EntityUid, net_id: u16) -> bool {
-        let removed = match net_id {
-            Self::METADATA_NET_ID => self.inner.metadata.remove(&uid).is_some(),
-            Self::TRANSFORM_NET_ID => self.inner.remove_transform_component(uid),
-            Self::MAP_NET_ID => self.inner.remove_map_component(uid),
-            Self::MAP_GRID_NET_ID => self.inner.remove_map_grid_component(uid),
-            Self::PHYSICS_NET_ID => self.inner.physics.remove(&uid).is_some(),
-            Self::APPEARANCE_NET_ID => self.inner.appearances.remove(&uid).is_some(),
-            Self::FIXTURES_NET_ID => self.inner.fixtures.remove(&uid).is_some(),
-            Self::JOINTS_NET_ID => self.inner.joint_components.remove(&uid).is_some(),
-            Self::LOOKUP_NET_ID => self.inner.entity_lookups.remove(&uid).is_some(),
-            Self::BROADPHASE_NET_ID => self.inner.broadphases.remove(&uid).is_some(),
-            Self::PHYSICS_MAP_NET_ID => self.inner.physics_maps.remove(&uid).is_some(),
-            _ => false,
-        };
+    pub(crate) fn remove_component_by_net_id(&mut self, uid: EntityUid, net_id: u16) -> bool {
+        let joints_present_before_physics_remove = net_id == EntityManager::PHYSICS_NET_ID
+            && self.inner.joint_components.contains_key(&uid);
+        let removed = self.inner.remove_component_by_net_id(uid, net_id);
 
         if removed {
             self.note_component_removed(uid, self.inner.current_tick, net_id);
+            if joints_present_before_physics_remove
+                && !self.inner.joint_components.contains_key(&uid)
+            {
+                self.note_component_removed(
+                    uid,
+                    self.inner.current_tick,
+                    EntityManager::JOINTS_NET_ID,
+                );
+            }
             if self.inner.entity_exists(uid) {
                 self.inner.dirty_entity(uid);
             }
@@ -110,274 +68,70 @@ impl ServerEntityManager {
         removed
     }
 
-    pub fn cull_deletion_history(&mut self, oldest_ack: GameTick) {
+    pub(crate) fn cull_deletion_history(&mut self, oldest_ack: GameTick) {
         self.component_deletion_history.retain(|_, history| {
             history.retain(|(tick, _)| *tick >= oldest_ack);
             !history.is_empty()
         });
     }
 
-    pub fn entity_dirty_since(&self, uid: EntityUid, from_tick: GameTick) -> bool {
-        if from_tick == GameTick::ZERO {
-            return self.inner.entity_exists(uid);
-        }
-
-        self.inner
-            .metadata
-            .get(&uid)
-            .map(|meta| meta.entity_last_modified_tick > from_tick)
-            .unwrap_or(false)
-    }
-
-    fn component_dirty_since(component: &sekai::Component, from_tick: GameTick) -> bool {
-        from_tick == GameTick::ZERO
-            || component.creation_tick > from_tick
-            || component.last_modified_tick > from_tick
-    }
-
-    fn component_created_since(component: &sekai::Component, from_tick: GameTick) -> bool {
-        from_tick == GameTick::ZERO || component.creation_tick > from_tick
-    }
-
-    fn component_exists_for_net_id(&self, uid: EntityUid, net_id: u16) -> bool {
-        match net_id {
-            Self::METADATA_NET_ID => self.inner.metadata.contains_key(&uid),
-            Self::TRANSFORM_NET_ID => self.inner.transforms.contains_key(&uid),
-            Self::MAP_NET_ID => self.inner.map_components.contains_key(&uid),
-            Self::MAP_GRID_NET_ID => self.inner.map_grid_components.contains_key(&uid),
-            Self::PHYSICS_NET_ID => self.inner.physics.contains_key(&uid),
-            Self::APPEARANCE_NET_ID => self.inner.appearances.contains_key(&uid),
-            Self::FIXTURES_NET_ID => self.inner.fixtures.contains_key(&uid),
-            Self::JOINTS_NET_ID => self.inner.joint_components.contains_key(&uid),
-            Self::LOOKUP_NET_ID => self.inner.entity_lookups.contains_key(&uid),
-            Self::BROADPHASE_NET_ID => self.inner.broadphases.contains_key(&uid),
-            Self::PHYSICS_MAP_NET_ID => self.inner.physics_maps.contains_key(&uid),
-            _ => false,
-        }
-    }
-
-    pub fn build_entity_state(
-        &mut self,
-        serializer: &mut RobustSerializer,
-        uid: EntityUid,
-    ) -> Option<SerializedEntityState> {
-        self.build_entity_state_since(serializer, uid, GameTick::ZERO)
-    }
-
-    pub fn build_entity_state_since(
+    #[cfg(test)]
+    fn build_entity_state_since(
         &mut self,
         serializer: &mut RobustSerializer,
         uid: EntityUid,
         from_tick: GameTick,
     ) -> Option<SerializedEntityState> {
-        if !self.inner.entity_exists(uid) {
-            return None;
-        }
-
-        let mut changes = Vec::new();
-
-        if let Some(meta) = self.inner.metadata.get(&uid)
-            && (from_tick == GameTick::ZERO || meta.entity_last_modified_tick > from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::METADATA_NET_ID,
-                Self::component_created_since(&meta.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<MetaDataComponentState>(
-                            &meta.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(xform) = self.inner.transforms.get(&uid)
-            && Self::component_dirty_since(&xform.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::TRANSFORM_NET_ID,
-                Self::component_created_since(&xform.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<TransformComponentState>(
-                            &xform.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(map) = self.inner.map_components.get(&uid)
-            && Self::component_dirty_since(&map.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::MAP_NET_ID,
-                Self::component_created_since(&map.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<MapComponentState>(&map.get_component_state())
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(grid) = self.inner.map_grid_components.get(&uid)
-            && Self::component_dirty_since(&grid.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::MAP_GRID_NET_ID,
-                Self::component_created_since(&grid.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<MapGridComponentState>(
-                            &grid.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(physics) = self.inner.physics.get(&uid)
-            && Self::component_dirty_since(&physics.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::PHYSICS_NET_ID,
-                Self::component_created_since(&physics.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<PhysicsComponentState>(
-                            &physics.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(appearance) = self.inner.appearances.get(&uid)
-            && Self::component_dirty_since(&appearance.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::APPEARANCE_NET_ID,
-                Self::component_created_since(&appearance.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<AppearanceComponentState>(
-                            &appearance.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(fixtures) = self.inner.fixtures.get(&uid)
-            && Self::component_dirty_since(&fixtures.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::FIXTURES_NET_ID,
-                Self::component_created_since(&fixtures.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<FixturesComponentState>(
-                            &fixtures.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(joints) = self.inner.joint_components.get(&uid)
-            && Self::component_dirty_since(&joints.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::JOINTS_NET_ID,
-                Self::component_created_since(&joints.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<JointComponentState>(
-                            &joints.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(lookup) = self.inner.entity_lookups.get(&uid)
-            && Self::component_dirty_since(&lookup.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::LOOKUP_NET_ID,
-                Self::component_created_since(&lookup.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<EntityLookupComponentState>(
-                            &lookup.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(broadphase) = self.inner.broadphases.get(&uid)
-            && Self::component_dirty_since(&broadphase.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::BROADPHASE_NET_ID,
-                Self::component_created_since(&broadphase.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<BroadphaseComponentState>(
-                            &broadphase.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        if let Some(physics_map) = self.inner.physics_maps.get(&uid)
-            && Self::component_dirty_since(&physics_map.base, from_tick)
-        {
-            changes.push(SerializedComponentChange::new(
-                Self::PHYSICS_MAP_NET_ID,
-                Self::component_created_since(&physics_map.base, from_tick),
-                false,
-                Some(
-                    serializer
-                        .serialize_component_state::<SharedPhysicsMapComponentState>(
-                            &physics_map.get_component_state(),
-                        )
-                        .ok()?,
-                ),
-            ));
-        }
-
-        for net_id in self.get_deleted_components(uid, from_tick) {
-            if self.component_exists_for_net_id(uid, net_id) {
-                continue;
-            }
-            if changes.iter().any(|change| change.net_id == net_id) {
-                continue;
-            }
-            changes.push(SerializedComponentChange::new(net_id, false, true, None));
-        }
-
-        Some(SerializedEntityState {
-            uid,
-            component_changes: changes,
-        })
+        let deletion_history = &self.component_deletion_history;
+        self.inner
+            .build_serialized_entity_state_with_deleted_callback(
+                serializer,
+                uid,
+                from_tick,
+                |uid, from_tick| {
+                    deletion_history
+                        .get(&uid)
+                        .map(|history| {
+                            history
+                                .iter()
+                                .filter_map(|(tick, net_id)| {
+                                    (*tick >= from_tick).then_some(*net_id)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                },
+            )
     }
 
-    pub fn receive_component_message(
+    pub(crate) fn build_entity_states_for_sync(
+        &mut self,
+        serializer: &mut RobustSerializer,
+        ids: &[EntityUid],
+        newly_visible: &[EntityUid],
+        from_tick: GameTick,
+    ) -> Vec<SerializedEntityState> {
+        let deletion_history = &self.component_deletion_history;
+        self.inner.build_serialized_entity_states_for_sync(
+            serializer,
+            ids,
+            newly_visible,
+            from_tick,
+            |uid, from_tick| {
+                deletion_history
+                    .get(&uid)
+                    .map(|history| {
+                        history
+                            .iter()
+                            .filter_map(|(tick, net_id)| (*tick >= from_tick).then_some(*net_id))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            },
+        )
+    }
+
+    pub(crate) fn receive_component_message(
         &mut self,
         user_id: impl Into<String>,
         uid: EntityUid,
@@ -394,7 +148,7 @@ impl ServerEntityManager {
             ));
     }
 
-    pub fn receive_system_message(
+    pub(crate) fn receive_system_message(
         &mut self,
         user_id: impl Into<String>,
         payload: impl Into<String>,
@@ -416,31 +170,39 @@ mod tests {
     use butsuri::{AabbShape, Fixture, Joint, JointType, PhysShape};
     use jikan::GameTick;
     use keisan::{Box2, Vector2i};
-    use sekai::{EntityUid, GridId, MapId, RobustSerializer, Tile, TileRenderFlag};
+    use sekai::{
+        EntityManager, EntityUid, GridId, MapId, PhysicsComponentState, RobustSerializer, Tile,
+        TileRenderFlag,
+    };
 
     #[test]
     fn server_entity_manager_builds_serialized_entity_states() {
         let mut entities = ServerEntityManager::new();
-        let uid = entities.create_entity(Some("mob"));
-        entities.initialize_entity(uid);
-        entities
-            .inner
-            .ensure_fixtures(uid)
-            .insert_fixture(Fixture::new(
+        let uid = entities.inner.create_entity_uninitialized(Some("mob"));
+        entities.inner.initialize_entity(uid);
+        entities.inner.ensure_collision_wake(uid);
+        entities.inner.ensure_collide_on_anchor(uid);
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
                 "main",
                 PhysShape::Aabb(AabbShape::new(Box2::new(-1.0, -1.0, 1.0, 1.0), 0.0)),
-            ));
+            ),
+        );
         entities
             .inner
             .ensure_lookup(uid)
             .add_or_update(uid, Box2::new(-1.0, -1.0, 1.0, 1.0));
         let mut joint = Joint::new(uid.raw(), 999, JointType::Distance);
         joint.id = "rope".to_string();
-        entities.inner.ensure_joints(uid).add_joint(joint);
+        assert!(entities.inner.add_joint_between(joint));
         entities.inner.ensure_broadphase(uid);
-        entities.inner.ensure_physics_map(uid).add_body(uid, true);
+        entities.inner.ensure_physics_map(uid);
         let mut serializer = RobustSerializer::new();
-        let state = entities.build_entity_state(&mut serializer, uid).unwrap();
+        let state = entities
+            .inner
+            .build_serialized_entity_state(&mut serializer, uid)
+            .unwrap();
         assert_eq!(state.uid, uid);
         assert!(
             state
@@ -472,6 +234,18 @@ mod tests {
                 .iter()
                 .any(|change| change.net_id == 11)
         );
+        assert!(
+            state
+                .component_changes
+                .iter()
+                .any(|change| change.net_id == 12)
+        );
+        assert!(
+            state
+                .component_changes
+                .iter()
+                .any(|change| change.net_id == 13)
+        );
         entities.note_component_removed(uid, GameTick::new(5), 7);
         assert_eq!(
             entities.get_deleted_components(uid, GameTick::new(4)),
@@ -486,29 +260,32 @@ mod tests {
     #[test]
     fn server_entity_manager_emits_deleted_component_changes_incrementally() {
         let mut entities = ServerEntityManager::new();
-        entities.set_current_tick(GameTick::new(8));
-        let uid = entities.create_entity(Some("mob"));
-        entities.initialize_entity(uid);
-        entities.inner.ensure_appearance(uid).set_data("mode", 1u8);
-        assert!(entities.remove_component_by_net_id(uid, ServerEntityManager::APPEARANCE_NET_ID));
+        entities.inner.current_tick = GameTick::new(8);
+        let uid = entities.inner.create_entity_uninitialized(Some("mob"));
+        entities.inner.initialize_entity(uid);
+        assert!(entities.inner.set_appearance_data(uid, "mode", 1u8));
+        assert!(entities.remove_component_by_net_id(uid, EntityManager::APPEARANCE_NET_ID));
         let mut serializer = RobustSerializer::new();
         let state = entities
             .build_entity_state_since(&mut serializer, uid, GameTick::new(7))
             .unwrap();
-        assert!(state.component_changes.iter().any(|change| change.net_id
-            == ServerEntityManager::APPEARANCE_NET_ID
-            && change.deleted));
+        assert!(
+            state
+                .component_changes
+                .iter()
+                .any(|change| change.net_id == EntityManager::APPEARANCE_NET_ID && change.deleted)
+        );
     }
 
     #[test]
     fn server_entity_manager_removes_transform_and_grid_components_with_runtime_cleanup() {
         let mut entities = ServerEntityManager::new();
-        let map = entities.create_entity(None);
-        entities.initialize_entity(map);
+        let map = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(map);
         entities.inner.ensure_map(MapId::new(1), map);
 
-        let grid = entities.create_entity(None);
-        entities.initialize_entity(grid);
+        let grid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(grid);
         let grid_component = entities.inner.map_grid_components.entry(grid).or_default();
         grid_component.base.owner = grid;
         grid_component.grid_index = GridId::new(3);
@@ -524,8 +301,8 @@ mod tests {
             .unwrap()
             .set_tile(Vector2i::new(0, 0), Tile::new(1, TileRenderFlag(0), 0));
 
-        let child = entities.create_entity(None);
-        entities.initialize_entity(child);
+        let child = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(child);
         let _ = entities.inner.apply_transform_state(
             child,
             sekai::TransformComponentState {
@@ -538,27 +315,27 @@ mod tests {
                 anchored: false,
             },
         );
-        sekai::EntityLookupSystem.update_bounds(&mut entities.inner, child);
+        entities.inner.reconcile_transform_runtime(child, None);
 
-        assert!(entities.remove_component_by_net_id(grid, ServerEntityManager::MAP_GRID_NET_ID));
+        assert!(entities.remove_component_by_net_id(grid, EntityManager::MAP_GRID_NET_ID));
         assert!(!entities.inner.map_grid_components.contains_key(&grid));
         assert!(!entities.inner.map_grids.contains_key(&grid));
 
-        assert!(entities.remove_component_by_net_id(child, ServerEntityManager::TRANSFORM_NET_ID));
+        assert!(entities.remove_component_by_net_id(child, EntityManager::TRANSFORM_NET_ID));
         assert!(!entities.inner.transforms.contains_key(&child));
     }
 
     #[test]
     fn server_entity_manager_removes_map_components_with_runtime_cleanup() {
         let mut entities = ServerEntityManager::new();
-        let map = entities.create_entity(None);
-        entities.initialize_entity(map);
+        let map = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(map);
         entities.inner.ensure_map(MapId::new(1), map);
         entities.inner.ensure_broadphase(map);
         entities.inner.ensure_physics_map(map);
 
-        let grid = entities.create_entity(None);
-        entities.initialize_entity(grid);
+        let grid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(grid);
         let grid_component = entities.inner.map_grid_components.entry(grid).or_default();
         grid_component.base.owner = grid;
         grid_component.grid_index = GridId::new(5);
@@ -568,10 +345,10 @@ mod tests {
         entities.inner.map_grids.insert(grid, map_grid);
         entities.inner.set_parent(grid, map);
 
-        assert!(entities.remove_component_by_net_id(map, ServerEntityManager::MAP_NET_ID));
+        assert!(entities.remove_component_by_net_id(map, EntityManager::MAP_NET_ID));
         assert!(!entities.inner.map_components.contains_key(&map));
-        assert!(!entities.inner.broadphases.contains_key(&map));
-        assert!(!entities.inner.physics_maps.contains_key(&map));
+        assert!(!entities.inner.has_map_broadphase(MapId::new(1)));
+        assert!(!entities.inner.has_map_physics_runtime(MapId::new(1)));
         let grid_transform = entities.inner.transforms.get(&grid).unwrap();
         assert_eq!(grid_transform.parent, EntityUid::INVALID);
         assert_eq!(grid_transform.map_id, MapId::NULLSPACE);
@@ -579,5 +356,423 @@ mod tests {
             entities.inner.map_grids.get(&grid).unwrap().parent_map_id,
             MapId::NULLSPACE
         );
+    }
+
+    #[test]
+    fn server_entity_manager_removes_physics_and_fixtures_with_runtime_cleanup() {
+        let mut entities = ServerEntityManager::new();
+        let map = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(map);
+        entities.inner.ensure_map(MapId::new(2), map);
+        entities.inner.transforms.get_mut(&map).unwrap().map_id = MapId::new(2);
+        entities.inner.ensure_broadphase(map);
+        entities.inner.ensure_physics_map(map);
+
+        let first = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(first);
+        let _ = entities.inner.apply_transform_state(
+            first,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::ZERO,
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id: MapId::new(2),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(entities.inner.configure_physics_body(
+            first,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            first,
+            Fixture::new(
+                "first",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        let second = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(second);
+        let _ = entities.inner.apply_transform_state(
+            second,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::new(0.5, 0.0),
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id: MapId::new(2),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(entities.inner.configure_physics_body(
+            second,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            second,
+            Fixture::new(
+                "second",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        entities.inner.refresh_entities_runtime(&[first, second]);
+        assert_eq!(entities.inner.map_contact_count(MapId::new(2)), 1);
+
+        assert!(entities.remove_component_by_net_id(first, EntityManager::PHYSICS_NET_ID));
+        assert_eq!(entities.inner.map_contact_count(MapId::new(2)), 0);
+        assert_eq!(
+            entities
+                .inner
+                .query_aabb_entities(map, Box2::new(-1.0, -1.0, 1.0, 1.0)),
+            vec![second]
+        );
+
+        assert!(entities.remove_component_by_net_id(second, EntityManager::FIXTURES_NET_ID));
+        assert!(
+            entities
+                .inner
+                .query_aabb_entities(map, Box2::new(-1.0, -1.0, 1.0, 1.0))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn server_entity_manager_removes_joint_components_symmetrically_with_runtime_cleanup() {
+        let mut entities = ServerEntityManager::new();
+        let map = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(map);
+        entities.inner.ensure_map(MapId::new(3), map);
+        entities.inner.transforms.get_mut(&map).unwrap().map_id = MapId::new(3);
+        entities.inner.ensure_broadphase(map);
+        entities.inner.ensure_physics_map(map);
+
+        let first = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(first);
+        let _ = entities.inner.apply_transform_state(
+            first,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::ZERO,
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id: MapId::new(3),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(entities.inner.configure_physics_body(
+            first,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            first,
+            Fixture::new(
+                "first",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        let second = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(second);
+        let _ = entities.inner.apply_transform_state(
+            second,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::new(0.5, 0.0),
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id: MapId::new(3),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(entities.inner.configure_physics_body(
+            second,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            second,
+            Fixture::new(
+                "second",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+
+        let mut joint = Joint::new(first.raw(), second.raw(), JointType::Distance);
+        joint.id = "rope".to_string();
+        joint.collide_connected = false;
+        assert!(entities.inner.add_joint_between(joint));
+        entities.inner.refresh_entities_runtime(&[first, second]);
+        assert_eq!(entities.inner.map_contact_count(MapId::new(3)), 0);
+
+        assert!(entities.remove_component_by_net_id(first, EntityManager::JOINTS_NET_ID));
+        assert!(!entities.inner.joint_components.contains_key(&first));
+        assert_eq!(
+            entities
+                .inner
+                .joint_components
+                .get(&second)
+                .unwrap()
+                .joint_count(),
+            0
+        );
+        assert_eq!(entities.inner.map_contact_count(MapId::new(3)), 1);
+    }
+
+    #[test]
+    fn server_entity_manager_removing_physics_also_emits_joint_component_deletion() {
+        let mut entities = ServerEntityManager::new();
+        entities.inner.current_tick = GameTick::new(9);
+        let first = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(first);
+        entities.inner.ensure_physics(first);
+        let second = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(second);
+        entities.inner.ensure_physics(second);
+
+        let mut joint = Joint::new(first.raw(), second.raw(), JointType::Distance);
+        joint.id = "rope".to_string();
+        assert!(entities.inner.add_joint_between(joint));
+
+        assert!(entities.remove_component_by_net_id(first, EntityManager::PHYSICS_NET_ID));
+        let deleted = entities.get_deleted_components(first, GameTick::new(8));
+        assert!(deleted.contains(&EntityManager::PHYSICS_NET_ID));
+        assert!(deleted.contains(&EntityManager::JOINTS_NET_ID));
+        assert_eq!(
+            entities
+                .inner
+                .joint_components
+                .get(&second)
+                .unwrap()
+                .joint_count(),
+            0
+        );
+    }
+
+    #[test]
+    fn server_entity_manager_builds_runtime_component_deltas_after_immediate_physics_refresh() {
+        let mut entities = ServerEntityManager::new();
+        let map = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(map);
+        entities.inner.ensure_map(MapId::new(4), map);
+        entities.inner.transforms.get_mut(&map).unwrap().map_id = MapId::new(4);
+        entities.inner.ensure_broadphase(map);
+        entities.inner.ensure_physics_map(map);
+
+        let uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(uid);
+        let _ = entities.inner.apply_transform_state(
+            uid,
+            sekai::TransformComponentState {
+                local_position: keisan::Vector2::ZERO,
+                rotation: keisan::Angle::ZERO,
+                parent_id: EntityUid::INVALID,
+                map_id: MapId::new(4),
+                grid_id: GridId::INVALID,
+                no_local_rotation: false,
+                anchored: false,
+            },
+        );
+        assert!(entities.inner.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(true),
+            Some(true),
+            None,
+        ));
+        let _ = entities.inner.insert_fixture_and_reconcile(
+            uid,
+            Fixture::new(
+                "main",
+                PhysShape::Aabb(AabbShape::new(Box2::new(-0.5, -0.5, 0.5, 0.5), 0.0)),
+            ),
+        );
+        entities.inner.refresh_map_physics_runtime(MapId::new(4));
+
+        entities.inner.current_tick = GameTick::new(5);
+        let physics = crate::physics_system::PhysicsSystem::new();
+        assert!(physics.set_can_collide(&mut entities, uid, false));
+
+        let mut serializer = RobustSerializer::new();
+        let state = entities
+            .build_entity_state_since(&mut serializer, map, GameTick::new(4))
+            .unwrap();
+        assert!(
+            state
+                .component_changes
+                .iter()
+                .any(|change| change.net_id == EntityManager::BROADPHASE_NET_ID)
+        );
+        assert!(
+            state
+                .component_changes
+                .iter()
+                .any(|change| change.net_id == EntityManager::PHYSICS_MAP_NET_ID)
+        );
+    }
+
+    #[test]
+    fn server_entity_manager_serializes_awake_state_in_physics_component() {
+        let mut entities = ServerEntityManager::new();
+        let uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(uid);
+        assert!(entities.inner.configure_physics_body(
+            uid,
+            Some(sekai::BodyType::Dynamic),
+            Some(false),
+            Some(true),
+            None,
+        ));
+
+        let mut serializer = RobustSerializer::new();
+        let state = entities
+            .inner
+            .build_serialized_entity_state(&mut serializer, uid)
+            .unwrap();
+        let physics = state
+            .component_changes
+            .iter()
+            .find(|change| change.net_id == EntityManager::PHYSICS_NET_ID)
+            .and_then(|change| change.state.as_ref())
+            .map(|component| {
+                serializer
+                    .deserialize_component_state::<PhysicsComponentState>(component)
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(!physics.awake);
+    }
+
+    #[test]
+    fn server_entity_manager_serializes_collision_wake_component_state() {
+        let mut entities = ServerEntityManager::new();
+        let uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(uid);
+        entities.inner.ensure_collision_wake(uid).enabled = false;
+
+        let mut serializer = RobustSerializer::new();
+        let state = entities
+            .inner
+            .build_serialized_entity_state(&mut serializer, uid)
+            .unwrap();
+        let collision_wake = state
+            .component_changes
+            .iter()
+            .find(|change| change.net_id == EntityManager::COLLISION_WAKE_NET_ID)
+            .and_then(|change| change.state.as_ref())
+            .map(|component| {
+                serializer
+                    .deserialize_component_state::<sekai::CollisionWakeComponentState>(component)
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(!collision_wake.enabled);
+    }
+
+    #[test]
+    fn server_entity_manager_serializes_map_paused_state() {
+        let mut entities = ServerEntityManager::new();
+        let uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(uid);
+        entities.inner.ensure_map(MapId::new(77), uid);
+        assert!(entities.inner.set_map_paused(uid, true));
+
+        let mut serializer = RobustSerializer::new();
+        let state = entities
+            .inner
+            .build_serialized_entity_state(&mut serializer, uid)
+            .unwrap();
+        let map = state
+            .component_changes
+            .iter()
+            .find(|change| change.net_id == EntityManager::MAP_NET_ID)
+            .and_then(|change| change.state.as_ref())
+            .map(|component| {
+                serializer
+                    .deserialize_component_state::<sekai::MapComponentState>(component)
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(map.map_paused);
+    }
+
+    #[test]
+    fn server_entity_manager_serializes_collide_on_anchor_component_state() {
+        let mut entities = ServerEntityManager::new();
+        let uid = entities.inner.create_entity_uninitialized(None);
+        entities.inner.initialize_entity(uid);
+        entities.inner.ensure_collide_on_anchor(uid).enable = true;
+
+        let mut serializer = RobustSerializer::new();
+        let state = entities
+            .inner
+            .build_serialized_entity_state(&mut serializer, uid)
+            .unwrap();
+        let collide_on_anchor = state
+            .component_changes
+            .iter()
+            .find(|change| change.net_id == EntityManager::COLLIDE_ON_ANCHOR_NET_ID)
+            .and_then(|change| change.state.as_ref())
+            .map(|component| {
+                serializer
+                    .deserialize_component_state::<sekai::CollideOnAnchorComponentState>(component)
+                    .unwrap()
+            })
+            .unwrap();
+        assert!(collide_on_anchor.enable);
+    }
+
+    #[test]
+    fn server_entity_manager_build_entity_states_for_sync_respects_visibility_and_dirtying() {
+        let mut entities = ServerEntityManager::new();
+        entities.inner.current_tick = GameTick::new(4);
+
+        let newly_visible = entities.inner.create_entity_uninitialized(Some("new"));
+        entities.inner.initialize_entity(newly_visible);
+
+        let dirty = entities.inner.create_entity_uninitialized(Some("dirty"));
+        entities.inner.initialize_entity(dirty);
+
+        let clean = entities.inner.create_entity_uninitialized(Some("clean"));
+        entities.inner.initialize_entity(clean);
+
+        entities.inner.current_tick = GameTick::new(5);
+        assert!(
+            entities
+                .inner
+                .set_appearance_data(newly_visible, "mode", 1u8)
+        );
+        assert!(entities.inner.set_appearance_data(dirty, "mode", 2u8));
+        entities.inner.dirty_entity(dirty);
+
+        let mut serializer = RobustSerializer::new();
+        let states = entities.build_entity_states_for_sync(
+            &mut serializer,
+            &[newly_visible, dirty, clean],
+            &[newly_visible],
+            GameTick::new(4),
+        );
+
+        assert_eq!(states.len(), 2);
+        assert!(states.iter().any(|state| state.uid == newly_visible));
+        assert!(states.iter().any(|state| state.uid == dirty));
+        assert!(!states.iter().any(|state| state.uid == clean));
     }
 }

@@ -1,7 +1,7 @@
 use sekai::GameState;
 
 #[derive(Debug, Clone)]
-pub struct ClientGameStateProcessor {
+pub(crate) struct ClientGameStateProcessor {
     state_buffer: Vec<GameState>,
     last_full_state: Option<GameState>,
     waiting_for_full: bool,
@@ -22,19 +22,19 @@ impl Default for ClientGameStateProcessor {
 }
 
 impl ClientGameStateProcessor {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn min_buffer_size(&self) -> usize {
+    fn min_buffer_size(&self) -> usize {
         if self.interpolation { 3 } else { 2 }
     }
 
-    pub fn target_buffer_size(&self) -> usize {
+    fn target_buffer_size(&self) -> usize {
         self.min_buffer_size() + self.interp_ratio
     }
 
-    pub fn add_new_state(&mut self, state: GameState) {
+    pub(crate) fn add_new_state(&mut self, state: GameState) {
         if state.from_sequence == jikan::GameTick::ZERO
             && self
                 .last_full_state
@@ -59,7 +59,7 @@ impl ClientGameStateProcessor {
             .sort_by_key(|state| state.to_sequence.value);
     }
 
-    pub fn pop_next_state(&mut self) -> Option<GameState> {
+    pub(crate) fn pop_next_state(&mut self) -> Option<GameState> {
         if self.waiting_for_full {
             let full = self.last_full_state.clone()?;
             if self.state_buffer.is_empty() {
@@ -80,7 +80,7 @@ impl ClientGameStateProcessor {
         }
     }
 
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.state_buffer.clear();
         self.last_full_state = None;
         self.waiting_for_full = true;

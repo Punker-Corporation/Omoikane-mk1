@@ -45,7 +45,7 @@ pub enum DirectionFlag {
 }
 
 pub trait DirectionOps {
-    fn to_dir(self) -> Direction;
+    fn to_direction(self) -> Direction;
     fn to_flag(self) -> DirectionFlag;
     fn get_opposite(self) -> Direction;
     fn get_clockwise_90_degrees(self) -> Direction;
@@ -55,7 +55,7 @@ pub trait DirectionOps {
 }
 
 impl DirectionOps for DirectionFlag {
-    fn to_dir(self) -> Direction {
+    fn to_direction(self) -> Direction {
         match self {
             DirectionFlag::South => Direction::South,
             DirectionFlag::SouthEast => Direction::SouthEast,
@@ -74,28 +74,28 @@ impl DirectionOps for DirectionFlag {
     }
 
     fn get_opposite(self) -> Direction {
-        self.to_dir().get_opposite()
+        self.to_direction().get_opposite()
     }
 
     fn get_clockwise_90_degrees(self) -> Direction {
-        self.to_dir().get_clockwise_90_degrees()
+        self.to_direction().get_clockwise_90_degrees()
     }
 
     fn to_angle(self) -> Angle {
-        self.to_dir().to_angle()
+        self.to_direction().to_angle()
     }
 
     fn to_vec(self) -> Vector2 {
-        self.to_dir().to_vec()
+        self.to_direction().to_vec()
     }
 
     fn to_int_vec(self) -> Vector2i {
-        self.to_dir().to_int_vec()
+        self.to_direction().to_int_vec()
     }
 }
 
 impl DirectionOps for Direction {
-    fn to_dir(self) -> Direction {
+    fn to_direction(self) -> Direction {
         self
     }
 
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn direction_roundtrips_to_flags() {
         assert_eq!(
-            Direction::NorthWest.to_flag().to_dir(),
+            Direction::NorthWest.to_flag().to_direction(),
             Direction::NorthWest
         );
     }

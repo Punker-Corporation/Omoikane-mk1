@@ -25,6 +25,12 @@ jobs:
       - name: Verify Rust-only layout
         run: cargo run -p xtask -- verify-layout
 
+      - name: Report architecture map
+        run: cargo run -p xtask -- architecture-map
+
+      - name: Verify architecture boundaries
+        run: cargo run -p xtask -- verify-architecture
+
       - name: Format
         run: cargo fmt --all -- --check
 
@@ -33,4 +39,15 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-targets
+
+  dependency-policy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check dependency policy
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
 

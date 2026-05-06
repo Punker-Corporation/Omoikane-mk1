@@ -14,6 +14,7 @@ pub struct MapComponent {
 pub struct MapComponentState {
     pub map_id: MapId,
     pub lighting_enabled: bool,
+    pub map_paused: bool,
 }
 
 impl Default for MapComponent {
@@ -37,12 +38,14 @@ impl MapComponent {
         MapComponentState {
             map_id: self.world_map,
             lighting_enabled: self.lighting_enabled,
+            map_paused: self.map_paused,
         }
     }
 
     pub fn handle_map_state(&mut self, state: MapComponentState) {
         self.world_map = state.map_id;
         self.lighting_enabled = state.lighting_enabled;
+        self.map_paused = state.map_paused;
     }
 
     pub fn as_state_value(&self) -> ComponentStateValue {
@@ -61,8 +64,10 @@ mod tests {
         component.handle_map_state(MapComponentState {
             map_id: MapId::new(5),
             lighting_enabled: false,
+            map_paused: true,
         });
         assert_eq!(component.world_map, MapId::new(5));
         assert!(!component.lighting_enabled);
+        assert!(component.map_paused);
     }
 }

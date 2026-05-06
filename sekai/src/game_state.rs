@@ -38,12 +38,6 @@ pub struct GameState {
     pub payload_size: usize,
 }
 
-impl GameState {
-    pub fn deterministic_digest(&self) -> crate::StateDigest {
-        crate::digest_game_state(self)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct GameStateMapData {
     pub grid_data: HashMap<GridId, GridDatum>,

@@ -56,9 +56,9 @@ Este documento registra a varredura inicial de artigos, TCCs, teses, talks tecni
 
 - Criar crate `hikari` para renderer e abstracao grafica.
 - Adicionar `wgpu`, `winit`, `raw-window-handle`, `bytemuck`, `pollster` e `naga` somente depois de checagem de licencas via `cargo-deny`.
-- Implementar camada minima: `GraphicsInstance`, `GraphicsDevice`, `SurfaceTarget`, `FrameContext`, `GpuBuffer`, `GpuTexture`, `ShaderModule`.
-- Criar render graph tipado: passes declaram `read`, `write`, `create_transient`, `preserve`, `discard`.
-- Validar grafo em runtime e teste: recursos sem escritor, ciclos, leitura antes de escrita, pass morto, aliasing indevido.
+- Implementar camada minima: `GraphicsInstance`, `GraphicsDevice`, `SurfaceTarget`, `FrameContext`, `FrameSubmission`, `GraphicsResourceCatalog`, `GpuBuffer`, `GpuTexture`, `ShaderModule`, descritores de buffers/texturas/shaders/pipelines/bind groups/compute pipelines, command lists e usos/formato iniciais.
+- Criar render graph tipado: passes declaram `read`, `write`, `create_transient`, `create_persistent`, `preserve`, `discard`.
+- Validar grafo em runtime e teste: recursos sem escritor, ciclos, leitura antes de escrita, criacao duplicada, pass morto, aliasing indevido e lifetimes diagnosticaveis.
 
 ### P1: pipeline de renderizacao escalavel
 
@@ -81,9 +81,24 @@ Este documento registra a varredura inicial de artigos, TCCs, teses, talks tecni
 
 1. Implementar `xtask architecture-map` para medir acoplamento real da Omoikane.
 2. Criar `docs/Renderer Architecture.md` com o contrato de `hikari`.
-3. Adicionar `cargo-deny` e uma politica de licencas permissivas.
-4. Criar crate `hikari` vazio com testes de render graph puro em CPU, sem abrir janela.
-5. Depois integrar `wgpu` e um teste headless que cria device em backend disponivel ou `noop`.
+3. Adicionar `cargo-deny` e uma politica de licencas permissivas. Concluido em 2026-05-05.
+4. Criar crate `hikari` vazio com testes de render graph puro em CPU, sem abrir janela. Concluido em 2026-05-05.
+5. Fortalecer `hikari` com lifetimes explicitos de recursos e tipos estruturais minimos sem backend real. Concluido em 2026-05-05.
+6. Expor lifetimes de recursos em `GraphValidation` para diagnostico de graph. Concluido em 2026-05-05.
+7. Adicionar descritores validaveis de buffers e texturas sem backend real. Concluido em 2026-05-05.
+8. Adicionar descriptor validavel de shader sem compilador real. Concluido em 2026-05-05.
+9. Adicionar descriptor validavel de render pipeline sem backend real. Concluido em 2026-05-05.
+10. Adicionar descriptor validavel de bind group layout sem backend real. Concluido em 2026-05-05.
+11. Adicionar descriptor validavel de bind group sem backend real. Concluido em 2026-05-05.
+12. Adicionar command list validavel para `queue`/`submit` sem backend real. Concluido em 2026-05-05.
+13. Adicionar compute pipeline e dispatch validaveis sem backend real. Concluido em 2026-05-05.
+14. Adicionar submissao de frame validavel sem backend real. Concluido em 2026-05-05.
+15. Adicionar catalogo CPU-only de recursos para validar handles submetidos. Concluido em 2026-05-05.
+16. Validar usos declarados de recursos no catalogo CPU-only. Concluido em 2026-05-05.
+17. Validar compatibilidade de bind group layout contra pipeline ativo. Concluido em 2026-05-05.
+18. Validar que `DrawIndexed` tenha index buffer associado. Concluido em 2026-05-05.
+19. Validar slots de vertex buffer exigidos pelo pipeline ativo. Concluido em 2026-05-06.
+20. Depois integrar `wgpu` e um teste headless que cria device em backend disponivel ou `noop`.
 
 ## Decisoes de seguranca juridica
 

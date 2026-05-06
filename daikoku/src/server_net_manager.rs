@@ -1,10 +1,11 @@
 use crate::FullInputCmdMessage;
 use jikan::GameTick;
-use sekai::{CompatibilityProfile, CompatibilityReport, EntityUid, GameState, MsgPlayerList};
-use std::collections::HashMap;
+use sekai::{EntityUid, GameState, MsgPlayerList};
+use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeliveryMethod {
+pub(crate) enum DeliveryMethod {
     Unreliable,
     ReliableUnordered,
 }
@@ -23,7 +24,8 @@ pub struct MsgState {
 }
 
 impl MsgState {
-    pub const RELIABLE_THRESHOLD: usize = 1300;
+    #[cfg(test)]
+    pub(crate) const RELIABLE_THRESHOLD: usize = 1300;
 
     pub fn new(state: GameState) -> Self {
         let payload_size = bincode::serialize(&state)
@@ -35,11 +37,13 @@ impl MsgState {
         }
     }
 
-    pub fn should_send_reliably(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn should_send_reliably(&self) -> bool {
         self.payload_size > Self::RELIABLE_THRESHOLD
     }
 
-    pub fn delivery_method(&self) -> DeliveryMethod {
+    #[cfg(test)]
+    pub(crate) fn delivery_method(&self) -> DeliveryMethod {
         if self.should_send_reliably() {
             DeliveryMethod::ReliableUnordered
         } else {
@@ -71,48 +75,31 @@ pub enum OutboundMessage {
     PlayerList(MsgPlayerList),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ServerChannel {
-    pub user_id: String,
-    pub connected: bool,
-}
-
 #[derive(Debug, Clone, Default)]
-pub struct ServerNetManager {
-    compatibility: CompatibilityProfile,
-    channels: HashMap<String, ServerChannel>,
+pub(crate) struct ServerNetManager {
+    channels: HashSet<String>,
     outbox: HashMap<String, Vec<OutboundMessage>>,
     inbound_inputs: HashMap<String, Vec<FullInputCmdMessage>>,
     inbound_entities: HashMap<String, Vec<MsgEntity>>,
     inbound_player_list_requests: HashMap<String, usize>,
-    compatibility_reports: HashMap<String, CompatibilityReport>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SessionInboundBatch {
+    pub(crate) player_list_requests: usize,
+    pub(crate) inputs: Vec<FullInputCmdMessage>,
+    pub(crate) entities: Vec<MsgEntity>,
 }
 
 impl ServerNetManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn initialize(&mut self) {}
-
-    pub fn compatibility_profile(&self) -> &CompatibilityProfile {
-        &self.compatibility
-    }
-
-    pub fn set_compatibility_profile(&mut self, profile: CompatibilityProfile) {
-        self.compatibility = profile;
-    }
-
-    pub fn connect(&mut self, user_id: impl Into<String>) -> bool {
+    pub(crate) fn connect(&mut self, user_id: impl Into<String>) -> bool {
         let user_id = user_id.into();
-        let newly_connected = !self.channels.contains_key(&user_id);
-        self.channels.insert(
-            user_id.clone(),
-            ServerChannel {
-                user_id: user_id.clone(),
-                connected: true,
-            },
-        );
+        let newly_connected = !self.channels.contains(&user_id);
+        self.channels.insert(user_id.clone());
         self.outbox.entry(user_id.clone()).or_default();
         self.inbound_inputs.entry(user_id.clone()).or_default();
         self.inbound_entities.entry(user_id.clone()).or_default();
@@ -122,23 +109,19 @@ impl ServerNetManager {
         newly_connected
     }
 
-    pub fn disconnect(&mut self, user_id: &str) {
+    pub(crate) fn disconnect(&mut self, user_id: &str) {
         self.channels.remove(user_id);
         self.outbox.remove(user_id);
         self.inbound_inputs.remove(user_id);
         self.inbound_entities.remove(user_id);
         self.inbound_player_list_requests.remove(user_id);
-        self.compatibility_reports.remove(user_id);
     }
 
-    pub fn is_connected(&self, user_id: &str) -> bool {
-        self.channels
-            .get(user_id)
-            .map(|channel| channel.connected)
-            .unwrap_or(false)
+    fn is_connected(&self, user_id: &str) -> bool {
+        self.channels.contains(user_id)
     }
 
-    pub fn send_state(&mut self, user_id: &str, state: GameState) -> bool {
+    pub(crate) fn send_state(&mut self, user_id: &str, state: GameState) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -149,7 +132,8 @@ impl ServerNetManager {
         true
     }
 
-    pub fn send_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
+    #[cfg(test)]
+    pub(crate) fn send_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -160,18 +144,11 @@ impl ServerNetManager {
         true
     }
 
-    pub fn broadcast_entity(&mut self, message: MsgEntity) {
-        let targets: Vec<_> = self.channels.keys().cloned().collect();
-        for user_id in targets {
-            let _ = self.send_entity(&user_id, message.clone());
-        }
-    }
-
-    pub fn take_outbox(&mut self, user_id: &str) -> Vec<OutboundMessage> {
+    pub(crate) fn take_outbox(&mut self, user_id: &str) -> Vec<OutboundMessage> {
         self.outbox.remove(user_id).unwrap_or_default()
     }
 
-    pub fn queue_input(&mut self, user_id: &str, message: FullInputCmdMessage) -> bool {
+    pub(crate) fn queue_input(&mut self, user_id: &str, message: FullInputCmdMessage) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -182,11 +159,7 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_input(&mut self, user_id: &str) -> Vec<FullInputCmdMessage> {
-        self.inbound_inputs.remove(user_id).unwrap_or_default()
-    }
-
-    pub fn queue_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
+    pub(crate) fn queue_entity(&mut self, user_id: &str, message: MsgEntity) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -197,11 +170,7 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_entities(&mut self, user_id: &str) -> Vec<MsgEntity> {
-        self.inbound_entities.remove(user_id).unwrap_or_default()
-    }
-
-    pub fn queue_player_list_request(&mut self, user_id: &str) -> bool {
+    pub(crate) fn queue_player_list_request(&mut self, user_id: &str) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -212,13 +181,18 @@ impl ServerNetManager {
         true
     }
 
-    pub fn take_player_list_requests(&mut self, user_id: &str) -> usize {
-        self.inbound_player_list_requests
-            .remove(user_id)
-            .unwrap_or_default()
+    pub(crate) fn take_session_inbound(&mut self, user_id: &str) -> SessionInboundBatch {
+        SessionInboundBatch {
+            player_list_requests: self
+                .inbound_player_list_requests
+                .remove(user_id)
+                .unwrap_or_default(),
+            inputs: self.inbound_inputs.remove(user_id).unwrap_or_default(),
+            entities: self.inbound_entities.remove(user_id).unwrap_or_default(),
+        }
     }
 
-    pub fn send_player_list(&mut self, user_id: &str, list: MsgPlayerList) -> bool {
+    pub(crate) fn send_player_list(&mut self, user_id: &str, list: MsgPlayerList) -> bool {
         if !self.is_connected(user_id) {
             return false;
         }
@@ -228,25 +202,6 @@ impl ServerNetManager {
             .push(OutboundMessage::PlayerList(list));
         true
     }
-
-    pub fn negotiate_compatibility(
-        &mut self,
-        user_id: &str,
-        remote: &CompatibilityProfile,
-    ) -> Option<CompatibilityReport> {
-        if !self.is_connected(user_id) {
-            return None;
-        }
-
-        let report = self.compatibility.negotiate(remote);
-        self.compatibility_reports
-            .insert(user_id.to_string(), report.clone());
-        Some(report)
-    }
-
-    pub fn compatibility_report(&self, user_id: &str) -> Option<&CompatibilityReport> {
-        self.compatibility_reports.get(user_id)
-    }
 }
 
 #[cfg(test)]
@@ -255,7 +210,7 @@ mod tests {
     use crate::{BoundKeyState, FullInputCmdMessage};
     use jikan::GameTick;
     use keisan::Vector2;
-    use sekai::{CompatibilityProfile, GameState, ProtocolFeature};
+    use sekai::GameState;
     use sekai::{
         EntityCoordinates, EntityUid, MsgPlayerList, PlayerState, ScreenCoordinates, SessionStatus,
         WindowId,
@@ -310,7 +265,6 @@ mod tests {
                 ScreenCoordinates::new_xy(1.0, 1.0, WindowId::MAIN),
             ),
         ));
-        assert_eq!(net.take_input("u1").len(), 1);
         assert!(net.queue_entity(
             "u1",
             MsgEntity {
@@ -323,9 +277,11 @@ mod tests {
                 source_tick: GameTick::FIRST,
             },
         ));
-        assert_eq!(net.take_entities("u1").len(), 1);
         assert!(net.queue_player_list_request("u1"));
-        assert_eq!(net.take_player_list_requests("u1"), 1);
+        let inbound = net.take_session_inbound("u1");
+        assert_eq!(inbound.inputs.len(), 1);
+        assert_eq!(inbound.entities.len(), 1);
+        assert_eq!(inbound.player_list_requests, 1);
         assert!(net.send_player_list(
             "u1",
             MsgPlayerList {
@@ -342,26 +298,5 @@ mod tests {
             net.take_outbox("u1").pop().unwrap(),
             OutboundMessage::PlayerList(_)
         ));
-    }
-
-    #[test]
-    fn net_manager_negotiates_compatibility_per_connection() {
-        let mut net = ServerNetManager::new();
-        assert!(net.connect("u1"));
-
-        let report = net
-            .negotiate_compatibility("u1", &CompatibilityProfile::stable())
-            .unwrap();
-        assert!(report.accepted);
-        assert!(
-            report
-                .shared_features
-                .contains(ProtocolFeature::BinaryComponentState)
-        );
-        assert!(net.compatibility_report("u1").is_some());
-        assert!(
-            net.negotiate_compatibility("missing", &CompatibilityProfile::stable())
-                .is_none()
-        );
     }
 }

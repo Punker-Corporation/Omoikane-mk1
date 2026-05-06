@@ -31,7 +31,7 @@ impl Quaternion2D {
         )
     }
 
-    pub fn inverse_rotate_vector(self, vector: Vector2) -> Vector2 {
+    pub fn mul_t(self, vector: Vector2) -> Vector2 {
         Vector2::new(
             self.c * vector.x + self.s * vector.y,
             -self.s * vector.x + self.c * vector.y,
@@ -73,11 +73,11 @@ impl Transform {
     }
 
     pub fn transform_point(self, vector: Vector2) -> Vector2 {
-        self.rotation * vector + self.position
+        self.rotation.rotate_vector(vector) + self.position
     }
 
-    pub fn inverse_transform_point(self, vector: Vector2) -> Vector2 {
-        self.rotation.inverse_rotate_vector(vector - self.position)
+    pub fn mul_t(self, vector: Vector2) -> Vector2 {
+        self.rotation.mul_t(vector - self.position)
     }
 
     pub fn combine_t(a: Self, b: Self) -> Self {
@@ -86,7 +86,7 @@ impl Transform {
                 s: a.rotation.c * b.rotation.s - a.rotation.s * b.rotation.c,
                 c: a.rotation.c * b.rotation.c + a.rotation.s * b.rotation.s,
             },
-            position: a.rotation.inverse_rotate_vector(b.position - a.position),
+            position: a.rotation.mul_t(b.position - a.position),
         }
     }
 }
@@ -107,8 +107,8 @@ mod tests {
     #[test]
     fn transform_roundtrips_vectors() {
         let transform = Transform::new(Vector2::new(5.0, 0.0), core::f32::consts::FRAC_PI_2);
-        let world = transform * Vector2::UNIT_X;
-        let local = transform.inverse_transform_point(world);
+        let world = transform.transform_point(Vector2::UNIT_X);
+        let local = transform.mul_t(world);
         assert!((local - Vector2::UNIT_X).length() < 0.0001);
     }
 }
