@@ -14,6 +14,7 @@ The current crates are:
 - `daikoku`: authoritative server systems, networking queues, PVS and prediction inputs.
 - `shinobi`: client-side state application, interpolation, prediction and local systems.
 - `hikari`: CPU-validated render graph, resource catalog, frame submissions, render/compute command lists, structural graphics handles and future graphics runtime boundary.
+- `omoikane_app`: headless app host for local server/client orchestration, sandbox entity spawning, CPU render extract and future vertical slices.
 - `xtask`: repository maintenance checks for the Rust-only layout.
 
 ## Commands
@@ -22,6 +23,7 @@ The current crates are:
 cargo run -p xtask -- architecture-map
 cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- verify-layout
+cargo run -p omoikane_app --example headless_sandbox
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
@@ -35,9 +37,10 @@ systems. The migration target is not a line-by-line port: new work should keep
 the behavior compatible where useful while replacing legacy assumptions with
 idiomatic Rust APIs, better invariants and measurable performance wins.
 
-See `docs/Research Intake.md` for the current technical intake of papers,
-theses, talks and Rust repositories being evaluated for future Omoikane
-subsystems.
+See `docs/Omoikane Roadmap.md` for the long-term implementation roadmap and
+continuity prompt, and `docs/Research Intake.md` for the current technical
+intake of papers, theses, talks and Rust repositories being evaluated for
+future Omoikane subsystems.
 
 ## Legal
 

@@ -1,6 +1,6 @@
 # Omoikane Renderer Architecture
 
-Data: 2026-05-05
+Data: 2026-05-06
 
 Este documento define o contrato inicial do futuro crate `hikari`. O objetivo
 nao e adicionar renderer antes da hora, e sim fixar as fronteiras para que a
@@ -115,6 +115,28 @@ e rejeita submissao vazia ou command lists repetidas no mesmo frame. Isso ainda
 nao representa queue real de GPU; e apenas o contrato de entrada para um futuro
 backend.
 
+Em 2026-05-06, `RenderCommandList` e `FrameSubmission` ganharam dumps textuais
+estaveis via `debug_dump()`. O dump de command list lista id, label, quantidade
+de comandos e cada comando com handles e parametros principais. O dump de
+submission lista frame, device, target e command lists submetidas. O formato e
+intencionalmente simples para alimentar logs, testes e ferramentas headless
+antes de existir backend real.
+
+Em 2026-05-06, `RenderCommandListBuilder`, `RenderPassBuilder` e
+`ComputePassBuilder` foram adicionados como camada ergonomica sobre a command
+list validada. Eles criam passes por closure, emitem comandos de begin/end
+automaticamente, nao deixam comandos parciais quando a closure falha e retornam
+erro cedo para casos comuns como draw sem pipeline, `DrawIndexed` sem index
+buffer, dispatch sem pipeline e chamadas vazias. A validacao final de
+`RenderCommandList` continua sendo a fonte de seguranca para listas montadas
+manualmente ou vindas de outro caminho.
+
+No mesmo dia, os diagnosticos de command list passaram a carregar mais contexto
+nos erros de draw e dispatch. Falhas como draw sem pipeline, `DrawIndexed` sem
+index buffer, dispatch sem pipeline, draw vazio e dispatch vazio agora informam
+o comando afetado e, quando aplicavel, o pass ativo. Isso prepara a API para
+ferramentas e dumps de debug sem alterar o modelo CPU-only.
+
 `GraphicsResourceCatalog` e um registro CPU-only de handles conhecidos. Ele pode
 validar uma `FrameSubmission` contra devices, surfaces, buffers, texturas,
 samplers, pipelines e bind groups registrados, rejeitando referencias
@@ -124,8 +146,108 @@ submit e testes. Ele tambem preserva usos declarados de buffers/texturas para
 rejeitar, por exemplo, texture sem `RenderTarget` usada como alvo de render ou
 buffer sem `Vertex` usado como vertex buffer. Quando um pipeline ativo declara
 layouts de bind group, o catalogo tambem confere se o bind group associado ao
-slot usa o layout esperado. Para draws, o catalogo tambem confere se os slots
-de vertex buffer exigidos pelo pipeline ativo foram associados antes do comando.
+slot usa o layout esperado. Em 2026-05-06, esses erros de slot/layout tambem
+passaram a informar o pipeline render ou compute que declarou a exigencia. Para
+draws, o catalogo tambem confere se os slots de vertex buffer exigidos pelo
+pipeline ativo foram associados antes do comando.
+
+No app host headless, `CpuFrameResources` usa esse catalogo como registro local
+de recursos CPU. Em 2026-05-06, ele passou a aceitar mais de uma textura e mais
+de um render pipeline registrados, preservando o alvo/pipeline padrao para o
+caminho simples e mantendo as consultas extras sincronizadas com a validacao de
+submit.
+
+Ainda em 2026-05-06, o app host ganhou `CpuFrameResourceConfig` e configs
+menores para texturas e render pipelines. Essa camada ainda nao e um formato de
+arquivo nem asset pipeline, mas ja separa "descriptor vindo do projeto" de
+"recurso registrado em CPU", que e a fronteira esperada para loaders futuros.
+
+O primeiro formato serializavel acima dessa camada tambem foi introduzido em
+2026-05-06 no app host. `OmoikaneProjectConfig` cobre nome de projeto e
+texturas CPU em JSON, converte para `CpuFrameResourceConfig` e valida
+duplicidade de ids antes de construir os descriptors de `hikari`. Pipelines e
+cenas serializadas permanecem fora desse primeiro corte.
+
+No mesmo dia, o formato foi expandido para render pipelines. O projeto pode
+declarar `ProjectRenderPipelineConfig` com ids de shader, layouts de vertex
+buffer, targets e bind group layouts; o app host converte isso para
+`CpuRenderPipelineResourceConfig` e deixa a validacao detalhada do descriptor a
+cargo de `hikari`.
+
+O corte seguinte adicionou cenas headless serializaveis. `ProjectSceneConfig`
+descreve camera, textura de sandbox, viewport, world view e parametros do
+sprite principal, e converte diretamente para `RenderFrameOptions`. Isso ainda
+nao substitui um formato completo de cena ou mapa; por enquanto e a ponte
+minima entre projeto JSON e o frame CPU-only do sandbox.
+
+Em seguida, cenas passaram a poder declarar sprites estaticos por
+`ProjectSpriteConfig`. O app host combina esses sprites com o sprite de sandbox
+replicado em `HeadlessApp::build_project_scene_render_extract`, mantendo a
+validacao final em `RenderExtract`.
+
+Esse proximo corte tambem foi fechado em 2026-05-06:
+`HeadlessApp::build_project_scene_registered_cpu_frame` monta o extract de
+cena, preserva os ids serializados de camera/textura, prepara, queueia e valida
+a submissao contra `CpuFrameResources`. O metodo so aloca handles transientes de
+frame e command list, mantendo recursos persistentes registrados no app host.
+
+Cenas serializadas tambem podem declarar entidades visuais dinamicas com
+`ProjectSceneEntityConfig`. O app host cria essas entidades no servidor por
+`HeadlessApp::spawn_project_scene_entities`; depois do bombeamento local de
+ticks, o extract de cena le posicoes replicadas no cliente e emite sprites com
+os parametros visuais declarados no projeto. Isso ainda nao e um sistema de
+prefabs completo, mas fecha o caminho minimo projeto -> entidade autoritativa
+-> cliente -> render extract.
+
+Esse caminho tambem cobre o primeiro controle local vindo de configuracao de
+cena. `ProjectSceneEntityConfig::attach_local_player` pode anexar uma entidade
+dinamica ao jogador local no servidor, e `HeadlessApp::handle_local_input`
+encaminha comandos pelo cliente local para o loop autoritativo antes que a
+posicao replicada volte ao `RenderExtract`. Assim o renderer continua recebendo
+apenas dados extraidos, sem assumir autoridade de gameplay.
+
+Entidades dinamicas de cena tambem podem carregar um primeiro bloco de physics
+por `ProjectScenePhysicsConfig`. O app host converte esse bloco em configuracao
+de corpo e velocidades no servidor antes dos ticks, permitindo que movimento
+autoritativo inicial apareca no cliente e no `RenderExtract` sem acoplar
+`hikari` aos componentes de simulacao.
+
+O mesmo bloco de physics agora aceita fixtures declarativas por
+`ProjectSceneFixtureConfig`. Cenas podem descrever AABBs e circulos simples com
+material e bits de colisao; o app host converte esses descriptors em
+`butsuri::Fixture` no servidor durante o spawn. O renderer continua vendo apenas
+a posicao replicada e os dados visuais extraidos.
+
+As entidades dinamicas de cena tambem preservam rotacao inicial pelo mesmo
+caminho autoritativo. A configuracao serializada alimenta o transform do
+servidor, o cliente aplica a rotacao replicada e o app host le esse valor antes
+de criar o `SpriteExtract`. Isso mantem o renderer dependente apenas do extract,
+mesmo quando os dados visuais derivam de transform replicado.
+
+Cada entidade dinamica de cena possui tambem um id autoral estavel. Esse id nao
+substitui o `EntityUid` runtime; ele serve para a camada de projeto consultar a
+entidade criada pelo servidor depois do spawn. O app host rejeita ids duplicados
+dentro da mesma cena antes de criar entidades, evitando que sistemas futuros de
+gameplay apontem para uma entidade ambigua.
+
+A cena tambem pode declarar qual entidade autoral deve ser controlada pelo
+jogador local. `ProjectSceneConfig::controlled_entity` referencia um id de
+`ProjectSceneEntityConfig`; o app host valida a referencia antes do spawn e
+anexa o jogador local no servidor autoritativo. O extract visual continua lendo
+apenas o estado replicado do cliente.
+
+No mesmo nivel de autoria, cenas agora podem declarar bindings simples de
+input. `ProjectSceneInputBindingConfig` mapeia uma acao de projeto para a
+`BoundKeyFunction` runtime usada pelos sistemas de cliente e servidor, e
+`HeadlessApp::handle_project_scene_input` resolve esse binding antes de
+encaminhar o comando pelo cliente local. Isso mantem o caminho de controle
+server-authoritative enquanto evita que o projeto dependa diretamente dos nomes
+hardcoded usados pelo runtime atual.
+
+Esses bindings tambem sao validados como dados de projeto: acoes vazias,
+funcoes runtime vazias, acoes ausentes e acoes duplicadas sao reportadas como
+`ProjectConfigError` no app host. O cliente e o servidor continuam recebendo
+apenas comandos resolvidos para uma funcao runtime explicita.
 
 ## Render Graph
 
@@ -162,6 +284,19 @@ criacao, pass de descarte e ultimo pass de uso. Essa informacao deve continuar
 independente de backend e pode alimentar ferramentas futuras de debug, dumps ou
 visualizacoes do graph.
 
+Em 2026-05-06, `RenderGraph` e `GraphValidation` ganharam dumps textuais
+estaveis via `debug_dump()`. O dump do graph lista recursos importados,
+persistentes, passes, dependencias e usos por pass. O dump da validacao lista a
+ordem de execucao e lifetimes com tipo, criacao, descarte e ultimo uso. Esses
+dumps completam o primeiro caminho headless de diagnostico para graph,
+submission e command lists.
+
+No mesmo corte, `hikari/examples/cpu_frame_debug.rs` passou a exercitar o fluxo
+CPU-only sem janela: graph, extract, prepare, queue, command list, submission,
+catalogo de recursos e dumps. O exemplo serve como trilha minima para autores e
+para futuras ferramentas validarem o caminho renderer headless antes de existir
+backend grafico real.
+
 ## Estagios de Frame
 
 O renderer deve preservar uma separacao clara:
@@ -173,6 +308,22 @@ O renderer deve preservar uma separacao clara:
 
 `extract` pode observar estado de cliente, mas `prepare`, `queue` e `submit`
 devem operar em dados proprios do renderer.
+
+Em 2026-05-06, `hikari` passou a expor `RenderExtract` como contrato CPU-only
+para o primeiro corte 2D. Ele ainda nao depende de `sekai`: recebe cameras 2D,
+sprites, batches de tiles e linhas de debug como dados ja extraidos. A
+validacao rejeita camera ausente, camera duplicada, viewport/world view
+invalidos, primitivos apontando para camera inexistente, batches de tile vazios
+e valores nao finitos ou nao positivos onde isso tornaria a preparacao
+ambigua.
+
+No mesmo corte, `PreparedFrame` e `QueuedFrame` passaram a representar os
+estagios `prepare` e `queue` ainda sem GPU real. `PreparedFrame` valida o
+extract, agrupa sprites por camera/textura/depth, preserva batches de tiles e
+agrupa linhas de debug por camera/depth/cor/espessura. `QueuedFrame` transforma
+esses dados em draws de alto nivel ordenados por camera, depth, tipo de
+primitivo e textura. Essa fila ainda nao cria `RenderCommandList`; ela fixa a
+ordem e os lotes que um backend futuro deve consumir.
 
 ## Caminho 2D Inicial
 
@@ -229,5 +380,13 @@ separada. Licenca de codigo nao deve ser assumida como licenca de asset.
 17. Validar compatibilidade de bind group layout contra pipeline ativo. Concluido em 2026-05-05.
 18. Validar que `DrawIndexed` tenha index buffer associado. Concluido em 2026-05-05.
 19. Validar slots de vertex buffer exigidos pelo pipeline ativo. Concluido em 2026-05-06.
-20. Adicionar politica de licencas antes de qualquer backend real.
-21. Integrar `wgpu` somente depois do graph minimo estar coberto por testes.
+20. Adicionar `RenderExtract` CPU-only para camera 2D, sprites, tiles e debug lines. Concluido em 2026-05-06.
+21. Adicionar `PreparedFrame` e `QueuedFrame` CPU-only para batches 2D de alto nivel. Concluido em 2026-05-06.
+22. Adicionar builders ergonomicos para command list, render pass e compute pass. Concluido em 2026-05-06.
+23. Melhorar diagnosticos de command list para draw, index buffer e dispatch. Concluido em 2026-05-06.
+24. Melhorar diagnosticos de bind group layout no catalogo com pipeline ativo. Concluido em 2026-05-06.
+25. Adicionar dumps textuais de debug para command list e frame submission. Concluido em 2026-05-06.
+26. Adicionar dumps textuais de debug para render graph e lifetimes validados. Concluido em 2026-05-06.
+27. Adicionar exemplo CPU-only `cpu_frame_debug` para extract/prepare/queue/submit/dumps. Concluido em 2026-05-06.
+28. Adicionar politica de licencas antes de qualquer backend real.
+29. Integrar `wgpu` somente depois do graph minimo estar coberto por testes.

@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fmt::{self, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GraphicsInstanceId(u64);
@@ -329,6 +329,32 @@ impl FrameSubmission {
 
     pub fn command_lists(&self) -> &[RenderCommandList] {
         &self.command_lists
+    }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = String::new();
+        writeln!(
+            output,
+            "frame_submission frame={} device={} target={} command_lists={}",
+            self.frame.frame().raw(),
+            self.frame.device().raw(),
+            self.frame.target().raw(),
+            self.command_lists.len()
+        )
+        .expect("writing to a String cannot fail");
+
+        for command_list in &self.command_lists {
+            writeln!(
+                output,
+                "  command_list id={} label=\"{}\" commands={}",
+                command_list.id().raw(),
+                command_list.label(),
+                command_list.commands().len()
+            )
+            .expect("writing to a String cannot fail");
+        }
+
+        output
     }
 
     pub fn validate(&self) -> Result<(), GraphicsResourceError> {
@@ -761,13 +787,17 @@ impl GraphicsResourceCatalog {
         slot: u32,
         bind_group: BindGroupId,
     ) -> Result<(), GraphicsResourceError> {
-        let Some(pipeline) = self.render_pipelines.get(&pipeline) else {
+        let pipeline_id = pipeline;
+        let Some(pipeline) = self.render_pipelines.get(&pipeline_id) else {
             return Ok(());
         };
         self.require_pipeline_bind_group_layout(
-            frame,
-            command_list,
-            command,
+            SubmittedBindGroupLayoutCheck {
+                frame,
+                command_list,
+                command,
+                pipeline: SubmittedResource::RenderPipeline(pipeline_id),
+            },
             pipeline.bind_group_layouts(),
             slot,
             bind_group,
@@ -783,13 +813,17 @@ impl GraphicsResourceCatalog {
         slot: u32,
         bind_group: BindGroupId,
     ) -> Result<(), GraphicsResourceError> {
-        let Some(pipeline) = self.compute_pipelines.get(&pipeline) else {
+        let pipeline_id = pipeline;
+        let Some(pipeline) = self.compute_pipelines.get(&pipeline_id) else {
             return Ok(());
         };
         self.require_pipeline_bind_group_layout(
-            frame,
-            command_list,
-            command,
+            SubmittedBindGroupLayoutCheck {
+                frame,
+                command_list,
+                command,
+                pipeline: SubmittedResource::ComputePipeline(pipeline_id),
+            },
             pipeline.bind_group_layouts(),
             slot,
             bind_group,
@@ -798,18 +832,17 @@ impl GraphicsResourceCatalog {
 
     fn require_pipeline_bind_group_layout(
         &self,
-        frame: FrameId,
-        command_list: CommandListId,
-        command: &'static str,
+        context: SubmittedBindGroupLayoutCheck,
         layouts: &[BindGroupLayoutId],
         slot: u32,
         bind_group: BindGroupId,
     ) -> Result<(), GraphicsResourceError> {
         let Some(expected) = layouts.get(slot as usize) else {
             return Err(GraphicsResourceError::SubmittedBindGroupSlotOutOfRange {
-                frame,
-                command_list,
-                command,
+                frame: context.frame,
+                command_list: context.command_list,
+                command: context.command,
+                pipeline: context.pipeline,
                 slot,
                 bind_group,
             });
@@ -821,9 +854,10 @@ impl GraphicsResourceCatalog {
             .layout();
         if actual != *expected {
             return Err(GraphicsResourceError::SubmittedBindGroupLayoutMismatch {
-                frame,
-                command_list,
-                command,
+                frame: context.frame,
+                command_list: context.command_list,
+                command: context.command,
+                pipeline: context.pipeline,
                 slot,
                 bind_group,
                 expected: *expected,
@@ -857,6 +891,14 @@ impl GraphicsResourceCatalog {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SubmittedBindGroupLayoutCheck {
+    frame: FrameId,
+    command_list: CommandListId,
+    command: &'static str,
+    pipeline: SubmittedResource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1892,6 +1934,30 @@ impl RenderCommandList {
         &self.commands
     }
 
+    pub fn builder(id: CommandListId, label: impl Into<String>) -> RenderCommandListBuilder {
+        RenderCommandListBuilder::new(id, label)
+    }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = String::new();
+        writeln!(
+            output,
+            "command_list id={} label=\"{}\" commands={}",
+            self.id.raw(),
+            self.label,
+            self.commands.len()
+        )
+        .expect("writing to a String cannot fail");
+
+        for (index, command) in self.commands.iter().enumerate() {
+            write!(output, "  {index}: ").expect("writing to a String cannot fail");
+            write_command_dump(&mut output, command);
+            output.push('\n');
+        }
+
+        output
+    }
+
     pub fn validate(&self) -> Result<(), GraphicsResourceError> {
         if self.commands.is_empty() {
             return Err(GraphicsResourceError::EmptyCommandList {
@@ -1956,17 +2022,31 @@ impl RenderCommandList {
                     index_buffer_bound = true;
                 }
                 RenderCommand::Draw(draw) => {
-                    validate_draw_state(&self.label, active_pass, render_pipeline_bound)?;
-                    draw.validate(&self.label)?;
+                    validate_draw_state(
+                        &self.label,
+                        command.name(),
+                        active_pass,
+                        render_pipeline_bound,
+                    )?;
+                    draw.validate(&self.label, command.name())?;
                 }
                 RenderCommand::DrawIndexed(draw) => {
-                    validate_draw_state(&self.label, active_pass, render_pipeline_bound)?;
+                    validate_draw_state(
+                        &self.label,
+                        command.name(),
+                        active_pass,
+                        render_pipeline_bound,
+                    )?;
                     if !index_buffer_bound {
                         return Err(GraphicsResourceError::DrawIndexedWithoutIndexBuffer {
                             label: self.label.clone(),
+                            command: command.name(),
+                            active_pass: active_pass
+                                .map(|pass| pass.label().to_string())
+                                .unwrap_or_default(),
                         });
                     }
-                    draw.validate(&self.label)?;
+                    draw.validate(&self.label, command.name())?;
                 }
                 RenderCommand::BeginComputePass(pass) => {
                     if let Some(active) = active_pass {
@@ -2006,8 +2086,13 @@ impl RenderCommandList {
                     }
                 }
                 RenderCommand::Dispatch(dispatch) => {
-                    validate_dispatch_state(&self.label, active_pass, compute_pipeline_bound)?;
-                    dispatch.validate(&self.label)?;
+                    validate_dispatch_state(
+                        &self.label,
+                        command.name(),
+                        active_pass,
+                        compute_pipeline_bound,
+                    )?;
+                    dispatch.validate(&self.label, command.name())?;
                 }
             }
         }
@@ -2030,6 +2115,206 @@ impl RenderCommandList {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderCommandListBuilder {
+    id: CommandListId,
+    label: String,
+    commands: Vec<RenderCommand>,
+}
+
+impl RenderCommandListBuilder {
+    pub fn new(id: CommandListId, label: impl Into<String>) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            commands: Vec::new(),
+        }
+    }
+
+    pub const fn id(&self) -> CommandListId {
+        self.id
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn commands(&self) -> &[RenderCommand] {
+        &self.commands
+    }
+
+    pub fn render_pass(
+        &mut self,
+        descriptor: RenderPassDescriptor,
+        encode: impl FnOnce(&mut RenderPassBuilder) -> Result<(), GraphicsResourceError>,
+    ) -> Result<&mut Self, GraphicsResourceError> {
+        descriptor.validate()?;
+
+        let mut pass = RenderPassBuilder::new(self.label.clone());
+        encode(&mut pass)?;
+
+        self.commands
+            .push(RenderCommand::BeginRenderPass(descriptor));
+        self.commands.extend(pass.finish());
+        self.commands.push(RenderCommand::EndRenderPass);
+        Ok(self)
+    }
+
+    pub fn compute_pass(
+        &mut self,
+        descriptor: ComputePassDescriptor,
+        encode: impl FnOnce(&mut ComputePassBuilder) -> Result<(), GraphicsResourceError>,
+    ) -> Result<&mut Self, GraphicsResourceError> {
+        let mut pass = ComputePassBuilder::new(self.label.clone());
+        encode(&mut pass)?;
+
+        self.commands
+            .push(RenderCommand::BeginComputePass(descriptor));
+        self.commands.extend(pass.finish());
+        self.commands.push(RenderCommand::EndComputePass);
+        Ok(self)
+    }
+
+    pub fn finish(self) -> Result<RenderCommandList, GraphicsResourceError> {
+        RenderCommandList::new(self.id, self.label, self.commands)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderPassBuilder {
+    command_list_label: String,
+    commands: Vec<RenderCommand>,
+    pipeline_bound: bool,
+    index_buffer_bound: bool,
+}
+
+impl RenderPassBuilder {
+    fn new(command_list_label: String) -> Self {
+        Self {
+            command_list_label,
+            commands: Vec::new(),
+            pipeline_bound: false,
+            index_buffer_bound: false,
+        }
+    }
+
+    pub fn commands(&self) -> &[RenderCommand] {
+        &self.commands
+    }
+
+    pub fn set_pipeline(&mut self, pipeline: RenderPipelineId) -> &mut Self {
+        self.commands.push(RenderCommand::SetPipeline(pipeline));
+        self.pipeline_bound = true;
+        self
+    }
+
+    pub fn set_bind_group(&mut self, slot: u32, group: BindGroupId) -> &mut Self {
+        self.commands
+            .push(RenderCommand::SetBindGroup { slot, group });
+        self
+    }
+
+    pub fn set_vertex_buffer(&mut self, slot: u32, buffer: GpuBufferId) -> &mut Self {
+        self.commands
+            .push(RenderCommand::SetVertexBuffer { slot, buffer });
+        self
+    }
+
+    pub fn set_index_buffer(&mut self, buffer: GpuBufferId) -> &mut Self {
+        self.commands.push(RenderCommand::SetIndexBuffer(buffer));
+        self.index_buffer_bound = true;
+        self
+    }
+
+    pub fn draw(&mut self, draw: DrawCall) -> Result<&mut Self, GraphicsResourceError> {
+        validate_draw_state(
+            &self.command_list_label,
+            "draw",
+            Some(ActiveCommandPass::Render("builder")),
+            self.pipeline_bound,
+        )?;
+        draw.validate(&self.command_list_label, "draw")?;
+        self.commands.push(RenderCommand::Draw(draw));
+        Ok(self)
+    }
+
+    pub fn draw_indexed(
+        &mut self,
+        draw: IndexedDrawCall,
+    ) -> Result<&mut Self, GraphicsResourceError> {
+        validate_draw_state(
+            &self.command_list_label,
+            "draw_indexed",
+            Some(ActiveCommandPass::Render("builder")),
+            self.pipeline_bound,
+        )?;
+        if !self.index_buffer_bound {
+            return Err(GraphicsResourceError::DrawIndexedWithoutIndexBuffer {
+                label: self.command_list_label.clone(),
+                command: "draw_indexed",
+                active_pass: "builder".to_string(),
+            });
+        }
+        draw.validate(&self.command_list_label, "draw_indexed")?;
+        self.commands.push(RenderCommand::DrawIndexed(draw));
+        Ok(self)
+    }
+
+    fn finish(self) -> Vec<RenderCommand> {
+        self.commands
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComputePassBuilder {
+    command_list_label: String,
+    commands: Vec<RenderCommand>,
+    pipeline_bound: bool,
+}
+
+impl ComputePassBuilder {
+    fn new(command_list_label: String) -> Self {
+        Self {
+            command_list_label,
+            commands: Vec::new(),
+            pipeline_bound: false,
+        }
+    }
+
+    pub fn commands(&self) -> &[RenderCommand] {
+        &self.commands
+    }
+
+    pub fn set_pipeline(&mut self, pipeline: ComputePipelineId) -> &mut Self {
+        self.commands
+            .push(RenderCommand::SetComputePipeline(pipeline));
+        self.pipeline_bound = true;
+        self
+    }
+
+    pub fn set_bind_group(&mut self, slot: u32, group: BindGroupId) -> &mut Self {
+        self.commands
+            .push(RenderCommand::SetComputeBindGroup { slot, group });
+        self
+    }
+
+    pub fn dispatch(&mut self, dispatch: DispatchCall) -> Result<&mut Self, GraphicsResourceError> {
+        validate_dispatch_state(
+            &self.command_list_label,
+            "dispatch",
+            Some(ActiveCommandPass::Compute("builder")),
+            self.pipeline_bound,
+        )?;
+        dispatch.validate(&self.command_list_label, "dispatch")?;
+        self.commands.push(RenderCommand::Dispatch(dispatch));
+        Ok(self)
+    }
+
+    fn finish(self) -> Vec<RenderCommand> {
+        self.commands
     }
 }
 
@@ -2081,6 +2366,100 @@ impl RenderCommand {
             Self::SetComputeBindGroup { .. } => "set_compute_bind_group",
             Self::Dispatch(_) => "dispatch",
         }
+    }
+}
+
+fn write_command_dump(output: &mut String, command: &RenderCommand) {
+    match command {
+        RenderCommand::BeginRenderPass(pass) => {
+            write!(
+                output,
+                "begin_render_pass label=\"{}\" color_targets=[",
+                pass.label()
+            )
+            .expect("writing to a String cannot fail");
+            write_texture_ids(output, pass.color_targets());
+            output.push(']');
+            if let Some(depth_target) = pass.depth_target() {
+                write!(output, " depth_target={}", depth_target.raw())
+                    .expect("writing to a String cannot fail");
+            }
+        }
+        RenderCommand::EndRenderPass => output.push_str("end_render_pass"),
+        RenderCommand::SetPipeline(pipeline) => {
+            write!(output, "set_pipeline pipeline={}", pipeline.raw())
+                .expect("writing to a String cannot fail");
+        }
+        RenderCommand::SetBindGroup { slot, group } => {
+            write!(output, "set_bind_group slot={slot} group={}", group.raw())
+                .expect("writing to a String cannot fail");
+        }
+        RenderCommand::SetVertexBuffer { slot, buffer } => {
+            write!(
+                output,
+                "set_vertex_buffer slot={slot} buffer={}",
+                buffer.raw()
+            )
+            .expect("writing to a String cannot fail");
+        }
+        RenderCommand::SetIndexBuffer(buffer) => {
+            write!(output, "set_index_buffer buffer={}", buffer.raw())
+                .expect("writing to a String cannot fail");
+        }
+        RenderCommand::Draw(draw) => {
+            write!(
+                output,
+                "draw vertices={} instances={}",
+                draw.vertices(),
+                draw.instances()
+            )
+            .expect("writing to a String cannot fail");
+        }
+        RenderCommand::DrawIndexed(draw) => {
+            write!(
+                output,
+                "draw_indexed indices={} instances={}",
+                draw.indices(),
+                draw.instances()
+            )
+            .expect("writing to a String cannot fail");
+        }
+        RenderCommand::BeginComputePass(pass) => {
+            write!(output, "begin_compute_pass label=\"{}\"", pass.label())
+                .expect("writing to a String cannot fail");
+        }
+        RenderCommand::EndComputePass => output.push_str("end_compute_pass"),
+        RenderCommand::SetComputePipeline(pipeline) => {
+            write!(output, "set_compute_pipeline pipeline={}", pipeline.raw())
+                .expect("writing to a String cannot fail");
+        }
+        RenderCommand::SetComputeBindGroup { slot, group } => {
+            write!(
+                output,
+                "set_compute_bind_group slot={slot} group={}",
+                group.raw()
+            )
+            .expect("writing to a String cannot fail");
+        }
+        RenderCommand::Dispatch(dispatch) => {
+            write!(
+                output,
+                "dispatch workgroups={}x{}x{}",
+                dispatch.workgroups_x(),
+                dispatch.workgroups_y(),
+                dispatch.workgroups_z()
+            )
+            .expect("writing to a String cannot fail");
+        }
+    }
+}
+
+fn write_texture_ids(output: &mut String, textures: &[GpuTextureId]) {
+    for (index, texture) in textures.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        write!(output, "{}", texture.raw()).expect("writing to a String cannot fail");
     }
 }
 
@@ -2185,10 +2564,11 @@ impl DrawCall {
         self.instances
     }
 
-    fn validate(self, label: &str) -> Result<(), GraphicsResourceError> {
+    fn validate(self, label: &str, command: &'static str) -> Result<(), GraphicsResourceError> {
         if self.vertices == 0 || self.instances == 0 {
             return Err(GraphicsResourceError::EmptyDraw {
                 label: label.to_string(),
+                command,
             });
         }
         Ok(())
@@ -2214,10 +2594,11 @@ impl IndexedDrawCall {
         self.instances
     }
 
-    fn validate(self, label: &str) -> Result<(), GraphicsResourceError> {
+    fn validate(self, label: &str, command: &'static str) -> Result<(), GraphicsResourceError> {
         if self.indices == 0 || self.instances == 0 {
             return Err(GraphicsResourceError::EmptyDraw {
                 label: label.to_string(),
+                command,
             });
         }
         Ok(())
@@ -2252,10 +2633,11 @@ impl DispatchCall {
         self.workgroups_z
     }
 
-    fn validate(self, label: &str) -> Result<(), GraphicsResourceError> {
+    fn validate(self, label: &str, command: &'static str) -> Result<(), GraphicsResourceError> {
         if self.workgroups_x == 0 || self.workgroups_y == 0 || self.workgroups_z == 0 {
             return Err(GraphicsResourceError::EmptyDispatch {
                 label: label.to_string(),
+                command,
             });
         }
         Ok(())
@@ -2264,18 +2646,23 @@ impl DispatchCall {
 
 fn validate_draw_state(
     label: &str,
+    command: &'static str,
     active_pass: Option<ActiveCommandPass<'_>>,
     pipeline_bound: bool,
 ) -> Result<(), GraphicsResourceError> {
     if !matches!(active_pass, Some(ActiveCommandPass::Render(_))) {
         return Err(GraphicsResourceError::RenderPassNotActive {
             label: label.to_string(),
-            command: "draw",
+            command,
         });
     }
     if !pipeline_bound {
         return Err(GraphicsResourceError::DrawWithoutPipeline {
             label: label.to_string(),
+            command,
+            active_pass: active_pass
+                .map(|pass| pass.label().to_string())
+                .unwrap_or_default(),
         });
     }
     Ok(())
@@ -2283,18 +2670,23 @@ fn validate_draw_state(
 
 fn validate_dispatch_state(
     label: &str,
+    command: &'static str,
     active_pass: Option<ActiveCommandPass<'_>>,
     pipeline_bound: bool,
 ) -> Result<(), GraphicsResourceError> {
     if !matches!(active_pass, Some(ActiveCommandPass::Compute(_))) {
         return Err(GraphicsResourceError::ComputePassNotActive {
             label: label.to_string(),
-            command: "dispatch",
+            command,
         });
     }
     if !pipeline_bound {
         return Err(GraphicsResourceError::DispatchWithoutPipeline {
             label: label.to_string(),
+            command,
+            active_pass: active_pass
+                .map(|pass| pass.label().to_string())
+                .unwrap_or_default(),
         });
     }
     Ok(())
@@ -2413,6 +2805,7 @@ pub enum GraphicsResourceError {
         frame: FrameId,
         command_list: CommandListId,
         command: &'static str,
+        pipeline: SubmittedResource,
         slot: u32,
         bind_group: BindGroupId,
     },
@@ -2420,6 +2813,7 @@ pub enum GraphicsResourceError {
         frame: FrameId,
         command_list: CommandListId,
         command: &'static str,
+        pipeline: SubmittedResource,
         slot: u32,
         bind_group: BindGroupId,
         expected: BindGroupLayoutId,
@@ -2457,12 +2851,17 @@ pub enum GraphicsResourceError {
     },
     DrawWithoutPipeline {
         label: String,
+        command: &'static str,
+        active_pass: String,
     },
     DrawIndexedWithoutIndexBuffer {
         label: String,
+        command: &'static str,
+        active_pass: String,
     },
     EmptyDraw {
         label: String,
+        command: &'static str,
     },
     ComputePassAlreadyActive {
         label: String,
@@ -2478,9 +2877,12 @@ pub enum GraphicsResourceError {
     },
     DispatchWithoutPipeline {
         label: String,
+        command: &'static str,
+        active_pass: String,
     },
     EmptyDispatch {
         label: String,
+        command: &'static str,
     },
 }
 
@@ -2511,10 +2913,10 @@ mod tests {
         ComputePipelineDescriptor, ComputePipelineId, DispatchCall, DrawCall, FrameContext,
         FrameId, FrameSubmission, GpuBuffer, GpuBufferDescriptor, GpuBufferId, GpuTexture,
         GpuTextureDescriptor, GpuTextureId, GraphicsResourceCatalog, GraphicsResourceError,
-        IndexedDrawCall, RenderCommand, RenderCommandList, RenderPassDescriptor, ShaderModule,
-        ShaderModuleDescriptor, ShaderModuleId, ShaderSourceKind, ShaderStage, SubmittedResource,
-        SubmittedResourceUsage, SurfaceSize, SurfaceTarget, SurfaceTargetId, TextureFormat,
-        TextureSize, TextureUsage,
+        IndexedDrawCall, RenderCommand, RenderCommandList, RenderCommandListBuilder,
+        RenderPassDescriptor, ShaderModule, ShaderModuleDescriptor, ShaderModuleId,
+        ShaderSourceKind, ShaderStage, SubmittedResource, SubmittedResourceUsage, SurfaceSize,
+        SurfaceTarget, SurfaceTargetId, TextureFormat, TextureSize, TextureUsage,
     };
     use super::{
         PipelineShader, RenderPipeline, RenderPipelineDescriptor, RenderPipelineId,
@@ -2931,6 +3333,7 @@ mod tests {
                 frame: FrameId::new(143),
                 command_list: CommandListId::new(144),
                 command: "set_bind_group",
+                pipeline: SubmittedResource::RenderPipeline(pipeline.id()),
                 slot: 0,
                 bind_group: mismatched_group.id(),
                 expected: BindGroupLayoutId::new(137),
@@ -2970,6 +3373,7 @@ mod tests {
                 frame: FrameId::new(145),
                 command_list: CommandListId::new(146),
                 command: "set_bind_group",
+                pipeline: SubmittedResource::RenderPipeline(pipeline.id()),
                 slot: 1,
                 bind_group: compatible_group.id(),
             }
@@ -3654,6 +4058,8 @@ mod tests {
             .unwrap_err(),
             GraphicsResourceError::DrawWithoutPipeline {
                 label: "draw_without_pipeline".to_string(),
+                command: "draw",
+                active_pass: "main".to_string(),
             }
         );
         assert_eq!(
@@ -3686,6 +4092,7 @@ mod tests {
             .unwrap_err(),
             GraphicsResourceError::EmptyDraw {
                 label: "empty_draw".to_string(),
+                command: "draw",
             }
         );
         assert_eq!(
@@ -3706,6 +4113,8 @@ mod tests {
             .unwrap_err(),
             GraphicsResourceError::DrawIndexedWithoutIndexBuffer {
                 label: "indexed_without_buffer".to_string(),
+                command: "draw_indexed",
+                active_pass: "main".to_string(),
             }
         );
     }
@@ -3743,6 +4152,8 @@ mod tests {
             .unwrap_err(),
             GraphicsResourceError::DispatchWithoutPipeline {
                 label: "dispatch_without_pipeline".to_string(),
+                command: "dispatch",
+                active_pass: "cull".to_string(),
             }
         );
         assert_eq!(
@@ -3771,6 +4182,7 @@ mod tests {
             .unwrap_err(),
             GraphicsResourceError::EmptyDispatch {
                 label: "empty_dispatch".to_string(),
+                command: "dispatch",
             }
         );
         assert_eq!(
@@ -3786,6 +4198,238 @@ mod tests {
                 label: "compute_left_open".to_string(),
                 active_pass: "cull".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn render_command_list_builder_encodes_closed_render_and_compute_passes() {
+        let mut builder = RenderCommandListBuilder::new(CommandListId::new(170), "built_commands");
+        assert_eq!(builder.id(), CommandListId::new(170));
+        assert_eq!(builder.label(), "built_commands");
+        assert!(builder.commands().is_empty());
+
+        builder
+            .render_pass(
+                RenderPassDescriptor::new("main", [GpuTextureId::new(171)], None),
+                |pass| {
+                    assert!(pass.commands().is_empty());
+                    pass.set_pipeline(RenderPipelineId::new(172))
+                        .set_bind_group(0, BindGroupId::new(173))
+                        .set_vertex_buffer(0, GpuBufferId::new(174))
+                        .draw(DrawCall::new(6, 1))?
+                        .set_index_buffer(GpuBufferId::new(175))
+                        .draw_indexed(IndexedDrawCall::new(12, 2))?;
+                    Ok(())
+                },
+            )
+            .expect("render pass should encode");
+        builder
+            .compute_pass(ComputePassDescriptor::new("cull"), |pass| {
+                assert!(pass.commands().is_empty());
+                pass.set_pipeline(ComputePipelineId::new(176))
+                    .set_bind_group(0, BindGroupId::new(177))
+                    .dispatch(DispatchCall::new(2, 3, 1))?;
+                Ok(())
+            })
+            .expect("compute pass should encode");
+
+        let list = builder.finish().expect("builder should produce valid list");
+
+        assert_eq!(list.commands().len(), 13);
+        assert!(matches!(
+            list.commands()[0],
+            RenderCommand::BeginRenderPass(_)
+        ));
+        assert_eq!(list.commands()[7], RenderCommand::EndRenderPass);
+        assert!(matches!(
+            list.commands()[8],
+            RenderCommand::BeginComputePass(_)
+        ));
+        assert_eq!(list.commands()[12], RenderCommand::EndComputePass);
+    }
+
+    #[test]
+    fn render_command_list_builder_rejects_common_invalid_render_states() {
+        assert_eq!(
+            RenderCommandList::builder(CommandListId::new(178), "empty_builder")
+                .finish()
+                .unwrap_err(),
+            GraphicsResourceError::EmptyCommandList {
+                label: "empty_builder".to_string(),
+            }
+        );
+
+        let mut missing_target =
+            RenderCommandListBuilder::new(CommandListId::new(179), "missing_target");
+        assert_eq!(
+            missing_target
+                .render_pass(RenderPassDescriptor::new("main", [], None), |_| Ok(()))
+                .unwrap_err(),
+            GraphicsResourceError::MissingRenderPassTarget {
+                label: "main".to_string(),
+            }
+        );
+        assert!(missing_target.commands().is_empty());
+
+        let mut draw_without_pipeline =
+            RenderCommandListBuilder::new(CommandListId::new(180), "draw_without_pipeline");
+        assert_eq!(
+            draw_without_pipeline
+                .render_pass(
+                    RenderPassDescriptor::new("main", [GpuTextureId::new(181)], None),
+                    |pass| {
+                        pass.draw(DrawCall::new(3, 1))?;
+                        Ok(())
+                    },
+                )
+                .unwrap_err(),
+            GraphicsResourceError::DrawWithoutPipeline {
+                label: "draw_without_pipeline".to_string(),
+                command: "draw",
+                active_pass: "builder".to_string(),
+            }
+        );
+        assert!(draw_without_pipeline.commands().is_empty());
+
+        let mut indexed_without_buffer =
+            RenderCommandListBuilder::new(CommandListId::new(182), "indexed_without_buffer");
+        assert_eq!(
+            indexed_without_buffer
+                .render_pass(
+                    RenderPassDescriptor::new("main", [GpuTextureId::new(183)], None),
+                    |pass| {
+                        pass.set_pipeline(RenderPipelineId::new(184))
+                            .draw_indexed(IndexedDrawCall::new(3, 1))?;
+                        Ok(())
+                    },
+                )
+                .unwrap_err(),
+            GraphicsResourceError::DrawIndexedWithoutIndexBuffer {
+                label: "indexed_without_buffer".to_string(),
+                command: "draw_indexed",
+                active_pass: "builder".to_string(),
+            }
+        );
+        assert!(indexed_without_buffer.commands().is_empty());
+    }
+
+    #[test]
+    fn render_command_list_builder_rejects_common_invalid_compute_states() {
+        let mut dispatch_without_pipeline =
+            RenderCommandListBuilder::new(CommandListId::new(185), "dispatch_without_pipeline");
+        assert_eq!(
+            dispatch_without_pipeline
+                .compute_pass(ComputePassDescriptor::new("cull"), |pass| {
+                    pass.dispatch(DispatchCall::new(1, 1, 1))?;
+                    Ok(())
+                })
+                .unwrap_err(),
+            GraphicsResourceError::DispatchWithoutPipeline {
+                label: "dispatch_without_pipeline".to_string(),
+                command: "dispatch",
+                active_pass: "builder".to_string(),
+            }
+        );
+        assert!(dispatch_without_pipeline.commands().is_empty());
+
+        let mut empty_dispatch =
+            RenderCommandListBuilder::new(CommandListId::new(186), "empty_dispatch");
+        assert_eq!(
+            empty_dispatch
+                .compute_pass(ComputePassDescriptor::new("cull"), |pass| {
+                    pass.set_pipeline(ComputePipelineId::new(187))
+                        .dispatch(DispatchCall::new(1, 0, 1))?;
+                    Ok(())
+                })
+                .unwrap_err(),
+            GraphicsResourceError::EmptyDispatch {
+                label: "empty_dispatch".to_string(),
+                command: "dispatch",
+            }
+        );
+        assert!(empty_dispatch.commands().is_empty());
+    }
+
+    #[test]
+    fn render_command_list_debug_dump_is_stable() {
+        let mut builder = RenderCommandList::builder(CommandListId::new(188), "dumpable");
+        builder
+            .render_pass(
+                RenderPassDescriptor::new(
+                    "main",
+                    [GpuTextureId::new(189), GpuTextureId::new(190)],
+                    Some(GpuTextureId::new(191)),
+                ),
+                |pass| {
+                    pass.set_pipeline(RenderPipelineId::new(192))
+                        .set_bind_group(0, BindGroupId::new(193))
+                        .set_vertex_buffer(0, GpuBufferId::new(194))
+                        .draw(DrawCall::new(6, 1))?
+                        .set_index_buffer(GpuBufferId::new(195))
+                        .draw_indexed(IndexedDrawCall::new(12, 2))?;
+                    Ok(())
+                },
+            )
+            .expect("render pass should encode")
+            .compute_pass(ComputePassDescriptor::new("cull"), |pass| {
+                pass.set_pipeline(ComputePipelineId::new(196))
+                    .set_bind_group(1, BindGroupId::new(197))
+                    .dispatch(DispatchCall::new(2, 3, 4))?;
+                Ok(())
+            })
+            .expect("compute pass should encode");
+        let list = builder.finish().expect("command list should validate");
+
+        assert_eq!(
+            list.debug_dump(),
+            concat!(
+                "command_list id=188 label=\"dumpable\" commands=13\n",
+                "  0: begin_render_pass label=\"main\" color_targets=[189, 190] depth_target=191\n",
+                "  1: set_pipeline pipeline=192\n",
+                "  2: set_bind_group slot=0 group=193\n",
+                "  3: set_vertex_buffer slot=0 buffer=194\n",
+                "  4: draw vertices=6 instances=1\n",
+                "  5: set_index_buffer buffer=195\n",
+                "  6: draw_indexed indices=12 instances=2\n",
+                "  7: end_render_pass\n",
+                "  8: begin_compute_pass label=\"cull\"\n",
+                "  9: set_compute_pipeline pipeline=196\n",
+                "  10: set_compute_bind_group slot=1 group=197\n",
+                "  11: dispatch workgroups=2x3x4\n",
+                "  12: end_compute_pass\n",
+            )
+        );
+    }
+
+    #[test]
+    fn frame_submission_debug_dump_is_stable() {
+        let first = simple_render_command_list(198);
+        let mut builder = RenderCommandList::builder(CommandListId::new(199), "compute_only");
+        builder
+            .compute_pass(ComputePassDescriptor::new("cull"), |pass| {
+                pass.set_pipeline(ComputePipelineId::new(200))
+                    .dispatch(DispatchCall::new(1, 1, 1))?;
+                Ok(())
+            })
+            .expect("compute pass should encode");
+        let second = builder.finish().expect("command list should validate");
+        let submission = FrameSubmission::new(
+            FrameContext::new(
+                FrameId::new(201),
+                super::GraphicsDeviceId::new(202),
+                SurfaceTargetId::new(203),
+            ),
+            [first, second],
+        )
+        .expect("submission should validate");
+
+        assert_eq!(
+            submission.debug_dump(),
+            concat!(
+                "frame_submission frame=201 device=202 target=203 command_lists=2\n",
+                "  command_list id=198 label=\"simple\" commands=4\n",
+                "  command_list id=199 label=\"compute_only\" commands=4\n",
+            )
         );
     }
 

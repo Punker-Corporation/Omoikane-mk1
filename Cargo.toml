@@ -7,6 +7,7 @@ members = [
     "daikoku",
     "shinobi",
     "hikari",
+    "omoikane_app",
     "xtask",
 ]
 resolver = "2"

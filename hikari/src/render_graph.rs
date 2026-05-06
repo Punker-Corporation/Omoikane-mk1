@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fmt::{self, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PassId(usize);
@@ -246,6 +246,37 @@ impl RenderGraph {
         &self.passes
     }
 
+    pub fn debug_dump(&self) -> String {
+        let mut output = String::new();
+        writeln!(
+            output,
+            "render_graph imported=[{}] persistent=[{}] passes={}",
+            format_resources(&self.imported_resources),
+            format_resources(&self.persistent_resources),
+            self.passes.len()
+        )
+        .expect("writing to a String cannot fail");
+
+        for (index, pass) in self.passes.iter().enumerate() {
+            writeln!(
+                output,
+                "  pass {} \"{}\" after=[{}] reads=[{}] writes=[{}] create_transient=[{}] create_persistent=[{}] preserve=[{}] discard=[{}]",
+                index,
+                pass.name(),
+                format_pass_ids(pass.depends_on()),
+                format_resources(pass.reads()),
+                format_resources(pass.writes()),
+                format_resources(pass.transient_creates()),
+                format_resources(pass.persistent_creates()),
+                format_resources(pass.preserves()),
+                format_resources(pass.discards()),
+            )
+            .expect("writing to a String cannot fail");
+        }
+
+        output
+    }
+
     pub fn validate(&self) -> Result<GraphValidation, Vec<RenderGraphError>> {
         let mut errors = Vec::new();
         let mut live_resources = BTreeMap::<ResourceId, usize>::new();
@@ -411,6 +442,32 @@ impl GraphValidation {
     pub fn resource_lifetimes(&self) -> &[ResourceLifetime] {
         &self.resource_lifetimes
     }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = String::new();
+        writeln!(
+            output,
+            "graph_validation execution_order=[{}] resource_lifetimes={}",
+            format_pass_id_slice(&self.execution_order),
+            self.resource_lifetimes.len()
+        )
+        .expect("writing to a String cannot fail");
+
+        for lifetime in &self.resource_lifetimes {
+            writeln!(
+                output,
+                "  resource \"{}\" kind={} created_by={} discarded_by={} last_used_by={}",
+                lifetime.resource(),
+                lifetime.kind(),
+                format_optional_pass_id(lifetime.created_by()),
+                format_optional_pass_id(lifetime.discarded_by()),
+                format_optional_pass_id(lifetime.last_used_by()),
+            )
+            .expect("writing to a String cannot fail");
+        }
+
+        output
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,6 +506,54 @@ pub enum ResourceKind {
     Imported,
     Transient,
     Persistent,
+}
+
+impl fmt::Display for ResourceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Imported => f.write_str("imported"),
+            Self::Transient => f.write_str("transient"),
+            Self::Persistent => f.write_str("persistent"),
+        }
+    }
+}
+
+fn format_resources(resources: &BTreeSet<ResourceId>) -> String {
+    let mut output = String::new();
+    for (index, resource) in resources.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        write!(output, "{resource}").expect("writing to a String cannot fail");
+    }
+    output
+}
+
+fn format_pass_ids(passes: &BTreeSet<PassId>) -> String {
+    let mut output = String::new();
+    for (index, pass) in passes.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        write!(output, "{}", pass.index()).expect("writing to a String cannot fail");
+    }
+    output
+}
+
+fn format_pass_id_slice(passes: &[PassId]) -> String {
+    let mut output = String::new();
+    for (index, pass) in passes.iter().enumerate() {
+        if index > 0 {
+            output.push_str(", ");
+        }
+        write!(output, "{}", pass.index()).expect("writing to a String cannot fail");
+    }
+    output
+}
+
+fn format_optional_pass_id(pass: Option<PassId>) -> String {
+    pass.map(|pass| pass.index().to_string())
+        .unwrap_or_else(|| "none".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -877,6 +982,64 @@ mod tests {
         assert_eq!(lifetimes[2].created_by(), Some(PassId(0)));
         assert_eq!(lifetimes[2].discarded_by(), Some(PassId(1)));
         assert_eq!(lifetimes[2].last_used_by(), Some(PassId(1)));
+    }
+
+    #[test]
+    fn graph_debug_dump_is_stable() {
+        let mut graph = RenderGraph::new();
+        graph.import_resource("swapchain");
+        graph.declare_persistent_resource("history");
+        let gbuffer = graph.add_pass(
+            RenderPass::new("gbuffer")
+                .create_transient("color")
+                .write("color"),
+        );
+        graph.add_pass(
+            RenderPass::new("present")
+                .after(gbuffer)
+                .read("color")
+                .write("swapchain")
+                .preserve("history")
+                .discard("color"),
+        );
+
+        assert_eq!(
+            graph.debug_dump(),
+            concat!(
+                "render_graph imported=[swapchain] persistent=[history] passes=2\n",
+                "  pass 0 \"gbuffer\" after=[] reads=[] writes=[color] create_transient=[color] create_persistent=[] preserve=[] discard=[]\n",
+                "  pass 1 \"present\" after=[0] reads=[color] writes=[swapchain] create_transient=[] create_persistent=[] preserve=[history] discard=[color]\n",
+            )
+        );
+    }
+
+    #[test]
+    fn graph_validation_debug_dump_is_stable() {
+        let mut graph = RenderGraph::new();
+        graph.import_resource("swapchain");
+        graph.declare_persistent_resource("history");
+        graph.add_pass(
+            RenderPass::new("gbuffer")
+                .create_transient("color")
+                .write("color"),
+        );
+        graph.add_pass(
+            RenderPass::new("present")
+                .read("color")
+                .write("swapchain")
+                .preserve("history")
+                .discard("color"),
+        );
+
+        assert_eq!(
+            graph.validate().unwrap().debug_dump(),
+            concat!(
+                "graph_validation execution_order=[0, 1] resource_lifetimes=3\n",
+                "  resource \"swapchain\" kind=imported created_by=none discarded_by=none last_used_by=1\n",
+                "  resource \"history\" kind=persistent created_by=none discarded_by=none last_used_by=1\n",
+                "  resource \"color\" kind=transient created_by=0 discarded_by=1 last_used_by=1\n",
+            )
+        );
     }
 
     #[test]
