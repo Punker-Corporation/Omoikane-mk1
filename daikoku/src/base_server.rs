@@ -1,8 +1,14 @@
 use crate::{
-    EntityMessageType, FullInputCmdMessage, MsgEntity, OutboundMessage, actor_system::ActorSystem,
-    input_system::InputSystem, physics_system::PhysicsSystem, player_manager::PlayerManager,
-    server_entity_manager::ServerEntityManager, server_game_state_manager::ServerGameStateManager,
-    server_net_manager::ServerNetManager, transform_system::TransformSystem,
+    EntityMessageType, FullInputCmdMessage, MsgEntity, OutboundMessage,
+    actor_system::ActorSystem,
+    input_system::InputSystem,
+    physics_system::PhysicsSystem,
+    player_manager::PlayerManager,
+    server_entity_manager::ServerEntityManager,
+    server_game_state_manager::ServerGameStateManager,
+    server_net_manager::ServerNetManager,
+    status_endpoint::{HttpStatusRouteError, HttpStatusService, ServerStatusSnapshot},
+    transform_system::TransformSystem,
 };
 use butsuri::{Fixture, Joint};
 use jikan::GameTick;
@@ -16,6 +22,7 @@ use sekai::{
 pub struct ServerOptions {
     pub server_name: String,
     pub max_players: usize,
+    pub tick_rate: u16,
 }
 
 impl Default for ServerOptions {
@@ -23,6 +30,7 @@ impl Default for ServerOptions {
         Self {
             server_name: "Omoikane".to_string(),
             max_players: 32,
+            tick_rate: 60,
         }
     }
 }
@@ -543,6 +551,27 @@ impl DaikokuServer {
     pub fn current_tick(&self) -> GameTick {
         self.current_tick
     }
+
+    pub fn status_snapshot(&self) -> ServerStatusSnapshot {
+        ServerStatusSnapshot {
+            name: self.options.server_name.clone(),
+            state: self.state,
+            tick: self.current_tick,
+            tick_rate: self.options.tick_rate,
+            players: self.players.sessions().count(),
+            max_players: self.options.max_players,
+            queues: self.network.queue_stats(),
+        }
+    }
+
+    pub fn handle_status_http_request(
+        &self,
+        service: &mut HttpStatusService,
+        bytes: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<usize, HttpStatusRouteError> {
+        service.handle(&self.status_snapshot(), bytes, out)
+    }
 }
 
 #[cfg(test)]
@@ -567,6 +596,50 @@ mod tests {
         assert_eq!(server.take_outbox("u1").len(), 1);
         server.shutdown(Some("done".to_string()));
         assert_eq!(server.state(), ServerState::Stopped);
+    }
+
+    #[test]
+    fn base_server_reports_status_without_mutating_runtime() {
+        let mut server = DaikokuServer::new(ServerOptions {
+            server_name: "Omoikane Status".to_string(),
+            max_players: 64,
+            tick_rate: 120,
+        });
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        assert!(server.queue_player_list_request("u1"));
+        server.tick_update(0.016);
+
+        let snapshot = server.status_snapshot();
+        assert_eq!(snapshot.name, "Omoikane Status");
+        assert_eq!(snapshot.state, ServerState::Running);
+        assert_eq!(snapshot.tick, GameTick::FIRST);
+        assert_eq!(snapshot.tick_rate, 120);
+        assert_eq!(snapshot.players, 1);
+        assert_eq!(snapshot.max_players, 64);
+        assert_eq!(snapshot.queues.sessions, 1);
+        assert_eq!(server.current_tick(), GameTick::FIRST);
+    }
+
+    #[test]
+    fn base_server_serves_status_http_projection() {
+        let mut server = DaikokuServer::new(ServerOptions::default());
+        server.start();
+        assert!(server.connect_player("u1", "pedel"));
+        server.tick_update(0.016);
+
+        let mut service = crate::HttpStatusService::new();
+        let mut out = Vec::new();
+        let consumed = server
+            .handle_status_http_request(&mut service, b"GET /status HTTP/1.1\r\n\r\n", &mut out)
+            .expect("status response");
+        let response = std::str::from_utf8(&out).unwrap();
+
+        assert_eq!(consumed, 24);
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(response.contains("\"name\":\"Omoikane\""));
+        assert!(response.contains("\"state\":\"running\""));
+        assert!(response.contains("\"players\":1"));
     }
 
     #[test]
