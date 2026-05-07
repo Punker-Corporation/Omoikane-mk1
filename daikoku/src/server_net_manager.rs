@@ -1,4 +1,5 @@
 use crate::FullInputCmdMessage;
+use crate::status_endpoint::ServerQueueStats;
 use jikan::GameTick;
 use sekai::{EntityUid, GameState, MsgPlayerList};
 use std::collections::{HashMap, HashSet};
@@ -202,6 +203,16 @@ impl ServerNetManager {
             .push(OutboundMessage::PlayerList(list));
         true
     }
+
+    pub(crate) fn queue_stats(&self) -> ServerQueueStats {
+        ServerQueueStats {
+            sessions: self.channels.len(),
+            outbound_messages: self.outbox.values().map(Vec::len).sum(),
+            queued_inputs: self.inbound_inputs.values().map(Vec::len).sum(),
+            queued_entities: self.inbound_entities.values().map(Vec::len).sum(),
+            queued_player_list_requests: self.inbound_player_list_requests.values().sum(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -298,5 +309,6 @@ mod tests {
             net.take_outbox("u1").pop().unwrap(),
             OutboundMessage::PlayerList(_)
         ));
+        assert_eq!(net.queue_stats().sessions, 1);
     }
 }

@@ -457,6 +457,11 @@ transformar a base client/server em demo multiplayer real.
 
 Fatias:
 
+0. Criar nucleo HTTP/1 de status sem runtime externo. Concluido em
+   2026-05-07; `DaikokuServer::status_snapshot` projeta estado autoritativo e
+   `HttpStatusService` parseia `GET`/`HEAD` para `/status`, `/status.json`,
+   `/health` e `/healthz`, emitindo JSON direto para buffer reutilizavel.
+
 1. Definir transporte inicial.
    Pode comecar in-process/local loopback e depois UDP/QUIC/WebSocket.
 
