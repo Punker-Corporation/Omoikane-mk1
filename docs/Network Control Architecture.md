@@ -31,12 +31,15 @@ do servidor autoritativo. O fluxo de boot e:
 2. Criar `OmoikaneLaunchConfig`.
 3. Gerar `OmoikaneLaunchManifest`.
 4. Inicializar `DaikokuServer`.
-5. Imprimir o terminal Omoikane com IP overlay e endpoints.
-6. Subir `actix_web::HttpServer` com as rotas Omoikane.
+5. Abrir pool SQLx opcional para Postgres quando configurado.
+6. Imprimir o terminal Omoikane com IP overlay, SQL, metricas e endpoints.
+7. Subir loop de tick autoritativo.
+8. Subir `actix_web::HttpServer` com as rotas Omoikane.
 
 Esse terminal nao e apenas estetico. Ele e a primeira superficie operacional da
 engine, reunindo status local, status overlay, perfil de rack e plano de
-aceitacao em um lugar so.
+aceitacao em um lugar so. O `omoikane.exe` na raiz e o launcher precompilado
+para Windows, gerado do mesmo binario Rust.
 
 ## Overlay Fixo
 
@@ -64,6 +67,9 @@ fisica do tunel explicita e auditavel.
 - `/automation/junos/tools`: catalogo de operacoes NETCONF.
 - `/automation/junos/rpc/{tool}`: XML NETCONF gerado para uma ferramenta
   permitida.
+- `/database/status`: liveness SQLx quando banco esta configurado.
+- `/metrics`: metricas Prometheus-style.
+- `/grafana/dashboard.json`: dashboard JSON importavel em Grafana.
 
 ## Guardrails
 
@@ -75,6 +81,9 @@ fisica do tunel explicita e auditavel.
   invalido e referencia a device inexistente.
 - O overlay exige seed, nome, porta e chaves nao vazias antes de renderizar
   config.
+- URLs SQL sao redigidas no terminal e nos endpoints.
+- Grafana e tratado como formato de dashboard/observabilidade; codigo AGPL do
+  projeto Grafana nao e copiado para dentro da Omoikane.
 
 ## Proximos Cortes
 

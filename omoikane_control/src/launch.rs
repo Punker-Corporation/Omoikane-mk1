@@ -14,6 +14,8 @@ pub struct OmoikaneLaunchConfig {
     pub overlay_seed: String,
     pub overlay_enabled: bool,
     pub overlay_endpoint_hint: Option<String>,
+    pub database_url: Option<String>,
+    pub database_max_connections: u32,
     pub junos_host: String,
     pub junos_username: String,
 }
@@ -29,6 +31,8 @@ impl Default for OmoikaneLaunchConfig {
             overlay_seed: "omoikane-rack".to_string(),
             overlay_enabled: true,
             overlay_endpoint_hint: None,
+            database_url: None,
+            database_max_connections: 16,
             junos_host: "192.168.88.1".to_string(),
             junos_username: "netops".to_string(),
         }
@@ -93,6 +97,9 @@ impl OmoikaneLaunchConfig {
         }
         if self.tick_rate == 0 {
             return Err(LaunchConfigError::InvalidRate("tick_rate"));
+        }
+        if self.database_max_connections == 0 {
+            return Err(LaunchConfigError::InvalidCount("database_max_connections"));
         }
         Ok(())
     }
@@ -196,6 +203,18 @@ impl OmoikaneLaunchManifest {
         json::push_u16_field(out, "tick_rate", self.config.tick_rate, false);
         json::push_string_field(out, "overlay_seed", &self.config.overlay_seed, false);
         json::push_bool_field(out, "overlay_enabled", self.config.overlay_enabled, false);
+        json::push_bool_field(
+            out,
+            "database_enabled",
+            self.config.database_url.is_some(),
+            false,
+        );
+        json::push_usize_field(
+            out,
+            "database_max_connections",
+            self.config.database_max_connections as usize,
+            false,
+        );
         json::push_string_field(out, "junos_host", &self.config.junos_host, false);
         json::push_string_field(out, "junos_username", &self.config.junos_username, false);
         out.push('}');

@@ -31,9 +31,10 @@ A Omoikane ja possui uma base forte de runtime:
   local e ticks fixos sem janela.
 - `omoikane_control`: controle de rede Rust puro, manifesto de lancamento, IP
   overlay fixo, catalogo NETCONF e plano de automacao de rack.
-- `omoikane_web`: borda Actix Web, rotas de status/health e geracao de perfil
-  RouterOS para racks com RB2011, endpoints de manifesto e binario
-  `omoikane-server`.
+- `omoikane_web`: borda Actix Web, rotas de status/health, SQLx opcional,
+  terminal ANSI vivo, metricas Prometheus-style, dashboard JSON para Grafana,
+  geracao de perfil RouterOS para racks com RB2011, endpoints de manifesto e
+  binario `omoikane-server`.
 - `xtask`: verificacoes de layout, mapa arquitetural e regras de dependencia.
 
 O projeto esta mais proximo de um runtime multiplayer/simulacao do que de uma
@@ -490,6 +491,11 @@ Fatias:
      `DaikokuServer`, sobe Actix, imprime IP overlay fixo e expoe manifestos de
      lancamento, automacao e NETCONF.
 
+0.5. Criar launcher raiz e observabilidade operacional. Concluido em 2026-05-07
+     com `omoikane.exe` na raiz, loop de tick autoritativo, terminal ANSI vivo,
+     metricas `/metrics`, dashboard `/grafana/dashboard.json` e suporte SQLx
+     opcional para Postgres via `/database/status`.
+
 1. Definir transporte inicial.
    Pode comecar in-process/local loopback e depois UDP/QUIC/WebSocket.
 
@@ -775,8 +781,8 @@ Estado arquitetural:
 - hikari: renderer CPU-only, render graph, resources, command lists, pipelines,
   frame submissions e catalogo de validacao.
 - omoikane_control: launcher, overlay fixo, automacao de rack e NETCONF.
-- omoikane_web: integracao Actix Web, binario omoikane-server e perfil
-  RouterOS/RB2011.
+- omoikane_web: integracao Actix Web, binario omoikane-server, launcher raiz,
+  SQLx, observabilidade e perfil RouterOS/RB2011.
 - xtask: verify-layout, architecture-map e verify-architecture.
 
 Regras:
@@ -790,10 +796,11 @@ Regras:
 
 Proxima direcao recomendada:
 
-1. Adicionar configuracao TOML/JSON para bind, workers, rotas e perfil
+1. Adicionar configuracao TOML/JSON para bind, workers, rotas, SQLx e perfil
    RouterOS.
-2. Criar benchmark local para comparar `/health` e `/status` entre o codec
-   HTTP/1 minimo de `daikoku` e a borda Actix Web de `omoikane_web`.
+2. Criar benchmark local para comparar `/health`, `/status`, `/metrics` e
+   `/database/status` entre o codec HTTP/1 minimo de `daikoku` e a borda Actix
+   Web de `omoikane_web`.
 3. Adicionar backend opcional para aplicar perfis de overlay usando ferramentas
    legitimas ja instaladas pelo operador.
 4. Depois integrar renderer 2D real com backend isolado e feature-gated.
@@ -806,6 +813,8 @@ cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- architecture-map
 cargo test -p omoikane_control
 cargo test -p omoikane_web
+cargo run -p omoikane_web --bin omoikane-server -- --help
+.\omoikane.exe --help
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets -j1
 ```

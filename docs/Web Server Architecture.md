@@ -36,6 +36,9 @@ de simulacao, cliente, fisica ou renderer a conhecerem Actix.
 - `GET /automation/robot`
 - `GET /automation/junos/tools`
 - `GET /automation/junos/rpc/{tool}`
+- `GET /database/status`
+- `GET /metrics`
+- `GET /grafana/dashboard.json`
 
 O corpo de `/status` e produzido por `DaikokuServer::status_snapshot`, escrito
 pelo mesmo JSON estavel usado pelo nucleo HTTP/1 de `daikoku`. O Actix entra
@@ -63,6 +66,45 @@ cargo run -p omoikane_web --bin omoikane-server -- --name Omoikane --bind 0.0.0.
 O IP overlay e derivado de `overlay_seed + server_name` dentro de `100.104.0.0/16`.
 Isso da uma identidade estavel ao servidor sem depender de port forwarding. O
 tunel real ainda precisa de chaves e endpoint legitimos fornecidos pelo operador.
+
+O arquivo `omoikane.exe` na raiz e uma copia precompilada do launcher Rust para
+Windows. Ele existe para rodar a estrutura inteira com um comando direto, sem
+transformar a raiz do repositorio em pacote Cargo.
+
+## SQLx
+
+O launcher aceita:
+
+```powershell
+.\omoikane.exe --database-url postgres://user:pass@host/db
+```
+
+A integracao usa SQLx `0.8.6`, sem features default, com drivers tipados de
+Postgres. SQLite nao e habilitado neste corte para evitar carregar `libsqlite3`.
+MySQL/MariaDB tambem fica fora deste corte porque a cadeia atual do driver puxa
+um advisory de RSA sem patch seguro. Quando a URL de banco e fornecida, a
+Omoikane abre pool async, redige a senha no terminal e expoe `/database/status`
+com liveness `SELECT 1`.
+
+## Terminal e Observabilidade
+
+O terminal vivo usa ANSI SGR direto, sem dependencia de TUI. Ele limpa e
+redesenha o painel a cada segundo com:
+
+- estado autoritativo
+- tick e tick rate
+- jogadores e capacidade
+- uptime
+- requests HTTP
+- checks/erros SQL
+- URL local e URL publica overlay
+- sistema operacional, arquitetura, familia, PID e paralelismo visivel
+
+A rota `/metrics` emite texto Prometheus-style. A rota
+`/grafana/dashboard.json` gera um dashboard JSON importavel em Grafana com
+paineis para uptime, requests, tick, players, SQL errors e paralelismo. A
+Omoikane nao copia codigo do Grafana; ela produz uma interpretacao nativa do
+modelo de observabilidade para que o operador conecte a ferramenta que quiser.
 
 ## Automacao de Rack e NETCONF
 
@@ -105,8 +147,8 @@ politica de firewall e topologia real variam por rack.
 1. Expor configuracao TOML/JSON para bind address, workers e rotas ativas.
 2. Adicionar aplicacao real do perfil WireGuard quando houver backend de tunel
    legitimamente configurado no host.
-3. Adicionar endpoint de metrica textual sem alocar estado de simulacao.
-4. Criar benchmark local de `/health` e `/status` comparando:
+3. Criar benchmark local de `/health`, `/status`, `/metrics` e
+   `/database/status` comparando:
    - codec HTTP/1 minimo de `daikoku`
    - borda Actix Web de `omoikane_web`
 5. Adicionar um gerador `xtask routeros-rb2011-profile` para materializar o
