@@ -43,6 +43,15 @@ source, network operating system images, proprietary VPN clients, activators,
 cracked installers, short-link downloads or third-party binaries. Operators must
 provide legitimate credentials, keys, endpoints and device software.
 
+The SQL layer integrates SQLx as a Rust dependency. SQLx is licensed
+`MIT OR Apache-2.0`, matching the current dependency policy. This repository
+enables PostgreSQL support for the Omoikane server launcher and does not enable
+SQLite or MySQL/MariaDB in this cut.
+
+Grafana support is limited to generating metrics text and a dashboard JSON
+shape that can be imported into a Grafana deployment. Grafana itself is not
+vendored, embedded or redistributed by this repository.
+
 ## Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR

@@ -38,6 +38,20 @@ skip = [
     { name = "socket2", version = "0.5.10" },
     # socket2 0.5 keeps the older Windows bindings; the newer stack uses 0.61.
     { name = "windows-sys", version = "0.52.0" },
+    # SQLx 0.8 uses hashlink/hashbrown 0.15 while indexmap uses hashbrown 0.17.
+    { name = "hashbrown", version = "0.15.5" },
+    # SQLx Postgres pulls whoami/libredox while tokio/parking_lot use the older Redox syscall line.
+    { name = "redox_syscall", version = "0.7.5" },
+    # SQLx Postgres' etcetera/home stack still carries Windows bindings 0.48.
+    { name = "windows-sys", version = "0.48.0" },
+    { name = "windows-targets", version = "0.48.5" },
+    { name = "windows_aarch64_gnullvm", version = "0.48.5" },
+    { name = "windows_aarch64_msvc", version = "0.48.5" },
+    { name = "windows_i686_gnu", version = "0.48.5" },
+    { name = "windows_i686_msvc", version = "0.48.5" },
+    { name = "windows_x86_64_gnu", version = "0.48.5" },
+    { name = "windows_x86_64_gnullvm", version = "0.48.5" },
+    { name = "windows_x86_64_msvc", version = "0.48.5" },
 ]
 
 [sources]
