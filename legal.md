@@ -36,6 +36,13 @@ software licensed and distributed by MikroTik with RouterBOARD devices; no
 RouterOS binaries, packages or firmware images are vendored into this
 repository.
 
+The network-control layer is implemented as original Rust source in
+`omoikane_control`. It generates rack automation manifests, NETCONF RPC text and
+WireGuard-style overlay profiles, but it does not vendor Python automation
+source, network operating system images, proprietary VPN clients, activators,
+cracked installers, short-link downloads or third-party binaries. Operators must
+provide legitimate credentials, keys, endpoints and device software.
+
 ## Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR

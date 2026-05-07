@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 actix-web = { version = "4.13.0", default-features = false }
 daikoku = { path = "../daikoku", version = "0.1.0" }
+omoikane_control = { path = "../omoikane_control", version = "0.1.0" }
 
 [lib]
 path = "src/lib.rs"

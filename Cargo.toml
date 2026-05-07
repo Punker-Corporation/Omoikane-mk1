@@ -8,6 +8,7 @@ members = [
     "shinobi",
     "hikari",
     "omoikane_app",
+    "omoikane_control",
     "omoikane_web",
     "xtask",
 ]

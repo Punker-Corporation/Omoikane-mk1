@@ -622,11 +622,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "omoikane_control"
+version = "0.1.0"
+
+[[package]]
 name = "omoikane_web"
 version = "0.1.0"
 dependencies = [
  "actix-web",
  "daikoku",
+ "omoikane_control",
 ]
 
 [[package]]
