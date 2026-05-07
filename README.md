@@ -66,6 +66,12 @@ cargo run -p xtask -- web-smoke --host 127.0.0.1 --port 8080
 cargo run -p xtask -- web-bench --host 127.0.0.1 --port 8080 --path /status --requests 128
 ```
 
+Ao abrir `omoikane.exe` por duplo clique, o launcher tenta usar a porta `8080`.
+Se ela ja estiver ocupada e nenhuma porta tiver sido passada por `--port`, ele
+usa a primeira porta livre entre `8081` e `8099` e mostra o endereco no terminal.
+Em erro fatal, a janela permanece aberta ate Enter para que a mensagem possa ser
+lida.
+
 ## Servidor
 
 O launcher raiz e uma copia precompilada do binario Rust de servidor. Ele sobe

@@ -81,6 +81,11 @@ Campos aceitos:
 
 Argumentos de CLI aplicados depois de `--config` sobrescrevem o arquivo.
 
+Quando o launcher e aberto sem argumentos, o fluxo e amigavel para duplo
+clique: ele tenta `8080` e, se a porta estiver ocupada, procura automaticamente
+uma porta livre entre `8081` e `8099`. Se ainda assim houver falha fatal, a
+janela fica aberta ate Enter para exibir o erro.
+
 ## Overlay
 
 O IP overlay fixo e derivado de `overlay_seed + server_name` dentro de

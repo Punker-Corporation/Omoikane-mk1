@@ -7,16 +7,32 @@ use daikoku::{DaikokuServer, ServerOptions};
 use omoikane_control::OmoikaneLaunchConfig;
 use std::env;
 use std::io;
+use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 pub fn run_omoikane_server_from_env() -> io::Result<()> {
-    let config = parse_launch_args(env::args().skip(1))?;
-    run_omoikane_server(config)
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let allow_port_fallback = !args.iter().any(|arg| arg == "--port");
+    let config = parse_launch_args(args)?;
+    run_omoikane_server_with_port_fallback(config, allow_port_fallback)
 }
 
 pub fn run_omoikane_server(config: OmoikaneLaunchConfig) -> io::Result<()> {
+    run_omoikane_server_with_port_fallback(config, false)
+}
+
+fn run_omoikane_server_with_port_fallback(
+    mut config: OmoikaneLaunchConfig,
+    allow_port_fallback: bool,
+) -> io::Result<()> {
+    if let Some((requested, selected)) = select_runtime_port(&mut config, allow_port_fallback)? {
+        eprintln!(
+            "Porta {requested} ocupada; iniciando Omoikane em {selected}. Use --port <porta> para fixar uma porta."
+        );
+    }
+
     let manifest = config
         .build_manifest()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, format!("{err:?}")))?;
@@ -52,6 +68,33 @@ pub fn run_omoikane_server(config: OmoikaneLaunchConfig) -> io::Result<()> {
         .run()
         .await
     })
+}
+
+fn select_runtime_port(
+    config: &mut OmoikaneLaunchConfig,
+    allow_port_fallback: bool,
+) -> io::Result<Option<(u16, u16)>> {
+    match reserve_port(&config.bind_host, config.port) {
+        Ok(()) => Ok(None),
+        Err(err) if allow_port_fallback && err.kind() == io::ErrorKind::AddrInUse => {
+            let requested = config.port;
+            for candidate in 8081..=8099 {
+                if reserve_port(&config.bind_host, candidate).is_ok() {
+                    config.port = candidate;
+                    return Ok(Some((requested, candidate)));
+                }
+            }
+            Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "ports 8080..8099 are already in use",
+            ))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn reserve_port(bind_host: &str, port: u16) -> io::Result<()> {
+    TcpListener::bind((bind_host, port)).map(drop)
 }
 
 pub fn parse_launch_args(
@@ -200,6 +243,8 @@ fn print_help() {
     println!("  --database-max-connections <count>");
     println!("  --kaminari-host <host>");
     println!("  --kaminari-user <user>");
+    println!("double-click:");
+    println!("  without --port, Omoikane uses 8080 or the first free port from 8081..8099");
     println!("endpoints:");
     println!("  /status /launch /metrics /grakane/dashboard.json /database/status");
     println!("  /automation/mamori /automation/kaminari/tools /automation/michisuji/rb2011.rsc");
@@ -207,7 +252,9 @@ fn print_help() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_launch_args;
+    use super::{parse_launch_args, select_runtime_port};
+    use omoikane_control::OmoikaneLaunchConfig;
+    use std::net::TcpListener;
 
     #[test]
     fn launch_args_parse_sql_and_overlay_options() {
@@ -230,5 +277,20 @@ mod tests {
         assert_eq!(config.database_max_connections, 32);
         assert!(config.database_url.is_some());
         assert!(!config.overlay_enabled);
+    }
+
+    #[test]
+    fn default_port_falls_back_when_busy() {
+        let _guard = TcpListener::bind(("127.0.0.1", 8080)).ok();
+        let mut config = OmoikaneLaunchConfig {
+            bind_host: "127.0.0.1".to_string(),
+            port: 8080,
+            ..OmoikaneLaunchConfig::default()
+        };
+
+        let selected = select_runtime_port(&mut config, true).unwrap();
+
+        assert!(matches!(selected, Some((8080, 8081..=8099))));
+        assert!((8081..=8099).contains(&config.port));
     }
 }

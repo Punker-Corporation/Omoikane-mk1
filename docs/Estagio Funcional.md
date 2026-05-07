@@ -20,6 +20,8 @@ automacao de rack e validacao de endpoints.
 - Michisuji gera perfil RB2011 auditavel.
 - SQLx/PostgreSQL pode ser habilitado por `--database-url`.
 - Config TOML/JSON pode ser usada por `--config`.
+- Duplo clique no `omoikane.exe` usa fallback automatico de porta e preserva a
+  janela quando houver erro fatal.
 - `xtask` valida layout, arquitetura, smoke test, bench e perfis de rack.
 
 ## Contrato do Estagio Funcional
