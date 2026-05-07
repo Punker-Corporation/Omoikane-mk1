@@ -14,14 +14,21 @@ automacao de rack e validacao de endpoints.
 - `omoikane-server` continua sendo o binario Rust-fonte dentro de
   `omoikane_web`.
 - Hayate sobe a borda HTTP do servidor.
+- Mikado entrega console unico em `/` e `/console`.
 - Grakane gera painel JSON em `/grakane/dashboard.json`.
+- Grakane pode exigir Gmail administrador configurado no host.
+- DNS automatico Rust-native publica escolhas em `/network/dns`.
+- Anti-DDoS e Sentinel publicam postura em `/security/status` e
+  `/security/monitoring`.
 - Kaminari expoe catalogo NETCONF read-only por padrao.
 - Mamori expoe plano de checks e rollback.
 - Michisuji gera perfil RB2011 auditavel.
 - SQLx/PostgreSQL pode ser habilitado por `--database-url`.
 - Config TOML/JSON pode ser usada por `--config`.
 - Duplo clique no `omoikane.exe` usa fallback automatico de porta e preserva a
-  janela quando houver erro fatal.
+  janela quando houver erro fatal. Sem argumentos, ele tambem abre o terminal
+  Mikado para selecionar IP, DNS e Gmail administrador antes de subir o
+  servidor.
 - `xtask` valida layout, arquitetura, smoke test, bench e perfis de rack.
 
 ## Contrato do Estagio Funcional
@@ -34,6 +41,8 @@ O estagio funcional exige que qualquer mudanca mantenha:
 - documentacao em portugues quando a mudanca alterar comportamento;
 - validacoes locais antes de abrir PR;
 - rotas observacionais sem mutacao acidental de simulacao.
+- navegador deve receber console unico quando anunciar `Accept: text/html`;
+- automacao deve continuar recebendo JSON/Prometheus com `Accept` tecnico.
 
 ## Checklist de Operacao
 
@@ -47,6 +56,10 @@ Em outro terminal:
 cargo run -p xtask -- web-smoke --host 127.0.0.1 --port 8080
 cargo run -p xtask -- web-bench --host 127.0.0.1 --port 8080 --path /status --requests 128
 ```
+
+Abra `http://127.0.0.1:8080/` para operar a pagina unica. Abrir `/status`,
+`/metrics` ou `/grakane/dashboard.json` diretamente pelo navegador tambem deve
+cair no console, enquanto clientes tecnicos continuam recebendo os dados crus.
 
 ## Proximo Nivel
 

@@ -6,16 +6,20 @@ use actix_web::{App, HttpServer, web};
 use daikoku::{DaikokuServer, ServerOptions};
 use omoikane_control::OmoikaneLaunchConfig;
 use std::env;
-use std::io;
-use std::net::TcpListener;
+use std::io::{self, Write};
+use std::net::{TcpListener, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 pub fn run_omoikane_server_from_env() -> io::Result<()> {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    let interactive = args.is_empty() && env::var_os("OMOIKANE_SKIP_WIZARD").is_none();
     let allow_port_fallback = !args.iter().any(|arg| arg == "--port");
-    let config = parse_launch_args(args)?;
+    let mut config = parse_launch_args(args)?;
+    if interactive {
+        config = launch_interactive_terminal(config)?;
+    }
     run_omoikane_server_with_port_fallback(config, allow_port_fallback)
 }
 
@@ -139,6 +143,24 @@ pub fn parse_launch_args(
             "--kaminari-user" => {
                 config.kaminari_username = next_value(&mut args, "--kaminari-user")?
             }
+            "--public-dns" => config.public_dns_name = Some(next_value(&mut args, "--public-dns")?),
+            "--grakane-admin-gmail" => {
+                config.grakane_admin_gmail = Some(next_value(&mut args, "--grakane-admin-gmail")?)
+            }
+            "--anti-ddos" => config.anti_ddos_enabled = true,
+            "--no-anti-ddos" => config.anti_ddos_enabled = false,
+            "--anti-ddos-window" => {
+                config.anti_ddos_window_seconds = parse_u16(
+                    &next_value(&mut args, "--anti-ddos-window")?,
+                    "--anti-ddos-window",
+                )?
+            }
+            "--anti-ddos-max-requests" => {
+                config.anti_ddos_max_requests = parse_u32(
+                    &next_value(&mut args, "--anti-ddos-max-requests")?,
+                    "--anti-ddos-max-requests",
+                )?
+            }
             unknown => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -148,6 +170,109 @@ pub fn parse_launch_args(
         }
     }
     Ok(config)
+}
+
+fn launch_interactive_terminal(
+    mut config: OmoikaneLaunchConfig,
+) -> io::Result<OmoikaneLaunchConfig> {
+    println!("\x1b[2J\x1b[H\x1b[38;5;81mOmoikane Mikado Terminal\x1b[0m");
+    println!("Selecione o IP que vai receber o servidor.");
+    let hosts = available_bind_hosts(&config);
+    for (index, host) in hosts.iter().enumerate() {
+        println!("  [{index}] {host}");
+    }
+    let selected_host = read_index("IP", hosts.len(), 0)?;
+    config.bind_host = hosts[selected_host].clone();
+
+    let preview = config
+        .build_manifest()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, format!("{err:?}")))?;
+    println!();
+    println!("Selecione o DNS/identidade publica para substituir o IP nos links.");
+    for (index, choice) in preview.dns.choices.iter().enumerate() {
+        println!(
+            "  [{index}] {} -> {} ({}, ttl={}s)",
+            choice.label, choice.host, choice.record_type, choice.ttl_seconds
+        );
+    }
+    let selected_dns = read_index("DNS", preview.dns.choices.len(), 0)?;
+    config.public_dns_name = Some(preview.dns.choices[selected_dns].host.clone());
+
+    println!();
+    println!("Informe o Gmail administrador do Grakane nesta maquina host.");
+    loop {
+        let gmail = read_line("gmail")?;
+        if is_valid_gmail(&gmail) {
+            config.grakane_admin_gmail = Some(gmail.trim().to_ascii_lowercase());
+            break;
+        }
+        println!("Use um endereco @gmail.com valido para destravar o Grakane.");
+    }
+
+    println!();
+    println!(
+        "Firewall logico anti-DDoS: {} requisicoes/{}s",
+        config.anti_ddos_max_requests, config.anti_ddos_window_seconds
+    );
+    println!("Iniciando servidor Omoikane...");
+    Ok(config)
+}
+
+fn available_bind_hosts(config: &OmoikaneLaunchConfig) -> Vec<String> {
+    let mut hosts = Vec::new();
+    push_unique(&mut hosts, config.bind_host.clone());
+    push_unique(&mut hosts, "127.0.0.1".to_string());
+    push_unique(&mut hosts, "0.0.0.0".to_string());
+    if let Some(primary) = primary_lan_ip() {
+        push_unique(&mut hosts, primary);
+    }
+    hosts
+}
+
+fn primary_lan_ip() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn read_index(label: &str, len: usize, default: usize) -> io::Result<usize> {
+    loop {
+        let line = read_line(&format!("{label} [{default}]"))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return Ok(default.min(len.saturating_sub(1)));
+        }
+        if let Ok(index) = trimmed.parse::<usize>() {
+            if index < len {
+                return Ok(index);
+            }
+        }
+        println!("Escolha um numero entre 0 e {}.", len.saturating_sub(1));
+    }
+}
+
+fn read_line(label: &str) -> io::Result<String> {
+    print!("{label}> ");
+    io::stdout().flush()?;
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    Ok(line)
+}
+
+fn is_valid_gmail(value: &str) -> bool {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    !value.is_empty()
+        && !value.starts_with('@')
+        && !value.chars().any(char::is_whitespace)
+        && lower.ends_with("@gmail.com")
 }
 
 fn spawn_tick_loop(server: Arc<Mutex<DaikokuServer>>, tick_rate: u16) {
@@ -243,10 +368,16 @@ fn print_help() {
     println!("  --database-max-connections <count>");
     println!("  --kaminari-host <host>");
     println!("  --kaminari-user <user>");
+    println!("  --public-dns <host>");
+    println!("  --grakane-admin-gmail <gmail>");
+    println!("  --anti-ddos | --no-anti-ddos");
+    println!("  --anti-ddos-window <seconds>");
+    println!("  --anti-ddos-max-requests <count>");
     println!("double-click:");
+    println!("  without arguments, Omoikane opens the IP/DNS/Gmail terminal before launch");
     println!("  without --port, Omoikane uses 8080 or the first free port from 8081..8099");
     println!("endpoints:");
-    println!("  /status /launch /metrics /grakane/dashboard.json /database/status");
+    println!("  / /console /status /launch /metrics /grakane/dashboard.json /database/status");
     println!("  /automation/mamori /automation/kaminari/tools /automation/michisuji/rb2011.rsc");
 }
 
@@ -266,6 +397,12 @@ mod tests {
                 "postgres://omoikane:secret@db.local/game",
                 "--database-max-connections",
                 "32",
+                "--public-dns",
+                "rack.example",
+                "--grakane-admin-gmail",
+                "host@gmail.com",
+                "--anti-ddos-max-requests",
+                "1200",
                 "--no-overlay",
             ]
             .into_iter()
@@ -277,6 +414,12 @@ mod tests {
         assert_eq!(config.database_max_connections, 32);
         assert!(config.database_url.is_some());
         assert!(!config.overlay_enabled);
+        assert_eq!(config.public_dns_name.as_deref(), Some("rack.example"));
+        assert_eq!(
+            config.grakane_admin_gmail.as_deref(),
+            Some("host@gmail.com")
+        );
+        assert_eq!(config.anti_ddos_max_requests, 1200);
     }
 
     #[test]

@@ -1,9 +1,11 @@
+pub mod dns;
 mod json;
 pub mod kaminari;
 pub mod launch;
 pub mod mamori;
 pub mod overlay;
 
+pub use dns::{OmoikaneDnsChoice, OmoikaneDnsPlan};
 pub use kaminari::{
     KaminariControlError, KaminariDeviceProfile, KaminariMcpCatalog, KaminariMcpTool,
     KaminariOperation,

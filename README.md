@@ -13,7 +13,10 @@ Agora a Omoikane possui:
 - launcher raiz `omoikane.exe` para Windows;
 - binario Rust `omoikane-server` dentro de `omoikane_web`;
 - borda HTTP Hayate baseada em dependencia Rust versionada;
+- console unico Mikado em `/` e `/console`, com visual de terminal de rack;
 - painel Grakane em `/grakane/dashboard.json`;
+- DNS automatico Rust-native em `/network/dns`;
+- firewall logico anti-DDoS e sentinel de monitoramento em `/security/status`;
 - automacao Kaminari para catalogo NETCONF;
 - plano Mamori para aceitacao de rack;
 - gerador Michisuji para RB2011 em `/automation/michisuji/rb2011.rsc`;
@@ -67,10 +70,11 @@ cargo run -p xtask -- web-bench --host 127.0.0.1 --port 8080 --path /status --re
 ```
 
 Ao abrir `omoikane.exe` por duplo clique, o launcher tenta usar a porta `8080`.
-Se ela ja estiver ocupada e nenhuma porta tiver sido passada por `--port`, ele
-usa a primeira porta livre entre `8081` e `8099` e mostra o endereco no terminal.
-Em erro fatal, a janela permanece aberta ate Enter para que a mensagem possa ser
-lida.
+Sem argumentos, ele abre o terminal Mikado para escolher IP disponivel, DNS
+publico/local e Gmail administrador do Grakane. Se a porta ja estiver ocupada e
+nenhuma porta tiver sido passada por `--port`, ele usa a primeira porta livre
+entre `8081` e `8099` e mostra o endereco no terminal. Em erro fatal, a janela
+permanece aberta ate Enter para que a mensagem possa ser lida.
 
 ## Servidor
 
@@ -78,14 +82,18 @@ O launcher raiz e uma copia precompilada do binario Rust de servidor. Ele sobe
 a estrutura inteira, imprime o terminal da Omoikane e expoe:
 
 - `/health` e `/healthz`;
+- `/` e `/console`;
 - `/status` e `/status.json`;
 - `/launch` e `/launch.json`;
 - `/metrics`;
 - `/database/status`;
 - `/grakane/dashboard.json`;
+- `/network/dns`;
 - `/network/overlay`;
 - `/network/overlay/server.conf`;
 - `/network/overlay/peer.conf`;
+- `/security/status`;
+- `/security/monitoring`;
 - `/automation/mamori`;
 - `/automation/kaminari/tools`;
 - `/automation/kaminari/rpc/{tool}`;
@@ -100,7 +108,14 @@ Config TOML ou JSON pode ser carregada com:
 Campos aceitos: `server_name`, `bind_host`, `port`, `max_players`,
 `tick_rate`, `overlay_seed`, `overlay_enabled`, `overlay_endpoint_hint`,
 `database_url`, `database_max_connections`, `kaminari_host` e
-`kaminari_username`.
+`kaminari_username`, `public_dns_name`, `grakane_admin_gmail`,
+`anti_ddos_enabled`, `anti_ddos_window_seconds` e
+`anti_ddos_max_requests`.
+
+Quando `/status`, `/metrics`, `/launch` ou `/grakane/dashboard.json` sao
+abertos por navegador com `Accept: text/html`, Hayate entrega o console unico.
+Clientes tecnicos continuam recebendo JSON ou texto Prometheus ao pedir
+`application/json` ou `text/plain`.
 
 ## Documentacao
 

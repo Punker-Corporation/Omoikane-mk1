@@ -1,3 +1,4 @@
+use crate::dns::OmoikaneDnsPlan;
 use crate::json;
 use crate::kaminari::{KaminariDeviceProfile, KaminariMcpCatalog};
 use crate::mamori::MamoriPlan;
@@ -18,6 +19,11 @@ pub struct OmoikaneLaunchConfig {
     pub database_max_connections: u32,
     pub kaminari_host: String,
     pub kaminari_username: String,
+    pub public_dns_name: Option<String>,
+    pub grakane_admin_gmail: Option<String>,
+    pub anti_ddos_enabled: bool,
+    pub anti_ddos_window_seconds: u16,
+    pub anti_ddos_max_requests: u32,
 }
 
 impl Default for OmoikaneLaunchConfig {
@@ -35,6 +41,11 @@ impl Default for OmoikaneLaunchConfig {
             database_max_connections: 16,
             kaminari_host: "192.168.88.1".to_string(),
             kaminari_username: "netops".to_string(),
+            public_dns_name: None,
+            grakane_admin_gmail: None,
+            anti_ddos_enabled: true,
+            anti_ddos_window_seconds: 60,
+            anti_ddos_max_requests: 900,
         }
     }
 }
@@ -58,6 +69,12 @@ impl OmoikaneLaunchConfig {
             .as_ref()
             .map(|overlay| overlay.address.to_string())
             .unwrap_or_else(|| self.bind_host.clone());
+        let dns = OmoikaneDnsPlan::new(
+            &self.bind_host,
+            &public_address,
+            self.port,
+            self.public_dns_name.as_deref(),
+        );
         let kaminari_device = KaminariDeviceProfile::rack_default(
             "rack-core",
             &self.kaminari_host,
@@ -69,9 +86,10 @@ impl OmoikaneLaunchConfig {
                 bind_host: self.bind_host.clone(),
                 port: self.port,
                 local_status_url: self.local_status_url(),
-                public_status_url: format!("http://{public_address}:{}/status", self.port),
+                public_status_url: dns.access_url("/status"),
             },
             config: self.clone(),
+            dns,
             overlay,
             kaminari: KaminariMcpCatalog::rack_default(kaminari_device),
             mamori: MamoriPlan::rack_acceptance(public_address, &self.kaminari_host),
@@ -104,6 +122,15 @@ impl OmoikaneLaunchConfig {
         if self.database_max_connections == 0 {
             return Err(LaunchConfigError::InvalidCount("database_max_connections"));
         }
+        if self.anti_ddos_window_seconds == 0 {
+            return Err(LaunchConfigError::InvalidCount("anti_ddos_window_seconds"));
+        }
+        if self.anti_ddos_max_requests == 0 {
+            return Err(LaunchConfigError::InvalidCount("anti_ddos_max_requests"));
+        }
+        if let Some(gmail) = &self.grakane_admin_gmail {
+            validate_gmail(gmail)?;
+        }
         Ok(())
     }
 }
@@ -120,6 +147,7 @@ pub struct ServerEndpoint {
 pub struct OmoikaneLaunchManifest {
     pub config: OmoikaneLaunchConfig,
     pub endpoint: ServerEndpoint,
+    pub dns: OmoikaneDnsPlan,
     pub overlay: Option<OverlayFixedIpProfile>,
     pub kaminari: KaminariMcpCatalog,
     pub mamori: MamoriPlan,
@@ -164,6 +192,18 @@ impl OmoikaneLaunchManifest {
             .expect("writing terminal to String cannot fail");
         writeln!(out, " overlay status: {overlay_status}")
             .expect("writing terminal to String cannot fail");
+        writeln!(out, " dns selected  : {}", self.dns.selected_host)
+            .expect("writing terminal to String cannot fail");
+        writeln!(
+            out,
+            " grakane gmail : {}",
+            self.config
+                .grakane_admin_gmail
+                .as_deref()
+                .map(mask_gmail)
+                .unwrap_or_else(|| "not configured".to_string())
+        )
+        .expect("writing terminal to String cannot fail");
         writeln!(
             out,
             " kaminari profile : {} {}@{}",
@@ -197,6 +237,8 @@ impl OmoikaneLaunchManifest {
             false,
         );
         out.push('}');
+        json::push_field_name(out, "dns", false);
+        self.dns.write_json(out);
         json::push_field_name(out, "config", false);
         out.push('{');
         json::push_string_field(out, "server_name", &self.config.server_name, true);
@@ -225,6 +267,36 @@ impl OmoikaneLaunchManifest {
             &self.config.kaminari_username,
             false,
         );
+        if let Some(public_dns_name) = &self.config.public_dns_name {
+            json::push_string_field(out, "public_dns_name", public_dns_name, false);
+        } else {
+            json::push_field_name(out, "public_dns_name", false);
+            out.push_str("null");
+        }
+        json::push_bool_field(
+            out,
+            "grakane_admin_gmail_configured",
+            self.config.grakane_admin_gmail.is_some(),
+            false,
+        );
+        json::push_bool_field(
+            out,
+            "anti_ddos_enabled",
+            self.config.anti_ddos_enabled,
+            false,
+        );
+        json::push_usize_field(
+            out,
+            "anti_ddos_window_seconds",
+            self.config.anti_ddos_window_seconds as usize,
+            false,
+        );
+        json::push_usize_field(
+            out,
+            "anti_ddos_max_requests",
+            self.config.anti_ddos_max_requests as usize,
+            false,
+        );
         out.push('}');
         json::push_field_name(out, "overlay", false);
         if let Some(overlay) = &self.overlay {
@@ -243,6 +315,7 @@ impl OmoikaneLaunchManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchConfigError {
     EmptyField(&'static str),
+    InvalidGmail(&'static str),
     InvalidPort(&'static str),
     InvalidCount(&'static str),
     InvalidRate(&'static str),
@@ -254,6 +327,32 @@ fn validate_non_empty(field: &'static str, value: &str) -> Result<(), LaunchConf
     } else {
         Ok(())
     }
+}
+
+fn validate_gmail(value: &str) -> Result<(), LaunchConfigError> {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    if value.chars().any(char::is_whitespace)
+        || value.starts_with('@')
+        || !lower.ends_with("@gmail.com")
+    {
+        return Err(LaunchConfigError::InvalidGmail("grakane_admin_gmail"));
+    }
+    Ok(())
+}
+
+fn mask_gmail(value: &str) -> String {
+    let Some((name, domain)) = value.split_once('@') else {
+        return "configured".to_string();
+    };
+    let mut visible = String::new();
+    for ch in name.chars().take(2) {
+        visible.push(ch);
+    }
+    if visible.is_empty() {
+        visible.push('*');
+    }
+    format!("{visible}***@{domain}")
 }
 
 #[cfg(test)]

@@ -1,11 +1,14 @@
 mod config;
+mod console;
 mod launcher;
 mod metrics;
 mod michisuji;
+mod monitoring;
+mod security;
 mod sql;
 mod terminal;
 
-use actix_web::{HttpResponse, web};
+use actix_web::{HttpRequest, HttpResponse, web};
 use daikoku::{DaikokuServer, ServerStatusSnapshot};
 use omoikane_control::OmoikaneLaunchConfig;
 use std::sync::{Arc, Mutex};
@@ -22,6 +25,7 @@ pub use omoikane_control::{
     OmoikaneLaunchConfig as WebLaunchConfig, OmoikaneLaunchManifest, OverlayConfigError,
     OverlayFixedIpProfile, ServerEndpoint, stable_overlay_ip,
 };
+pub use security::OmoikaneSecurityState;
 pub use sql::OmoikaneSqlState;
 pub use terminal::{render_boot_panel, render_live_panel};
 
@@ -30,6 +34,7 @@ pub struct OmoikaneHayateState {
     server: Arc<Mutex<DaikokuServer>>,
     launch_manifest: Arc<OmoikaneLaunchManifest>,
     metrics: Arc<OmoikaneRuntimeMetrics>,
+    security: Arc<OmoikaneSecurityState>,
     sql: Option<OmoikaneSqlState>,
 }
 
@@ -51,10 +56,12 @@ impl OmoikaneHayateState {
         server: DaikokuServer,
         launch_manifest: OmoikaneLaunchManifest,
     ) -> Self {
+        let security = Arc::new(OmoikaneSecurityState::from_manifest(&launch_manifest));
         Self {
             server: Arc::new(Mutex::new(server)),
             launch_manifest: Arc::new(launch_manifest),
             metrics: Arc::new(OmoikaneRuntimeMetrics::default()),
+            security,
             sql: None,
         }
     }
@@ -84,6 +91,7 @@ impl OmoikaneHayateState {
     ) -> Self {
         Self {
             server,
+            security: Arc::new(OmoikaneSecurityState::from_manifest(&launch_manifest)),
             launch_manifest: Arc::new(launch_manifest),
             metrics: Arc::new(OmoikaneRuntimeMetrics::default()),
             sql,
@@ -109,6 +117,10 @@ impl OmoikaneHayateState {
         Arc::clone(&self.metrics)
     }
 
+    pub fn security(&self) -> Arc<OmoikaneSecurityState> {
+        Arc::clone(&self.security)
+    }
+
     pub fn sql(&self) -> Option<OmoikaneSqlState> {
         self.sql.clone()
     }
@@ -120,7 +132,9 @@ pub enum OmoikaneHayateError {
 }
 
 pub fn configure_omoikane_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/health", web::get().to(health))
+    cfg.route("/", web::get().to(console_home))
+        .route("/console", web::get().to(console_home))
+        .route("/health", web::get().to(health))
         .route("/healthz", web::get().to(health))
         .route("/status", web::get().to(status))
         .route("/status", web::head().to(status_head))
@@ -131,6 +145,7 @@ pub fn configure_omoikane_routes(cfg: &mut web::ServiceConfig) {
         .route("/launch.json", web::get().to(launch_manifest))
         .route("/launch.json", web::head().to(launch_manifest_head))
         .route("/network/overlay", web::get().to(overlay_manifest))
+        .route("/network/dns", web::get().to(dns_manifest))
         .route(
             "/network/overlay/server.conf",
             web::get().to(overlay_server_config),
@@ -150,6 +165,8 @@ pub fn configure_omoikane_routes(cfg: &mut web::ServiceConfig) {
             web::get().to(michisuji_rb2011_script),
         )
         .route("/database/status", web::get().to(database_status))
+        .route("/security/status", web::get().to(security_status))
+        .route("/security/monitoring", web::get().to(security_monitoring))
         .route("/metrics", web::get().to(metrics))
         .route("/grakane/dashboard.json", web::get().to(grakane_dashboard));
 }
@@ -160,8 +177,22 @@ pub async fn health() -> HttpResponse {
         .body(r#"{"ok":true}"#)
 }
 
-pub async fn status(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn console_home(req: HttpRequest, state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    console::console_response(&req, state.get_ref())
+}
+
+pub async fn status(req: HttpRequest, state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    if console::wants_console(&req) {
+        return console::console_response(&req, state.get_ref());
+    }
     match write_status_body(&state) {
         Ok(body) => HttpResponse::Ok()
             .content_type("application/json")
@@ -170,8 +201,11 @@ pub async fn status(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     }
 }
 
-pub async fn status_head(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn status_head(req: HttpRequest, state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     match write_status_body(&state) {
         Ok(body) => HttpResponse::Ok()
             .content_type("application/json")
@@ -181,16 +215,31 @@ pub async fn status_head(state: web::Data<OmoikaneHayateState>) -> HttpResponse 
     }
 }
 
-pub async fn launch_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn launch_manifest(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    if console::wants_console(&req) {
+        return console::console_response(&req, state.get_ref());
+    }
     let body = write_launch_body(&state);
     HttpResponse::Ok()
         .content_type("application/json")
         .body(body)
 }
 
-pub async fn launch_manifest_head(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn launch_manifest_head(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let body = write_launch_body(&state);
     HttpResponse::Ok()
         .content_type("application/json")
@@ -198,8 +247,14 @@ pub async fn launch_manifest_head(state: web::Data<OmoikaneHayateState>) -> Http
         .finish()
 }
 
-pub async fn overlay_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn overlay_manifest(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     let mut body = String::new();
     body.push('{');
@@ -215,8 +270,27 @@ pub async fn overlay_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResp
         .body(body)
 }
 
-pub async fn overlay_server_config(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn dns_manifest(req: HttpRequest, state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    let mut body = String::new();
+    manifest.dns.write_json(&mut body);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(body)
+}
+
+pub async fn overlay_server_config(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     let Some(overlay) = &manifest.overlay else {
         return HttpResponse::NotFound()
@@ -232,8 +306,14 @@ pub async fn overlay_server_config(state: web::Data<OmoikaneHayateState>) -> Htt
     }
 }
 
-pub async fn overlay_peer_config(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn overlay_peer_config(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     let Some(overlay) = &manifest.overlay else {
         return HttpResponse::NotFound()
@@ -249,8 +329,14 @@ pub async fn overlay_peer_config(state: web::Data<OmoikaneHayateState>) -> HttpR
     }
 }
 
-pub async fn mamori_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn mamori_manifest(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     let mut body = String::new();
     manifest.mamori.write_json(&mut body);
@@ -259,8 +345,14 @@ pub async fn mamori_manifest(state: web::Data<OmoikaneHayateState>) -> HttpRespo
         .body(body)
 }
 
-pub async fn kaminari_tools(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn kaminari_tools(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     let mut body = String::new();
     manifest.kaminari.write_json(&mut body);
@@ -270,10 +362,14 @@ pub async fn kaminari_tools(state: web::Data<OmoikaneHayateState>) -> HttpRespon
 }
 
 pub async fn kaminari_rpc(
+    req: HttpRequest,
     state: web::Data<OmoikaneHayateState>,
     tool: web::Path<String>,
 ) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     match manifest.kaminari.rpc_for_tool(&tool) {
         Ok(rpc) => HttpResponse::Ok().content_type("application/xml").body(rpc),
@@ -289,8 +385,14 @@ pub async fn kaminari_rpc(
     }
 }
 
-pub async fn michisuji_rb2011_script(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn michisuji_rb2011_script(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let manifest = state.launch_manifest();
     let server_address = manifest
         .overlay
@@ -310,8 +412,14 @@ pub async fn michisuji_rb2011_script(state: web::Data<OmoikaneHayateState>) -> H
     }
 }
 
-pub async fn database_status(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn database_status(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
     let Some(sql) = state.sql() else {
         return HttpResponse::Ok()
             .content_type("application/json")
@@ -336,8 +444,45 @@ pub async fn database_status(state: web::Data<OmoikaneHayateState>) -> HttpRespo
     }
 }
 
-pub async fn metrics(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn security_status(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let mut body = String::new();
+    state.security.write_json(&mut body);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(body)
+}
+
+pub async fn security_monitoring(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    let mut body = String::new();
+    monitoring::write_sentinel_json(&manifest, &state.security, &mut body);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(body)
+}
+
+pub async fn metrics(req: HttpRequest, state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    if console::wants_console(&req) {
+        return console::console_response(&req, state.get_ref());
+    }
     match state.status_snapshot() {
         Ok(snapshot) => {
             let manifest = state.launch_manifest();
@@ -345,14 +490,24 @@ pub async fn metrics(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
             state
                 .metrics
                 .write_prometheus(&snapshot, &manifest, state.sql.is_some(), &mut body);
+            state.security.write_prometheus(&mut body);
             HttpResponse::Ok().content_type("text/plain").body(body)
         }
         Err(error) => status_error_response(error),
     }
 }
 
-pub async fn grakane_dashboard(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+pub async fn grakane_dashboard(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
     state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    if console::wants_console(&req) {
+        return console::console_response(&req, state.get_ref());
+    }
     let mut body = String::new();
     state.metrics.write_grakane_dashboard(&mut body);
     HttpResponse::Ok()

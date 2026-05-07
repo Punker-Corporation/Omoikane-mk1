@@ -13,8 +13,11 @@ opacos ou firmware embutido.
 
 - `OverlayFixedIpProfile`: gera IP overlay fixo em `100.104.0.0/16`, configs
   WireGuard-style e URL publica de status.
+- `OmoikaneDnsPlan`: gera lista DNS/local/overlay para publicacao automatica
+  dos links.
 - `OmoikaneLaunchConfig` e `OmoikaneLaunchManifest`: descrevem bind, porta,
-  tick rate, jogadores, overlay, banco e automacao.
+  tick rate, jogadores, overlay, DNS, Gmail do Grakane, budget anti-DDoS,
+  banco e automacao.
 - `KaminariMcpCatalog`: cataloga operacoes NETCONF como ferramentas
   estruturadas e bloqueia escrita por padrao.
 - `MamoriPlan`: descreve dispositivos, checks, criticidade e rollback.
@@ -27,12 +30,15 @@ externos.
 
 1. Ler CLI e, opcionalmente, arquivo TOML/JSON.
 2. Criar `OmoikaneLaunchConfig`.
-3. Gerar `OmoikaneLaunchManifest`.
-4. Inicializar `DaikokuServer`.
-5. Abrir pool SQLx opcional para PostgreSQL.
-6. Imprimir terminal Omoikane com overlay, SQL, metricas e endpoints.
-7. Subir loop de tick autoritativo.
-8. Subir Hayate com as rotas Omoikane.
+3. Em duplo clique, abrir terminal Mikado para escolher IP, DNS e Gmail do
+   Grakane.
+4. Gerar `OmoikaneLaunchManifest`.
+5. Inicializar `DaikokuServer`.
+6. Abrir pool SQLx opcional para PostgreSQL.
+7. Imprimir terminal Omoikane com overlay, DNS, SQL, firewall, metricas e
+   endpoints.
+8. Subir loop de tick autoritativo.
+9. Subir Hayate com as rotas Omoikane.
 
 O `omoikane.exe` da raiz executa esse fluxo no Windows usando o mesmo binario
 Rust do crate web.
@@ -53,6 +59,7 @@ fornecidos pelo operador.
 ## Rotas de Controle
 
 - `/launch`: manifesto completo de lancamento.
+- `/network/dns`: plano DNS automatico e escolhas disponiveis.
 - `/network/overlay`: perfil overlay em JSON.
 - `/network/overlay/server.conf`: config WireGuard-style do lado servidor.
 - `/network/overlay/peer.conf`: bloco peer para cliente ou roteador.
@@ -62,8 +69,11 @@ fornecidos pelo operador.
   permitida.
 - `/automation/michisuji/rb2011.rsc`: script RB2011 revisavel.
 - `/database/status`: liveness SQLx quando banco esta configurado.
+- `/security/status`: budget anti-DDoS e contadores do guardiao HTTP.
+- `/security/monitoring`: Sentinel com DNS watch e forense da maquina host.
 - `/metrics`: metricas de runtime.
 - `/grakane/dashboard.json`: painel Grakane em JSON.
+- `/` e `/console`: console unico Mikado para operacao humana.
 
 ## Comandos de Manutencao
 
@@ -85,12 +95,21 @@ cargo run -p xtask -- web-bench --host 127.0.0.1 --port 8080 --path /status --re
 - URLs SQL sao mascaradas no terminal e nos endpoints.
 - Grakane e formato de painel proprio da Omoikane, nao copia codigo externo de
   observabilidade.
+- Grakane pode ser protegido por `grakane_admin_gmail`; o console exige o Gmail
+  configurado no host para liberar a pagina.
+- O arquivo de firmware ou pacote de roteador que existir localmente nao entra
+  no manifesto, nao e convertido e nao e empacotado. Michisuji representa a
+  interface de configuracao em Rust puro.
 
 ## Marco Funcional
 
 Os cortes pendentes do controle de rede foram fechados neste marco:
 
 - arquivo TOML/JSON para configuracao do launcher;
+- terminal Mikado com selecao de IP, DNS e Gmail;
+- console unico em HTML para navegador;
+- plano DNS automatico Rust-native;
+- guardiao anti-DDoS e Sentinel;
 - gerador `xtask` de perfil Michisuji/RB2011;
 - smoke test ativo contra servidor local;
 - benchmark simples de endpoints HTTP;

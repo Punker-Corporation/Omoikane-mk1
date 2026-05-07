@@ -17,6 +17,11 @@ struct LaunchFileConfig {
     database_max_connections: Option<u32>,
     kaminari_host: Option<String>,
     kaminari_username: Option<String>,
+    public_dns_name: Option<String>,
+    grakane_admin_gmail: Option<String>,
+    anti_ddos_enabled: Option<bool>,
+    anti_ddos_window_seconds: Option<u16>,
+    anti_ddos_max_requests: Option<u32>,
 }
 
 pub fn load_launch_config_file(
@@ -86,6 +91,21 @@ fn apply_file_config(config: &mut OmoikaneLaunchConfig, file: LaunchFileConfig) 
     if let Some(value) = file.kaminari_username {
         config.kaminari_username = value;
     }
+    if let Some(value) = file.public_dns_name {
+        config.public_dns_name = Some(value);
+    }
+    if let Some(value) = file.grakane_admin_gmail {
+        config.grakane_admin_gmail = Some(value);
+    }
+    if let Some(value) = file.anti_ddos_enabled {
+        config.anti_ddos_enabled = value;
+    }
+    if let Some(value) = file.anti_ddos_window_seconds {
+        config.anti_ddos_window_seconds = value;
+    }
+    if let Some(value) = file.anti_ddos_max_requests {
+        config.anti_ddos_max_requests = value;
+    }
 }
 
 #[cfg(test)]
@@ -106,6 +126,9 @@ max_players = 96
 tick_rate = 120
 overlay_enabled = false
 kaminari_host = "192.0.2.1"
+public_dns_name = "rack.example"
+grakane_admin_gmail = "host@gmail.com"
+anti_ddos_max_requests = 1200
 "#,
         )
         .unwrap();
@@ -119,6 +142,12 @@ kaminari_host = "192.0.2.1"
         assert_eq!(config.tick_rate, 120);
         assert!(!config.overlay_enabled);
         assert_eq!(config.kaminari_host, "192.0.2.1");
+        assert_eq!(config.public_dns_name.as_deref(), Some("rack.example"));
+        assert_eq!(
+            config.grakane_admin_gmail.as_deref(),
+            Some("host@gmail.com")
+        );
+        assert_eq!(config.anti_ddos_max_requests, 1200);
     }
 
     #[test]

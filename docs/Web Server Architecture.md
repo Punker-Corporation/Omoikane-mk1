@@ -4,8 +4,8 @@ Data: 2026-05-07
 
 Este documento registra o corte funcional do servidor web da Omoikane. A
 direcao e manter `daikoku` como nucleo autoritativo e expor uma borda HTTP
-operacional chamada Hayate, com metricas, terminal vivo, configuracao por
-arquivo, SQL opcional e automacao de rack.
+operacional chamada Hayate, com metricas, console unico, terminal vivo,
+configuracao por arquivo, SQL opcional, seguranca e automacao de rack.
 
 ## Decisao Funcional
 
@@ -15,7 +15,8 @@ a identidade operacional da camada e Hayate. O runtime fica dividido assim:
 - `daikoku`: estado autoritativo, snapshot de status e codec HTTP/1 minimo.
 - `omoikane_control`: manifestos de lancamento, overlay fixo, Kaminari e
   Mamori.
-- `omoikane_web`: Hayate HTTP, launcher, terminal, SQLx, Grakane e Michisuji.
+- `omoikane_web`: Hayate HTTP, launcher, console Mikado, terminal, SQLx,
+  Grakane, guardiao de seguranca e Michisuji.
 - `omoikane_app`: host de aplicacao e cortes verticais locais.
 
 Essa divisao permite operacao real sem obrigar simulacao, cliente, fisica ou
@@ -25,11 +26,13 @@ renderer a conhecerem a borda web.
 
 `configure_omoikane_routes` registra:
 
+- `GET /` e `GET /console`
 - `GET /health` e `GET /healthz`
 - `GET /status` e `HEAD /status`
 - `GET /status.json` e `HEAD /status.json`
 - `GET /launch` e `HEAD /launch`
 - `GET /launch.json` e `HEAD /launch.json`
+- `GET /network/dns`
 - `GET /network/overlay`
 - `GET /network/overlay/server.conf`
 - `GET /network/overlay/peer.conf`
@@ -38,12 +41,20 @@ renderer a conhecerem a borda web.
 - `GET /automation/kaminari/rpc/{tool}`
 - `GET /automation/michisuji/rb2011.rsc`
 - `GET /database/status`
+- `GET /security/status`
+- `GET /security/monitoring`
 - `GET /metrics`
 - `GET /grakane/dashboard.json`
 
 O corpo de `/status` vem de `DaikokuServer::status_snapshot`, no mesmo JSON
 estavel usado pelo nucleo HTTP/1 de `daikoku`. Hayate entra como transporte e
 observabilidade, nao como segunda fonte de estado.
+
+Quando o cliente anuncia `Accept: text/html`, as rotas operacionais que seriam
+cruas no navegador entregam o console Mikado. O console une status, links, DNS,
+firewall, SQLx, Grakane, Sentinel, Michisuji e Kaminari em uma unica pagina.
+Requisicoes tecnicas com `Accept: application/json` ou `Accept: text/plain`
+continuam recebendo os formatos estaveis de automacao.
 
 ## Launcher
 
@@ -78,13 +89,29 @@ Campos aceitos:
 - `database_max_connections`
 - `kaminari_host`
 - `kaminari_username`
+- `public_dns_name`
+- `grakane_admin_gmail`
+- `anti_ddos_enabled`
+- `anti_ddos_window_seconds`
+- `anti_ddos_max_requests`
 
 Argumentos de CLI aplicados depois de `--config` sobrescrevem o arquivo.
 
 Quando o launcher e aberto sem argumentos, o fluxo e amigavel para duplo
-clique: ele tenta `8080` e, se a porta estiver ocupada, procura automaticamente
-uma porta livre entre `8081` e `8099`. Se ainda assim houver falha fatal, a
-janela fica aberta ate Enter para exibir o erro.
+clique: primeiro aparece o terminal Mikado com lista de IPs consultados na
+maquina, lista DNS derivada do plano de publicacao e prompt obrigatorio para o
+Gmail administrador do Grakane. Em seguida ele tenta `8080` e, se a porta
+estiver ocupada, procura automaticamente uma porta livre entre `8081` e `8099`.
+Se ainda assim houver falha fatal, a janela fica aberta ate Enter para exibir o
+erro.
+
+## DNS Automatico
+
+`OmoikaneDnsPlan` e a implementacao Rust-native do fluxo de DNS automatico. Ele
+mantem lista de escolhas de host, TTL, tipo de registro e dica de provedor, sem
+executar Python ou scripts externos. O `public_dns_name` escolhido vira a base
+dos links publicos do manifesto. Na ausencia de DNS explicito, a Omoikane usa o
+endereco overlay ou o bind local.
 
 ## Overlay
 
@@ -119,11 +146,21 @@ a cada segundo com:
 - requests HTTP;
 - checks e erros SQL;
 - URL local e URL publica overlay;
+- DNS ativo;
+- budget anti-DDoS;
 - sistema operacional, arquitetura, familia, PID e paralelismo visivel.
 
 `/metrics` emite texto compativel com coletores de metricas. `/grakane/dashboard.json`
 gera o painel Grakane da Omoikane: um dashboard JSON proprio, com uptime,
 requests, tick, players, erros SQL e paralelismo da maquina.
+
+## Seguranca e Sentinel
+
+O guardiao HTTP aplica budget anti-DDoS por cliente em janela configuravel e
+publica contadores em `/security/status` e `/metrics`. O Sentinel em
+`/security/monitoring` registra postura de seguranca, analise simples do DNS
+selecionado contra marcadores de phishing e inventario forense minimo da
+maquina host: sistema, arquitetura, PID e paralelismo visivel.
 
 ## Automacao de Rack
 
@@ -142,6 +179,10 @@ cargo run -p xtask -- michisuji-rb2011-profile --server 100.104.1.10 --port 8080
 
 O script deve ser revisado antes de producao, porque enderecos, interfaces,
 politicas e topologia variam por rack.
+
+No console Mikado, os comandos `routeros` e `juniper` mostram a interface
+Rust-native de Michisuji e Kaminari no mesmo terminal web, sem embutir firmware
+ou clientes externos.
 
 ## Ferramentas de Validacao
 
