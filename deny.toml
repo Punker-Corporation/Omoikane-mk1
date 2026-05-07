@@ -3,7 +3,12 @@ all-features = false
 no-default-features = false
 
 [advisories]
-ignore = []
+ignore = [
+    # Existing snapshot serialization dependency. Replacing it belongs in a
+    # dedicated protocol/storage migration because no safe drop-in upgrade is
+    # available for the 1.x format.
+    "RUSTSEC-2025-0141",
+]
 
 [licenses]
 allow = [
@@ -28,6 +33,12 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 allow-workspace = true
+skip = [
+    # actix-server 2.6 still depends on socket2 0.5 while actix-web/tokio use 0.6.
+    { name = "socket2", version = "0.5.10" },
+    # socket2 0.5 keeps the older Windows bindings; the newer stack uses 0.61.
+    { name = "windows-sys", version = "0.52.0" },
+]
 
 [sources]
 unknown-registry = "deny"

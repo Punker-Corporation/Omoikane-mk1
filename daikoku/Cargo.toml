@@ -5,10 +5,10 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-sekai = { path = "../sekai" }
-jikan = { path = "../jikan" }
-keisan = { path = "../keisan" }
-butsuri = { path = "../butsuri" }
+sekai = { path = "../sekai", version = "0.1.0" }
+jikan = { path = "../jikan", version = "0.1.0" }
+keisan = { path = "../keisan", version = "0.1.0" }
+butsuri = { path = "../butsuri", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
 

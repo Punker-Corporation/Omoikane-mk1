@@ -5,7 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-keisan = { path = "../keisan" }
+keisan = { path = "../keisan", version = "0.1.0" }
 
 [lib]
 path = "src/lib.rs"

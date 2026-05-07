@@ -5,8 +5,8 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-keisan = { path = "../keisan" }
-jikan = { path = "../jikan" }
+keisan = { path = "../keisan", version = "0.1.0" }
+jikan = { path = "../jikan", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 
 [lib]

@@ -1,0 +1,12 @@
+[package]
+name = "omoikane_web"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+actix-web = { version = "4.13.0", default-features = false }
+daikoku = { path = "../daikoku", version = "0.1.0" }
+
+[lib]
+path = "src/lib.rs"

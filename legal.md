@@ -26,6 +26,16 @@ dependencies should prefer permissive licenses such as MIT, Apache-2.0, BSD,
 Zlib or CC0, and must be reviewed before adding graphics backends, platform
 crates or asset pipeline tooling.
 
+The `omoikane_web` crate integrates Actix Web as a Rust dependency. The upstream
+Actix Web workspace is licensed `MIT OR Apache-2.0`, which fits the current
+dependency policy.
+
+RouterOS support in this repository is limited to generated configuration text
+and integration guidance for MikroTik devices. RouterOS itself is proprietary
+software licensed and distributed by MikroTik with RouterBOARD devices; no
+RouterOS binaries, packages or firmware images are vendored into this
+repository.
+
 ## Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR

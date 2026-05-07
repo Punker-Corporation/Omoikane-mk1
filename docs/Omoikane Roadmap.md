@@ -29,6 +29,8 @@ A Omoikane ja possui uma base forte de runtime:
   resources, command lists, pipelines e validacao de submit.
 - `omoikane_app`: host headless inicial para orquestrar servidor local, cliente
   local e ticks fixos sem janela.
+- `omoikane_web`: borda Actix Web, rotas de status/health e geracao de perfil
+  RouterOS para racks com RB2011.
 - `xtask`: verificacoes de layout, mapa arquitetural e regras de dependencia.
 
 O projeto esta mais proximo de um runtime multiplayer/simulacao do que de uma
@@ -96,6 +98,8 @@ Regras desejadas para fases futuras:
 
 - `omoikane_app` ou crate equivalente pode depender de `sekai`, `daikoku`,
   `shinobi` e `hikari`, mas nao deve ser dependencia de nenhum deles.
+- `omoikane_web` pode depender de `daikoku` e de dependencias web externas, mas
+  `daikoku` nao deve depender de Actix Web.
 - Asset pipeline deve ficar em crate proprio, por exemplo `kura`, sem puxar
   renderer para simulacao.
 - Plataforma/janela deve ficar isolada de `sekai` e `daikoku`.
@@ -462,6 +466,16 @@ Fatias:
    `HttpStatusService` parseia `GET`/`HEAD` para `/status`, `/status.json`,
    `/health` e `/healthz`, emitindo JSON direto para buffer reutilizavel.
 
+0.1. Soldar Actix Web como borda HTTP externa ao servidor autoritativo.
+     Concluido em 2026-05-07 com `omoikane_web`, que registra rotas
+     `/health`, `/healthz`, `/status` e `/status.json` sobre
+     `DaikokuServer::status_snapshot`.
+
+0.2. Adicionar suporte RouterOS/RB2011 sem vendorizar firmware. Concluido em
+     2026-05-07 com `RouterOsRackProfile`, gerando comandos para RouterOS
+     stable `7.22.2`, arquitetura `mipsbe`, NAT, FastTrack opcional e perfil
+     de bridge para rack.
+
 1. Definir transporte inicial.
    Pode comecar in-process/local loopback e depois UDP/QUIC/WebSocket.
 
@@ -746,6 +760,7 @@ Estado arquitetural:
 - shinobi: cliente, prediction/interpolation.
 - hikari: renderer CPU-only, render graph, resources, command lists, pipelines,
   frame submissions e catalogo de validacao.
+- omoikane_web: integracao Actix Web e perfil RouterOS/RB2011.
 - xtask: verify-layout, architecture-map e verify-architecture.
 
 Regras:
@@ -759,10 +774,12 @@ Regras:
 
 Proxima direcao recomendada:
 
-1. Finalizar a fase `hikari` CPU-only com RenderExtract, PreparedFrame,
-   QueuedFrame e builders ergonomicos.
-2. Depois criar um app host headless com loop server/client local.
-3. Depois integrar renderer 2D real com backend isolado e feature-gated.
+1. Criar binario `omoikane-web` usando `actix_web::HttpServer`.
+2. Adicionar configuracao TOML/JSON para bind, workers, rotas e perfil
+   RouterOS.
+3. Criar benchmark local para comparar `/health` e `/status` entre o codec
+   HTTP/1 minimo de `daikoku` e a borda Actix Web de `omoikane_web`.
+4. Depois integrar renderer 2D real com backend isolado e feature-gated.
 
 Validacao padrao:
 
@@ -770,6 +787,7 @@ cargo fmt --all -- --check
 cargo run -p xtask -- verify-layout
 cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- architecture-map
+cargo test -p omoikane_web
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets -j1
 ```

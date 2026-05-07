@@ -15,6 +15,7 @@ The current crates are:
 - `shinobi`: client-side state application, interpolation, prediction and local systems.
 - `hikari`: CPU-validated render graph, resource catalog, frame submissions, render/compute command lists, structural graphics handles and future graphics runtime boundary.
 - `omoikane_app`: headless app host for local server/client orchestration, sandbox entity spawning, CPU render extract and future vertical slices.
+- `omoikane_web`: Actix Web integration, server status routes and RouterOS rack profile generation.
 - `xtask`: repository maintenance checks for the Rust-only layout.
 
 ## Commands
@@ -24,6 +25,7 @@ cargo run -p xtask -- architecture-map
 cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- verify-layout
 cargo run -p omoikane_app --example headless_sandbox
+cargo test -p omoikane_web
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
@@ -38,7 +40,8 @@ the behavior compatible where useful while replacing legacy assumptions with
 idiomatic Rust APIs, better invariants and measurable performance wins.
 
 See `docs/Omoikane Roadmap.md` for the long-term implementation roadmap and
-continuity prompt, and `docs/Research Intake.md` for the current technical
+continuity prompt, `docs/Web Server Architecture.md` for the Actix/RouterOS
+web-server path, and `docs/Research Intake.md` for the current technical
 intake of papers, theses, talks and Rust repositories being evaluated for
 future Omoikane subsystems.
 

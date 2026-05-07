@@ -337,6 +337,11 @@ fn architecture_rules() -> &'static [ArchitectureRule] {
             reason: "server must not depend on client code",
         },
         ArchitectureRule {
+            source: "daikoku",
+            target: "omoikane_web",
+            reason: "authoritative server must not depend on web edge adapters",
+        },
+        ArchitectureRule {
             source: "sekai",
             target: "daikoku",
             reason: "shared state must not depend on server systems",
@@ -607,6 +612,22 @@ serde = "1"
             architecture_violations(&crates),
             vec![
                 "hikari has unexpected internal deps before extract integration: sekai (only keisan is allowed)"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn architecture_violations_reject_web_edge_back_edges() {
+        let crates = crates(vec![
+            ("daikoku", vec!["sekai", "omoikane_web"]),
+            ("omoikane_web", vec![]),
+        ]);
+
+        assert_eq!(
+            architecture_violations(&crates),
+            vec![
+                "daikoku must not depend on omoikane_web (authoritative server must not depend on web edge adapters)"
                     .to_string(),
             ]
         );
