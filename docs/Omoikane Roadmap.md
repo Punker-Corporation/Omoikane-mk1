@@ -29,8 +29,11 @@ A Omoikane ja possui uma base forte de runtime:
   resources, command lists, pipelines e validacao de submit.
 - `omoikane_app`: host headless inicial para orquestrar servidor local, cliente
   local e ticks fixos sem janela.
+- `omoikane_control`: controle de rede Rust puro, manifesto de lancamento, IP
+  overlay fixo, catalogo NETCONF e plano de automacao de rack.
 - `omoikane_web`: borda Actix Web, rotas de status/health e geracao de perfil
-  RouterOS para racks com RB2011.
+  RouterOS para racks com RB2011, endpoints de manifesto e binario
+  `omoikane-server`.
 - `xtask`: verificacoes de layout, mapa arquitetural e regras de dependencia.
 
 O projeto esta mais proximo de um runtime multiplayer/simulacao do que de uma
@@ -100,6 +103,8 @@ Regras desejadas para fases futuras:
   `shinobi` e `hikari`, mas nao deve ser dependencia de nenhum deles.
 - `omoikane_web` pode depender de `daikoku` e de dependencias web externas, mas
   `daikoku` nao deve depender de Actix Web.
+- `omoikane_control` deve permanecer Rust puro e isolado de Actix, `daikoku`,
+  firmware e scripts externos.
 - Asset pipeline deve ficar em crate proprio, por exemplo `kura`, sem puxar
   renderer para simulacao.
 - Plataforma/janela deve ficar isolada de `sekai` e `daikoku`.
@@ -476,6 +481,15 @@ Fatias:
      stable `7.22.2`, arquitetura `mipsbe`, NAT, FastTrack opcional e perfil
      de bridge para rack.
 
+0.3. Soldar controle de rede Rust nativo. Concluido em 2026-05-07 com
+     `omoikane_control`, incluindo `OverlayFixedIpProfile`,
+     `JunosMcpCatalog`, `NetworkRobotPlan` e `OmoikaneLaunchManifest`.
+
+0.4. Criar servidor executavel com terminal Omoikane. Concluido em 2026-05-07
+     com `cargo run -p omoikane_web --bin omoikane-server`, que inicializa
+     `DaikokuServer`, sobe Actix, imprime IP overlay fixo e expoe manifestos de
+     lancamento, automacao e NETCONF.
+
 1. Definir transporte inicial.
    Pode comecar in-process/local loopback e depois UDP/QUIC/WebSocket.
 
@@ -760,7 +774,9 @@ Estado arquitetural:
 - shinobi: cliente, prediction/interpolation.
 - hikari: renderer CPU-only, render graph, resources, command lists, pipelines,
   frame submissions e catalogo de validacao.
-- omoikane_web: integracao Actix Web e perfil RouterOS/RB2011.
+- omoikane_control: launcher, overlay fixo, automacao de rack e NETCONF.
+- omoikane_web: integracao Actix Web, binario omoikane-server e perfil
+  RouterOS/RB2011.
 - xtask: verify-layout, architecture-map e verify-architecture.
 
 Regras:
@@ -774,11 +790,12 @@ Regras:
 
 Proxima direcao recomendada:
 
-1. Criar binario `omoikane-web` usando `actix_web::HttpServer`.
-2. Adicionar configuracao TOML/JSON para bind, workers, rotas e perfil
+1. Adicionar configuracao TOML/JSON para bind, workers, rotas e perfil
    RouterOS.
-3. Criar benchmark local para comparar `/health` e `/status` entre o codec
+2. Criar benchmark local para comparar `/health` e `/status` entre o codec
    HTTP/1 minimo de `daikoku` e a borda Actix Web de `omoikane_web`.
+3. Adicionar backend opcional para aplicar perfis de overlay usando ferramentas
+   legitimas ja instaladas pelo operador.
 4. Depois integrar renderer 2D real com backend isolado e feature-gated.
 
 Validacao padrao:
@@ -787,6 +804,7 @@ cargo fmt --all -- --check
 cargo run -p xtask -- verify-layout
 cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- architecture-map
+cargo test -p omoikane_control
 cargo test -p omoikane_web
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets -j1

@@ -13,7 +13,10 @@ para uma pilha externa cedo demais.
 `daikoku` continua sendo a fonte autoritativa de estado. A fronteira fica assim:
 
 - `daikoku`: estado autoritativo, snapshot de status e codec HTTP/1 minimo.
-- `omoikane_web`: adaptador Actix Web, rotas HTTP e perfis RouterOS.
+- `omoikane_control`: manifestos de lancamento, overlay fixo, automacao de rack
+  e catalogo NETCONF.
+- `omoikane_web`: adaptador Actix Web, rotas HTTP, terminal de servidor e perfis
+  RouterOS.
 - `omoikane_app`: host de aplicacao e cortes verticais locais.
 
 Essa separacao permite usar Actix Web para operacao real sem obrigar os crates
@@ -26,10 +29,55 @@ de simulacao, cliente, fisica ou renderer a conhecerem Actix.
 - `GET /health` e `GET /healthz`
 - `GET /status` e `HEAD /status`
 - `GET /status.json` e `HEAD /status.json`
+- `GET /launch` e `GET /launch.json`
+- `GET /network/overlay`
+- `GET /network/overlay/server.conf`
+- `GET /network/overlay/peer.conf`
+- `GET /automation/robot`
+- `GET /automation/junos/tools`
+- `GET /automation/junos/rpc/{tool}`
 
 O corpo de `/status` e produzido por `DaikokuServer::status_snapshot`, escrito
 pelo mesmo JSON estavel usado pelo nucleo HTTP/1 de `daikoku`. O Actix entra
 como camada de transporte, nao como segunda fonte de estado.
+
+## Launcher de Servidor
+
+O binario `omoikane-server` sobe um `HttpServer` Actix real usando
+`DaikokuServer` como nucleo autoritativo. Ao iniciar, ele imprime um terminal
+Omoikane com:
+
+- endereco de bind local
+- URL local de status
+- IP overlay fixo deterministico
+- URL de status pelo overlay
+- perfil NETCONF de rack
+- plano de automacao de aceitacao
+
+Exemplo:
+
+```powershell
+cargo run -p omoikane_web --bin omoikane-server -- --name Omoikane --bind 0.0.0.0 --port 8080 --overlay-seed rack-a
+```
+
+O IP overlay e derivado de `overlay_seed + server_name` dentro de `100.104.0.0/16`.
+Isso da uma identidade estavel ao servidor sem depender de port forwarding. O
+tunel real ainda precisa de chaves e endpoint legitimos fornecidos pelo operador.
+
+## Automacao de Rack e NETCONF
+
+`omoikane_control` substitui scripts externos por contratos Rust:
+
+- `NetworkRobotPlan` descreve dispositivos, checks criticos e rollback.
+- `JunosMcpCatalog` lista operacoes NETCONF estruturadas para leitura,
+  validacao de commit e commit confirmado.
+- perfis read-only bloqueiam operacoes de escrita por padrao.
+- `/automation/junos/rpc/{tool}` materializa o XML NETCONF de operacoes
+  permitidas e retorna `403` para operacoes bloqueadas.
+- os manifestos sao expostos por rotas JSON para dashboards, CLI e testes.
+
+Esse desenho permite soldar automacao de rede a Omoikane sem transformar a
+engine em uma colecao de scripts Python ou contenedores auxiliares.
 
 ## RouterOS e RB2011
 
@@ -54,8 +102,9 @@ politica de firewall e topologia real variam por rack.
 
 ## Proximos Cortes
 
-1. Adicionar binario `omoikane-web` para subir `HttpServer` Actix de verdade.
-2. Expor configuracao TOML/JSON para bind address, workers e rotas ativas.
+1. Expor configuracao TOML/JSON para bind address, workers e rotas ativas.
+2. Adicionar aplicacao real do perfil WireGuard quando houver backend de tunel
+   legitimamente configurado no host.
 3. Adicionar endpoint de metrica textual sem alocar estado de simulacao.
 4. Criar benchmark local de `/health` e `/status` comparando:
    - codec HTTP/1 minimo de `daikoku`
@@ -70,6 +119,8 @@ politica de firewall e topologia real variam por rack.
 - Nao copiar codigo do repositorio Actix Web para dentro da Omoikane; usar
   dependencia versionada e auditar licenca.
 - Nao embutir RouterOS ou qualquer firmware proprietario.
+- Nao embutir ativadores, cracks, clientes VPN proprietarios ou downloads por
+  short-link; overlay deve ser configuracao Rust auditavel.
 - Nao deixar `daikoku` depender de Actix Web.
 - Todo endpoint deve ler snapshots ou comandos explicitos; nada de mutacao
   acidental de simulacao por rota observacional.
