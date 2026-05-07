@@ -1,39 +1,42 @@
-# Omoikane Server Status
+# Status do Servidor Omoikane
 
-The authoritative server crate is `daikoku`. Its network-facing state is built
-around explicit session records, outbound message queues, player state deltas,
-visibility filtering and acknowledged game-state ticks.
+O crate autoritativo de servidor e `daikoku`. O estado exposto para rede nasce
+de sessoes explicitas, filas de mensagens, deltas de estado por jogador,
+filtros de visibilidade e ticks reconhecidos.
 
-## Runtime State
+## Estado de Runtime
 
-Server state is intentionally split into small systems:
+O estado de servidor fica dividido em sistemas pequenos:
 
-- `DaikokuServer`: orchestration, tick lifecycle and message pumping.
-- `ServerNetManager`: inbound/outbound protocol queues.
-- `PlayerManager`: connection and session state.
-- `ServerGameStateManager`: full and incremental snapshots.
-- `PvsSystem`: per-player visibility sets.
-- `PhysicsSystem`, `MapSystem`, `TransformSystem`: authoritative simulation.
+- `DaikokuServer`: orquestracao, ciclo de tick e bombeamento de mensagens.
+- `ServerNetManager`: filas de entrada e saida do protocolo.
+- `PlayerManager`: conexoes e sessoes.
+- `ServerGameStateManager`: snapshots completos e incrementais.
+- `PvsSystem`: conjuntos de visibilidade por jogador.
+- `PhysicsSystem`, `MapSystem` e `TransformSystem`: simulacao autoritativa.
 
-## Status Contract
+## Contrato de Status
 
-A production status endpoint is a thin projection of server state, not a second
-source of truth. `DaikokuServer::status_snapshot` reads the authoritative
-runtime state and `HttpStatusService` turns that snapshot into a small HTTP/1
-response without pulling an async runtime or external web framework into
-`daikoku`.
+Um endpoint de status em producao e uma projecao fina do estado autoritativo,
+nao uma segunda fonte de verdade. `DaikokuServer::status_snapshot` le o estado
+do runtime e `HttpStatusService` transforma esse snapshot em HTTP/1 pequeno sem
+levar runtime async ou framework web para dentro de `daikoku`.
 
-`omoikane_web` mounts the same status contract on Actix Web. This keeps the
-authoritative server independent while giving the engine a production-shaped
-HTTP edge for rack tests, reverse proxies and future web tooling.
+`omoikane_web` monta o mesmo contrato na borda Hayate. Isso preserva a
+independencia do servidor autoritativo e, ao mesmo tempo, entrega uma superficie
+HTTP operacional para testes de rack, proxies reversos, observabilidade e
+ferramentas futuras.
 
-The first supported routes are:
+Rotas de status:
 
-- `GET /status` and `HEAD /status`: full status JSON.
-- `GET /status.json` and `HEAD /status.json`: same payload, explicit suffix.
-- `GET /health` and `GET /healthz`: minimal health JSON.
+- `GET /status` e `HEAD /status`: JSON completo.
+- `GET /status.json` e `HEAD /status.json`: mesmo payload, com sufixo
+  explicito.
+- `GET /health` e `GET /healthz`: JSON minimo de saude.
+- `GET /metrics`: metricas de runtime.
+- `GET /database/status`: estado do pool SQL quando configurado.
 
-The stable JSON shape starts small:
+Forma estavel inicial:
 
 ```json
 {
@@ -53,8 +56,6 @@ The stable JSON shape starts small:
 }
 ```
 
-Transport is deliberately still thin here. The implementation can be wrapped by
-TCP, QUIC-side metadata or an in-process host API as long as it reads from the
-same authoritative state and never mutates simulation data. This keeps the
-server path compatible with a future Omoikane-native runtime that can be
-measured directly against existing Rust web stacks.
+O transporte continua deliberadamente fino. Ele pode ser exposto por TCP, por
+metadados QUIC, por API in-process ou por Hayate, desde que leia o mesmo estado
+autoritativo e nao altere dados de simulacao por uma rota observacional.

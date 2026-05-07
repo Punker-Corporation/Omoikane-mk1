@@ -8,7 +8,10 @@ version.workspace = true
 actix-web = { version = "4.13.0", default-features = false }
 daikoku = { path = "../daikoku", version = "0.1.0" }
 omoikane_control = { path = "../omoikane_control", version = "0.1.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres"] }
+toml = "0.9"
 
 [lib]
 path = "src/lib.rs"

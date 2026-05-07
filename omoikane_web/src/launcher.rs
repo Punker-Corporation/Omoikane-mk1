@@ -1,6 +1,7 @@
+use crate::config::load_launch_config_file;
 use crate::sql::OmoikaneSqlState;
 use crate::terminal::{render_boot_panel, render_live_panel};
-use crate::{OmoikaneActixState, configure_omoikane_routes};
+use crate::{OmoikaneHayateState, configure_omoikane_routes};
 use actix_web::{App, HttpServer, web};
 use daikoku::{DaikokuServer, ServerOptions};
 use omoikane_control::OmoikaneLaunchConfig;
@@ -37,7 +38,7 @@ pub fn run_omoikane_server(config: OmoikaneLaunchConfig) -> io::Result<()> {
             .map_err(|err| io::Error::other(format!("sqlx connection failed: {err}")))?;
         println!("{}", render_boot_panel(&manifest, sql.as_ref(), workers));
 
-        let state = OmoikaneActixState::from_shared_with_runtime(shared_server, manifest, sql);
+        let state = OmoikaneHayateState::from_shared_with_runtime(shared_server, manifest, sql);
         spawn_terminal_monitor(state.clone());
 
         let data = web::Data::new(state);
@@ -64,6 +65,9 @@ pub fn parse_launch_args(
                 print_help();
                 std::process::exit(0);
             }
+            "--config" => {
+                config = load_launch_config_file(next_value(&mut args, "--config")?, config)?
+            }
             "--name" => config.server_name = next_value(&mut args, "--name")?,
             "--bind" => config.bind_host = next_value(&mut args, "--bind")?,
             "--port" => config.port = parse_u16(&next_value(&mut args, "--port")?, "--port")?,
@@ -88,8 +92,10 @@ pub fn parse_launch_args(
                     "--database-max-connections",
                 )?
             }
-            "--junos-host" => config.junos_host = next_value(&mut args, "--junos-host")?,
-            "--junos-user" => config.junos_username = next_value(&mut args, "--junos-user")?,
+            "--kaminari-host" => config.kaminari_host = next_value(&mut args, "--kaminari-host")?,
+            "--kaminari-user" => {
+                config.kaminari_username = next_value(&mut args, "--kaminari-user")?
+            }
             unknown => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -117,7 +123,7 @@ fn spawn_tick_loop(server: Arc<Mutex<DaikokuServer>>, tick_rate: u16) {
     });
 }
 
-fn spawn_terminal_monitor(state: OmoikaneActixState) {
+fn spawn_terminal_monitor(state: OmoikaneHayateState) {
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_secs(1));
@@ -181,6 +187,7 @@ fn parse_usize(value: &str, name: &str) -> io::Result<usize> {
 fn print_help() {
     println!("omoikane --name Omoikane --bind 0.0.0.0 --port 8080 --overlay-seed rack-a");
     println!("options:");
+    println!("  --config <omoikane.toml|omoikane.json>");
     println!("  --name <name>");
     println!("  --bind <host>");
     println!("  --port <port>");
@@ -191,10 +198,11 @@ fn print_help() {
     println!("  --no-overlay");
     println!("  --database-url <postgres-url>");
     println!("  --database-max-connections <count>");
-    println!("  --junos-host <host>");
-    println!("  --junos-user <user>");
+    println!("  --kaminari-host <host>");
+    println!("  --kaminari-user <user>");
     println!("endpoints:");
-    println!("  /status /launch /metrics /grafana/dashboard.json /database/status");
+    println!("  /status /launch /metrics /grakane/dashboard.json /database/status");
+    println!("  /automation/mamori /automation/kaminari/tools /automation/michisuji/rb2011.rsc");
 }
 
 #[cfg(test)]

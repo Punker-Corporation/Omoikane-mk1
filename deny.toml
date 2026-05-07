@@ -52,6 +52,8 @@ skip = [
     { name = "windows_x86_64_gnu", version = "0.48.5" },
     { name = "windows_x86_64_gnullvm", version = "0.48.5" },
     { name = "windows_x86_64_msvc", version = "0.48.5" },
+    # toml 0.9 keeps winnow 0.7 while toml_parser already moved to 1.0.
+    { name = "winnow", version = "0.7.15" },
 ]
 
 [sources]

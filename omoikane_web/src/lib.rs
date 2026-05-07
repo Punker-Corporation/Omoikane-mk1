@@ -1,6 +1,7 @@
+mod config;
 mod launcher;
 mod metrics;
-mod routeros;
+mod michisuji;
 mod sql;
 mod terminal;
 
@@ -9,29 +10,30 @@ use daikoku::{DaikokuServer, ServerStatusSnapshot};
 use omoikane_control::OmoikaneLaunchConfig;
 use std::sync::{Arc, Mutex};
 
+pub use config::load_launch_config_file;
 pub use launcher::{parse_launch_args, run_omoikane_server, run_omoikane_server_from_env};
 pub use metrics::OmoikaneRuntimeMetrics;
-pub use omoikane_control::{
-    JunosControlError, JunosDeviceProfile, JunosMcpCatalog, JunosMcpTool, JunosOperation,
-    LaunchConfigError, NetworkRobotCheck, NetworkRobotDevice, NetworkRobotPlan,
-    NetworkRobotPlanError, OmoikaneLaunchConfig as WebLaunchConfig, OmoikaneLaunchManifest,
-    OverlayConfigError, OverlayFixedIpProfile, ServerEndpoint, stable_overlay_ip,
+pub use michisuji::{
+    MICHISUJI_TARGET_VERSION, MichisujiRackProfile, MichisujiScriptError, RB2011_ARCHITECTURE,
 };
-pub use routeros::{
-    RB2011_ARCHITECTURE, ROUTEROS_STABLE_VERSION, RouterOsRackProfile, RouterOsScriptError,
+pub use omoikane_control::{
+    KaminariControlError, KaminariDeviceProfile, KaminariMcpCatalog, KaminariMcpTool,
+    KaminariOperation, LaunchConfigError, MamoriCheck, MamoriDevice, MamoriPlan, MamoriPlanError,
+    OmoikaneLaunchConfig as WebLaunchConfig, OmoikaneLaunchManifest, OverlayConfigError,
+    OverlayFixedIpProfile, ServerEndpoint, stable_overlay_ip,
 };
 pub use sql::OmoikaneSqlState;
 pub use terminal::{render_boot_panel, render_live_panel};
 
 #[derive(Clone)]
-pub struct OmoikaneActixState {
+pub struct OmoikaneHayateState {
     server: Arc<Mutex<DaikokuServer>>,
     launch_manifest: Arc<OmoikaneLaunchManifest>,
     metrics: Arc<OmoikaneRuntimeMetrics>,
     sql: Option<OmoikaneSqlState>,
 }
 
-impl OmoikaneActixState {
+impl OmoikaneHayateState {
     pub fn new(server: DaikokuServer) -> Self {
         let snapshot = server.status_snapshot();
         let launch_config = launch_config_from_snapshot(&snapshot);
@@ -92,11 +94,11 @@ impl OmoikaneActixState {
         Arc::clone(&self.server)
     }
 
-    pub fn status_snapshot(&self) -> Result<ServerStatusSnapshot, OmoikaneActixError> {
+    pub fn status_snapshot(&self) -> Result<ServerStatusSnapshot, OmoikaneHayateError> {
         self.server
             .lock()
             .map(|server| server.status_snapshot())
-            .map_err(|_| OmoikaneActixError::ServerLockPoisoned)
+            .map_err(|_| OmoikaneHayateError::ServerLockPoisoned)
     }
 
     pub fn launch_manifest(&self) -> Arc<OmoikaneLaunchManifest> {
@@ -113,7 +115,7 @@ impl OmoikaneActixState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OmoikaneActixError {
+pub enum OmoikaneHayateError {
     ServerLockPoisoned,
 }
 
@@ -137,12 +139,19 @@ pub fn configure_omoikane_routes(cfg: &mut web::ServiceConfig) {
             "/network/overlay/peer.conf",
             web::get().to(overlay_peer_config),
         )
-        .route("/automation/robot", web::get().to(robot_manifest))
-        .route("/automation/junos/tools", web::get().to(junos_tools))
-        .route("/automation/junos/rpc/{tool}", web::get().to(junos_rpc))
+        .route("/automation/mamori", web::get().to(mamori_manifest))
+        .route("/automation/kaminari/tools", web::get().to(kaminari_tools))
+        .route(
+            "/automation/kaminari/rpc/{tool}",
+            web::get().to(kaminari_rpc),
+        )
+        .route(
+            "/automation/michisuji/rb2011.rsc",
+            web::get().to(michisuji_rb2011_script),
+        )
         .route("/database/status", web::get().to(database_status))
         .route("/metrics", web::get().to(metrics))
-        .route("/grafana/dashboard.json", web::get().to(grafana_dashboard));
+        .route("/grakane/dashboard.json", web::get().to(grakane_dashboard));
 }
 
 pub async fn health() -> HttpResponse {
@@ -151,7 +160,7 @@ pub async fn health() -> HttpResponse {
         .body(r#"{"ok":true}"#)
 }
 
-pub async fn status(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn status(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     match write_status_body(&state) {
         Ok(body) => HttpResponse::Ok()
@@ -161,7 +170,7 @@ pub async fn status(state: web::Data<OmoikaneActixState>) -> HttpResponse {
     }
 }
 
-pub async fn status_head(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn status_head(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     match write_status_body(&state) {
         Ok(body) => HttpResponse::Ok()
@@ -172,7 +181,7 @@ pub async fn status_head(state: web::Data<OmoikaneActixState>) -> HttpResponse {
     }
 }
 
-pub async fn launch_manifest(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn launch_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let body = write_launch_body(&state);
     HttpResponse::Ok()
@@ -180,7 +189,7 @@ pub async fn launch_manifest(state: web::Data<OmoikaneActixState>) -> HttpRespon
         .body(body)
 }
 
-pub async fn launch_manifest_head(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn launch_manifest_head(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let body = write_launch_body(&state);
     HttpResponse::Ok()
@@ -189,7 +198,7 @@ pub async fn launch_manifest_head(state: web::Data<OmoikaneActixState>) -> HttpR
         .finish()
 }
 
-pub async fn overlay_manifest(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn overlay_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let manifest = state.launch_manifest();
     let mut body = String::new();
@@ -206,7 +215,7 @@ pub async fn overlay_manifest(state: web::Data<OmoikaneActixState>) -> HttpRespo
         .body(body)
 }
 
-pub async fn overlay_server_config(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn overlay_server_config(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let manifest = state.launch_manifest();
     let Some(overlay) = &manifest.overlay else {
@@ -223,7 +232,7 @@ pub async fn overlay_server_config(state: web::Data<OmoikaneActixState>) -> Http
     }
 }
 
-pub async fn overlay_peer_config(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn overlay_peer_config(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let manifest = state.launch_manifest();
     let Some(overlay) = &manifest.overlay else {
@@ -240,47 +249,68 @@ pub async fn overlay_peer_config(state: web::Data<OmoikaneActixState>) -> HttpRe
     }
 }
 
-pub async fn robot_manifest(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn mamori_manifest(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let manifest = state.launch_manifest();
     let mut body = String::new();
-    manifest.robot.write_json(&mut body);
+    manifest.mamori.write_json(&mut body);
     HttpResponse::Ok()
         .content_type("application/json")
         .body(body)
 }
 
-pub async fn junos_tools(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn kaminari_tools(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let manifest = state.launch_manifest();
     let mut body = String::new();
-    manifest.junos.write_json(&mut body);
+    manifest.kaminari.write_json(&mut body);
     HttpResponse::Ok()
         .content_type("application/json")
         .body(body)
 }
 
-pub async fn junos_rpc(
-    state: web::Data<OmoikaneActixState>,
+pub async fn kaminari_rpc(
+    state: web::Data<OmoikaneHayateState>,
     tool: web::Path<String>,
 ) -> HttpResponse {
     state.metrics.record_http_request();
     let manifest = state.launch_manifest();
-    match manifest.junos.rpc_for_tool(&tool) {
+    match manifest.kaminari.rpc_for_tool(&tool) {
         Ok(rpc) => HttpResponse::Ok().content_type("application/xml").body(rpc),
-        Err(JunosControlError::UnknownTool(_)) => HttpResponse::NotFound()
+        Err(KaminariControlError::UnknownTool(_)) => HttpResponse::NotFound()
             .content_type("application/json")
-            .body(r#"{"error":"unknown_junos_tool"}"#),
-        Err(JunosControlError::WriteBlocked(_)) => HttpResponse::Forbidden()
+            .body(r#"{"error":"unknown_kaminari_tool"}"#),
+        Err(KaminariControlError::WriteBlocked(_)) => HttpResponse::Forbidden()
             .content_type("application/json")
-            .body(r#"{"error":"junos_write_blocked"}"#),
+            .body(r#"{"error":"kaminari_write_blocked"}"#),
         Err(_) => HttpResponse::InternalServerError()
             .content_type("application/json")
-            .body(r#"{"error":"junos_catalog_invalid"}"#),
+            .body(r#"{"error":"kaminari_catalog_invalid"}"#),
     }
 }
 
-pub async fn database_status(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn michisuji_rb2011_script(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
+    state.metrics.record_http_request();
+    let manifest = state.launch_manifest();
+    let server_address = manifest
+        .overlay
+        .as_ref()
+        .map(|overlay| overlay.address.to_string())
+        .unwrap_or_else(|| manifest.endpoint.bind_host.clone());
+    let profile = MichisujiRackProfile::rb2011(server_address, manifest.endpoint.port)
+        .with_identity(format!("{}-rb2011", manifest.config.server_name));
+
+    match profile.render_script() {
+        Ok(script) => HttpResponse::Ok()
+            .content_type("text/plain; charset=utf-8")
+            .body(script),
+        Err(_) => HttpResponse::InternalServerError()
+            .content_type("application/json")
+            .body(r#"{"error":"michisuji_profile_invalid"}"#),
+    }
+}
+
+pub async fn database_status(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let Some(sql) = state.sql() else {
         return HttpResponse::Ok()
@@ -306,7 +336,7 @@ pub async fn database_status(state: web::Data<OmoikaneActixState>) -> HttpRespon
     }
 }
 
-pub async fn metrics(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn metrics(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     match state.status_snapshot() {
         Ok(snapshot) => {
@@ -321,32 +351,32 @@ pub async fn metrics(state: web::Data<OmoikaneActixState>) -> HttpResponse {
     }
 }
 
-pub async fn grafana_dashboard(state: web::Data<OmoikaneActixState>) -> HttpResponse {
+pub async fn grakane_dashboard(state: web::Data<OmoikaneHayateState>) -> HttpResponse {
     state.metrics.record_http_request();
     let mut body = String::new();
-    state.metrics.write_grafana_dashboard(&mut body);
+    state.metrics.write_grakane_dashboard(&mut body);
     HttpResponse::Ok()
         .content_type("application/json")
         .body(body)
 }
 
-fn write_status_body(state: &OmoikaneActixState) -> Result<Vec<u8>, OmoikaneActixError> {
+fn write_status_body(state: &OmoikaneHayateState) -> Result<Vec<u8>, OmoikaneHayateError> {
     let snapshot = state.status_snapshot()?;
     let mut body = Vec::with_capacity(512);
     snapshot.write_json(&mut body);
     Ok(body)
 }
 
-fn write_launch_body(state: &OmoikaneActixState) -> String {
+fn write_launch_body(state: &OmoikaneHayateState) -> String {
     let manifest = state.launch_manifest();
     let mut body = String::new();
     manifest.write_json(&mut body);
     body
 }
 
-fn status_error_response(error: OmoikaneActixError) -> HttpResponse {
+fn status_error_response(error: OmoikaneHayateError) -> HttpResponse {
     match error {
-        OmoikaneActixError::ServerLockPoisoned => HttpResponse::InternalServerError()
+        OmoikaneHayateError::ServerLockPoisoned => HttpResponse::InternalServerError()
             .content_type("application/json")
             .body(r#"{"error":"server_lock_poisoned"}"#),
     }
@@ -378,13 +408,13 @@ fn json_escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{OmoikaneActixState, configure_omoikane_routes};
+    use super::{OmoikaneHayateState, configure_omoikane_routes};
     use actix_web::{App, http::StatusCode, test, web};
     use daikoku::{DaikokuServer, ServerOptions};
 
     fn status_server() -> DaikokuServer {
         let mut server = DaikokuServer::new(ServerOptions {
-            server_name: "Omoikane Actix".to_string(),
+            server_name: "Omoikane Hayate".to_string(),
             max_players: 128,
             tick_rate: 144,
         });
@@ -395,9 +425,9 @@ mod tests {
     }
 
     #[test]
-    fn actix_routes_serve_daikoku_status() {
+    fn hayate_routes_serve_daikoku_status() {
         actix_web::rt::System::new().block_on(async {
-            let state = web::Data::new(OmoikaneActixState::new(status_server()));
+            let state = web::Data::new(OmoikaneHayateState::new(status_server()));
             let app = test::init_service(
                 App::new()
                     .app_data(state.clone())
@@ -411,16 +441,16 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let body = test::read_body(response).await;
             let body = std::str::from_utf8(&body).unwrap();
-            assert!(body.contains("\"name\":\"Omoikane Actix\""));
+            assert!(body.contains("\"name\":\"Omoikane Hayate\""));
             assert!(body.contains("\"tick_rate\":144"));
             assert!(body.contains("\"players\":1"));
         });
     }
 
     #[test]
-    fn actix_routes_serve_health_and_head_without_body() {
+    fn hayate_routes_serve_health_and_head_without_body() {
         actix_web::rt::System::new().block_on(async {
-            let state = web::Data::new(OmoikaneActixState::new(status_server()));
+            let state = web::Data::new(OmoikaneHayateState::new(status_server()));
             let app = test::init_service(
                 App::new()
                     .app_data(state.clone())
@@ -449,9 +479,9 @@ mod tests {
     }
 
     #[test]
-    fn actix_routes_serve_launch_and_overlay_manifests() {
+    fn hayate_routes_serve_launch_and_overlay_manifests() {
         actix_web::rt::System::new().block_on(async {
-            let state = web::Data::new(OmoikaneActixState::new(status_server()));
+            let state = web::Data::new(OmoikaneHayateState::new(status_server()));
             let app = test::init_service(
                 App::new()
                     .app_data(state.clone())
@@ -465,10 +495,10 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let body = test::read_body(response).await;
             let body = std::str::from_utf8(&body).unwrap();
-            assert!(body.contains("\"server_name\":\"Omoikane Actix\""));
+            assert!(body.contains("\"server_name\":\"Omoikane Hayate\""));
             assert!(body.contains("\"overlay\""));
-            assert!(body.contains("\"junos\""));
-            assert!(body.contains("\"robot\""));
+            assert!(body.contains("\"kaminari\""));
+            assert!(body.contains("\"mamori\""));
 
             let response = test::call_service(
                 &app,
@@ -486,7 +516,7 @@ mod tests {
             let response = test::call_service(
                 &app,
                 test::TestRequest::get()
-                    .uri("/automation/junos/rpc/junos.interface_terse")
+                    .uri("/automation/kaminari/rpc/kaminari.interface_terse")
                     .to_request(),
             )
             .await;
@@ -498,11 +528,35 @@ mod tests {
             let response = test::call_service(
                 &app,
                 test::TestRequest::get()
-                    .uri("/automation/junos/rpc/junos.commit_confirmed")
+                    .uri("/automation/kaminari/rpc/kaminari.commit_confirmed")
                     .to_request(),
             )
             .await;
             assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/automation/mamori")
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("\"name\":\"omoikane-rack-acceptance\""));
+
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/automation/michisuji/rb2011.rsc")
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("Omoikane Michisuji rack profile"));
 
             let response =
                 test::call_service(&app, test::TestRequest::get().uri("/metrics").to_request())
@@ -516,14 +570,14 @@ mod tests {
             let response = test::call_service(
                 &app,
                 test::TestRequest::get()
-                    .uri("/grafana/dashboard.json")
+                    .uri("/grakane/dashboard.json")
                     .to_request(),
             )
             .await;
             assert_eq!(response.status(), StatusCode::OK);
             let body = test::read_body(response).await;
             let body = std::str::from_utf8(&body).unwrap();
-            assert!(body.contains("\"title\":\"Omoikane Runtime\""));
+            assert!(body.contains("\"title\":\"Omoikane Grakane Runtime\""));
 
             let response = test::call_service(
                 &app,

@@ -1,62 +1,62 @@
-# Legal Info
+# Informacoes Legais
 
 ## Copyright
 
-The Authors retain all copyright to their respective work here submitted.
+Os autores preservam o copyright de seus respectivos trabalhos submetidos a este
+repositorio.
 
-## License
+## Licenca de Codigo
 
-All images, models, and rigging files in this repository are licensed under the
-Creative Commons Attribution-ShareAlike 3.0 United States license, unless
-otherwise stated. See `LICENSE-ASSETS.TXT`.
+Os crates Rust da Omoikane sao licenciados sob MIT, salvo indicacao explicita
+em contrario. Consulte `LICENSE-MIT.TXT`.
 
-## Code license
+## Licenca de Assets
 
-The Omoikane Rust crates are licensed under the MIT license unless otherwise
-stated. See `LICENSE-MIT.TXT`.
+Imagens, modelos e arquivos de rigging neste repositorio usam Creative Commons
+Attribution-ShareAlike 3.0 United States, salvo indicacao especifica. Consulte
+`LICENSE-ASSETS.TXT`.
 
-Historical license notices are preserved for inherited assets and repository
-history. See `LICENSE-GPLv3.TXT` where it applies to older inherited source
-materials in history.
+Avisos historicos foram preservados para materiais herdados e para o historico
+do repositorio. Consulte `LICENSE-GPLv3.TXT` quando aplicavel a materiais
+antigos mantidos por continuidade juridica.
 
-## Dependency policy
+## Politica de Dependencias
 
-Rust dependencies are checked with `cargo-deny` using `deny.toml`. New direct
-dependencies should prefer permissive licenses such as MIT, Apache-2.0, BSD,
-Zlib or CC0, and must be reviewed before adding graphics backends, platform
-crates or asset pipeline tooling.
+Dependencias Rust sao auditadas por `cargo-deny` usando `deny.toml`.
+Dependencias diretas devem preferir licencas permissivas como MIT,
+Apache-2.0, BSD, Zlib ou CC0. Qualquer nova dependencia de backend grafico,
+plataforma, banco, rede ou asset pipeline deve atualizar esta pagina.
 
-The `omoikane_web` crate integrates Actix Web as a Rust dependency. The upstream
-Actix Web workspace is licensed `MIT OR Apache-2.0`, which fits the current
-dependency policy.
+A borda HTTP Hayate usa uma dependencia Rust versionada para servir rotas. A
+licenca dessa dependencia e `MIT OR Apache-2.0`, compativel com a politica
+atual.
 
-RouterOS support in this repository is limited to generated configuration text
-and integration guidance for MikroTik devices. RouterOS itself is proprietary
-software licensed and distributed by MikroTik with RouterBOARD devices; no
-RouterOS binaries, packages or firmware images are vendored into this
-repository.
+A camada SQL usa SQLx como dependencia Rust. SQLx e licenciado como
+`MIT OR Apache-2.0`. Esta linha habilita PostgreSQL no launcher Omoikane e nao
+habilita SQLite, MySQL ou MariaDB neste corte.
 
-The network-control layer is implemented as original Rust source in
-`omoikane_control`. It generates rack automation manifests, NETCONF RPC text and
-WireGuard-style overlay profiles, but it does not vendor Python automation
-source, network operating system images, proprietary VPN clients, activators,
-cracked installers, short-link downloads or third-party binaries. Operators must
-provide legitimate credentials, keys, endpoints and device software.
+## Rede e Rack
 
-The SQL layer integrates SQLx as a Rust dependency. SQLx is licensed
-`MIT OR Apache-2.0`, matching the current dependency policy. This repository
-enables PostgreSQL support for the Omoikane server launcher and does not enable
-SQLite or MySQL/MariaDB in this cut.
+Michisuji gera texto de configuracao para equipamentos RB2011, mas nao
+vendoriza firmware, pacotes proprietarios ou imagens de sistema de rede. O
+operador deve fornecer software, credenciais, chaves e endpoints legitimos.
 
-Grafana support is limited to generating metrics text and a dashboard JSON
-shape that can be imported into a Grafana deployment. Grafana itself is not
-vendored, embedded or redistributed by this repository.
+Kaminari gera catalogo e RPC NETCONF em XML, com perfil read-only por padrao.
+Mamori descreve plano de aceitacao, checks e rollback como dados Rust
+estruturados. Nenhuma dessas camadas copia scripts externos, clientes
+proprietarios, ativadores, instaladores quebrados ou downloads por short-link.
 
-## Warranty
+## Grakane
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Grakane e o nome do painel Omoikane para interpretar metricas e produzir um
+dashboard JSON. O repositorio nao vendoriza, embute ou redistribui codigo de
+ferramentas externas de observabilidade. A Omoikane emite metricas e JSON
+proprios para que o operador conecte a ferramenta que escolher.
+
+## Garantia
+
+O SOFTWARE E FORNECIDO "COMO ESTA", SEM GARANTIA DE QUALQUER TIPO, EXPRESSA OU
+IMPLICITA, INCLUINDO, MAS NAO SE LIMITANDO A, GARANTIAS DE COMERCIALIZACAO,
+ADEQUACAO A UM FIM ESPECIFICO E NAO VIOLACAO. EM NENHUM CASO OS AUTORES OU
+DETENTORES DE COPYRIGHT SERAO RESPONSAVEIS POR QUALQUER RECLAMACAO, DANO OU
+OUTRA RESPONSABILIDADE DECORRENTE DO USO DO SOFTWARE.

@@ -35,7 +35,7 @@ pub fn render_boot_panel(
         "sqlx",
         sql.map(|sql| sql.redacted_url()).unwrap_or("disabled"),
     );
-    push_row(&mut out, "metrics", "/metrics + /grafana/dashboard.json");
+    push_row(&mut out, "metrics", "/metrics + /grakane/dashboard.json");
     push_footer(&mut out);
     out
 }

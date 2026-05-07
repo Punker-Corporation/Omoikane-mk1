@@ -118,10 +118,10 @@ impl OmoikaneRuntimeMetrics {
         .expect("writing metrics to String cannot fail");
     }
 
-    pub fn write_grafana_dashboard(&self, out: &mut String) {
+    pub fn write_grakane_dashboard(&self, out: &mut String) {
         out.clear();
         out.push_str(
-            r#"{"title":"Omoikane Runtime","timezone":"browser","schemaVersion":39,"version":1,"refresh":"1s","panels":["#,
+            r#"{"title":"Omoikane Grakane Runtime","timezone":"browser","schemaVersion":39,"version":1,"refresh":"1s","tags":["omoikane","grakane","functional-stage"],"panels":["#,
         );
         push_stat_panel(out, 1, "Uptime", "omoikane_uptime_seconds", 0, 0);
         out.push(',');
@@ -167,7 +167,7 @@ mod tests {
     use omoikane_control::OmoikaneLaunchConfig;
 
     #[test]
-    fn metrics_emit_prometheus_and_grafana_shapes() {
+    fn metrics_emit_prometheus_and_grakane_shapes() {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         server.tick_update(0.016);
@@ -181,8 +181,8 @@ mod tests {
         assert!(out.contains("omoikane_http_requests_total 1"));
         assert!(out.contains("omoikane_tick 1"));
 
-        metrics.write_grafana_dashboard(&mut out);
-        assert!(out.contains("\"title\":\"Omoikane Runtime\""));
+        metrics.write_grakane_dashboard(&mut out);
+        assert!(out.contains("\"title\":\"Omoikane Grakane Runtime\""));
         assert!(out.contains("omoikane_machine_parallelism"));
     }
 }

@@ -5,3 +5,4 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+omoikane_web = { path = "../omoikane_web", version = "0.1.0" }

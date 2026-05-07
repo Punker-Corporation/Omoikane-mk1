@@ -1,7 +1,7 @@
 use crate::json;
-use crate::junos::{JunosDeviceProfile, JunosMcpCatalog};
+use crate::kaminari::{KaminariDeviceProfile, KaminariMcpCatalog};
+use crate::mamori::MamoriPlan;
 use crate::overlay::OverlayFixedIpProfile;
-use crate::robot::NetworkRobotPlan;
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,8 +16,8 @@ pub struct OmoikaneLaunchConfig {
     pub overlay_endpoint_hint: Option<String>,
     pub database_url: Option<String>,
     pub database_max_connections: u32,
-    pub junos_host: String,
-    pub junos_username: String,
+    pub kaminari_host: String,
+    pub kaminari_username: String,
 }
 
 impl Default for OmoikaneLaunchConfig {
@@ -33,8 +33,8 @@ impl Default for OmoikaneLaunchConfig {
             overlay_endpoint_hint: None,
             database_url: None,
             database_max_connections: 16,
-            junos_host: "192.168.88.1".to_string(),
-            junos_username: "netops".to_string(),
+            kaminari_host: "192.168.88.1".to_string(),
+            kaminari_username: "netops".to_string(),
         }
     }
 }
@@ -58,8 +58,11 @@ impl OmoikaneLaunchConfig {
             .as_ref()
             .map(|overlay| overlay.address.to_string())
             .unwrap_or_else(|| self.bind_host.clone());
-        let junos_device =
-            JunosDeviceProfile::rack_default("rack-core", &self.junos_host, &self.junos_username);
+        let kaminari_device = KaminariDeviceProfile::rack_default(
+            "rack-core",
+            &self.kaminari_host,
+            &self.kaminari_username,
+        );
 
         Ok(OmoikaneLaunchManifest {
             endpoint: ServerEndpoint {
@@ -70,8 +73,8 @@ impl OmoikaneLaunchConfig {
             },
             config: self.clone(),
             overlay,
-            junos: JunosMcpCatalog::rack_default(junos_device),
-            robot: NetworkRobotPlan::rack_acceptance(public_address, &self.junos_host),
+            kaminari: KaminariMcpCatalog::rack_default(kaminari_device),
+            mamori: MamoriPlan::rack_acceptance(public_address, &self.kaminari_host),
         })
     }
 
@@ -87,8 +90,8 @@ impl OmoikaneLaunchConfig {
         validate_non_empty("server_name", &self.server_name)?;
         validate_non_empty("bind_host", &self.bind_host)?;
         validate_non_empty("overlay_seed", &self.overlay_seed)?;
-        validate_non_empty("junos_host", &self.junos_host)?;
-        validate_non_empty("junos_username", &self.junos_username)?;
+        validate_non_empty("kaminari_host", &self.kaminari_host)?;
+        validate_non_empty("kaminari_username", &self.kaminari_username)?;
         if self.port == 0 {
             return Err(LaunchConfigError::InvalidPort("port"));
         }
@@ -118,8 +121,8 @@ pub struct OmoikaneLaunchManifest {
     pub config: OmoikaneLaunchConfig,
     pub endpoint: ServerEndpoint,
     pub overlay: Option<OverlayFixedIpProfile>,
-    pub junos: JunosMcpCatalog,
-    pub robot: NetworkRobotPlan,
+    pub kaminari: KaminariMcpCatalog,
+    pub mamori: MamoriPlan,
 }
 
 impl OmoikaneLaunchManifest {
@@ -163,11 +166,11 @@ impl OmoikaneLaunchManifest {
             .expect("writing terminal to String cannot fail");
         writeln!(
             out,
-            " junos profile : {} {}@{}",
-            self.junos.device.name, self.junos.device.username, self.junos.device.host
+            " kaminari profile : {} {}@{}",
+            self.kaminari.device.name, self.kaminari.device.username, self.kaminari.device.host
         )
         .expect("writing terminal to String cannot fail");
-        writeln!(out, " robot plan    : {}", self.robot.name)
+        writeln!(out, " mamori plan   : {}", self.mamori.name)
             .expect("writing terminal to String cannot fail");
         out.push_str("\x1b[38;5;81m");
         out.push_str("+==============================================================+\n");
@@ -215,8 +218,13 @@ impl OmoikaneLaunchManifest {
             self.config.database_max_connections as usize,
             false,
         );
-        json::push_string_field(out, "junos_host", &self.config.junos_host, false);
-        json::push_string_field(out, "junos_username", &self.config.junos_username, false);
+        json::push_string_field(out, "kaminari_host", &self.config.kaminari_host, false);
+        json::push_string_field(
+            out,
+            "kaminari_username",
+            &self.config.kaminari_username,
+            false,
+        );
         out.push('}');
         json::push_field_name(out, "overlay", false);
         if let Some(overlay) = &self.overlay {
@@ -224,10 +232,10 @@ impl OmoikaneLaunchManifest {
         } else {
             out.push_str("null");
         }
-        json::push_field_name(out, "junos", false);
-        self.junos.write_json(out);
-        json::push_field_name(out, "robot", false);
-        self.robot.write_json(out);
+        json::push_field_name(out, "kaminari", false);
+        self.kaminari.write_json(out);
+        json::push_field_name(out, "mamori", false);
+        self.mamori.write_json(out);
         out.push('}');
     }
 }
