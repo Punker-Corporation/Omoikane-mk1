@@ -23,6 +23,10 @@ runtime state and `HttpStatusService` turns that snapshot into a small HTTP/1
 response without pulling an async runtime or external web framework into
 `daikoku`.
 
+`omoikane_web` mounts the same status contract on Actix Web. This keeps the
+authoritative server independent while giving the engine a production-shaped
+HTTP edge for rack tests, reverse proxies and future web tooling.
+
 The first supported routes are:
 
 - `GET /status` and `HEAD /status`: full status JSON.
