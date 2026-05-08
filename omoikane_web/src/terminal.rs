@@ -19,6 +19,17 @@ pub fn render_boot_panel(
     );
     push_row(&mut out, "local", &manifest.endpoint.local_status_url);
     push_row(&mut out, "public", &manifest.endpoint.public_status_url);
+    push_row(&mut out, "site", &manifest.publication.public_site_url());
+    push_row(&mut out, "dns", &manifest.dns.selected_host);
+    push_row(
+        &mut out,
+        "subservers",
+        &format!(
+            "{} target={}",
+            manifest.publication.subservers.len(),
+            manifest.publication.target_host
+        ),
+    );
     push_row(
         &mut out,
         "overlay",
@@ -35,7 +46,26 @@ pub fn render_boot_panel(
         "sqlx",
         sql.map(|sql| sql.redacted_url()).unwrap_or("disabled"),
     );
-    push_row(&mut out, "metrics", "/metrics + /grafana/dashboard.json");
+    push_row(
+        &mut out,
+        "firewall",
+        &format!(
+            "anti-ddos={} budget={}/{}s",
+            manifest.config.anti_ddos_enabled,
+            manifest.config.anti_ddos_max_requests,
+            manifest.config.anti_ddos_window_seconds
+        ),
+    );
+    push_row(
+        &mut out,
+        "grakane",
+        if manifest.config.grakane_admin_gmail.is_some() {
+            "gmail host gate"
+        } else {
+            "local unlocked"
+        },
+    );
+    push_row(&mut out, "console", "/ + /console");
     push_footer(&mut out);
     out
 }
@@ -86,6 +116,27 @@ pub fn render_live_panel(
     );
     push_row(&mut out, "local", &manifest.endpoint.local_status_url);
     push_row(&mut out, "public", &manifest.endpoint.public_status_url);
+    push_row(&mut out, "site", &manifest.publication.public_site_url());
+    push_row(&mut out, "dns", &manifest.dns.selected_host);
+    push_row(
+        &mut out,
+        "subservers",
+        &format!(
+            "{} target={}",
+            manifest.publication.subservers.len(),
+            manifest.publication.target_host
+        ),
+    );
+    push_row(
+        &mut out,
+        "firewall",
+        &format!(
+            "anti-ddos={} budget={}/{}s",
+            manifest.config.anti_ddos_enabled,
+            manifest.config.anti_ddos_max_requests,
+            manifest.config.anti_ddos_window_seconds
+        ),
+    );
     push_machine(&mut out);
     push_footer(&mut out);
     out

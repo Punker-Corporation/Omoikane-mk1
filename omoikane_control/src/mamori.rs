@@ -3,14 +3,14 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetworkRobotDevice {
+pub struct MamoriDevice {
     pub name: String,
     pub role: String,
     pub management_address: String,
     pub platform: String,
 }
 
-impl NetworkRobotDevice {
+impl MamoriDevice {
     pub fn new(
         name: impl Into<String>,
         role: impl Into<String>,
@@ -27,7 +27,7 @@ impl NetworkRobotDevice {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetworkRobotCheck {
+pub struct MamoriCheck {
     pub name: String,
     pub device: String,
     pub operation: String,
@@ -36,7 +36,7 @@ pub struct NetworkRobotCheck {
     pub critical: bool,
 }
 
-impl NetworkRobotCheck {
+impl MamoriCheck {
     pub fn new(
         name: impl Into<String>,
         device: impl Into<String>,
@@ -60,60 +60,60 @@ impl NetworkRobotCheck {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetworkRobotPlan {
+pub struct MamoriPlan {
     pub name: String,
-    pub devices: Vec<NetworkRobotDevice>,
-    pub checks: Vec<NetworkRobotCheck>,
+    pub devices: Vec<MamoriDevice>,
+    pub checks: Vec<MamoriCheck>,
     pub rollback_steps: Vec<String>,
 }
 
-impl NetworkRobotPlan {
+impl MamoriPlan {
     pub fn rack_acceptance(
         server_overlay_ip: impl Into<String>,
-        junos_host: impl Into<String>,
+        kaminari_host: impl Into<String>,
     ) -> Self {
         let server_overlay_ip = server_overlay_ip.into();
         Self {
             name: "omoikane-rack-acceptance".to_string(),
             devices: vec![
-                NetworkRobotDevice::new(
+                MamoriDevice::new(
                     "omoikane-server",
                     "runtime",
                     server_overlay_ip,
                     "omoikane-rust",
                 ),
-                NetworkRobotDevice::new("rack-core", "router", junos_host, "junos-netconf"),
+                MamoriDevice::new("rack-core", "router", kaminari_host, "kaminari-netconf"),
             ],
             checks: vec![
-                NetworkRobotCheck::new(
+                MamoriCheck::new(
                     "server-status",
                     "omoikane-server",
                     "GET /status",
                     "\"state\":\"running\"",
                 ),
-                NetworkRobotCheck::new(
+                MamoriCheck::new(
                     "router-interface-terse",
                     "rack-core",
-                    "junos.interface_terse",
+                    "kaminari.interface_terse",
                     "<interface-information",
                 ),
-                NetworkRobotCheck::new(
+                MamoriCheck::new(
                     "router-route-summary",
                     "rack-core",
-                    "junos.route_summary",
+                    "kaminari.route_summary",
                     "<route-summary-information",
                 )
                 .non_critical(),
             ],
             rollback_steps: vec![
-                "stop omoikane server listener".to_string(),
-                "remove temporary overlay peer if it was applied".to_string(),
-                "restore previous rack firewall profile if acceptance fails".to_string(),
+                "parar o listener do servidor Omoikane".to_string(),
+                "remover o peer overlay temporario caso tenha sido aplicado".to_string(),
+                "restaurar o perfil anterior de firewall do rack se a aceitacao falhar".to_string(),
             ],
         }
     }
 
-    pub fn validate(&self) -> Result<(), NetworkRobotPlanError> {
+    pub fn validate(&self) -> Result<(), MamoriPlanError> {
         validate_non_empty("name", &self.name)?;
 
         let mut device_names = BTreeSet::new();
@@ -123,7 +123,7 @@ impl NetworkRobotPlan {
             validate_non_empty("device.management_address", &device.management_address)?;
             validate_non_empty("device.platform", &device.platform)?;
             if !device_names.insert(device.name.clone()) {
-                return Err(NetworkRobotPlanError::DuplicateDevice(device.name.clone()));
+                return Err(MamoriPlanError::DuplicateDevice(device.name.clone()));
             }
         }
 
@@ -134,27 +134,27 @@ impl NetworkRobotPlan {
             validate_non_empty("check.operation", &check.operation)?;
             validate_non_empty("check.expected_fragment", &check.expected_fragment)?;
             if check.timeout_seconds == 0 {
-                return Err(NetworkRobotPlanError::InvalidTimeout(check.name.clone()));
+                return Err(MamoriPlanError::InvalidTimeout(check.name.clone()));
             }
             if !device_names.contains(&check.device) {
-                return Err(NetworkRobotPlanError::UnknownDevice(check.device.clone()));
+                return Err(MamoriPlanError::UnknownDevice(check.device.clone()));
             }
             if !check_names.insert(check.name.clone()) {
-                return Err(NetworkRobotPlanError::DuplicateCheck(check.name.clone()));
+                return Err(MamoriPlanError::DuplicateCheck(check.name.clone()));
             }
         }
 
         Ok(())
     }
 
-    pub fn render_runbook(&self) -> Result<String, NetworkRobotPlanError> {
+    pub fn render_runbook(&self) -> Result<String, MamoriPlanError> {
         self.validate()?;
 
         let mut runbook = String::new();
-        writeln!(runbook, "Omoikane network robot plan: {}", self.name)
+        writeln!(runbook, "Plano Mamori da Omoikane: {}", self.name)
             .expect("writing runbook to String cannot fail");
         writeln!(runbook).expect("writing runbook to String cannot fail");
-        writeln!(runbook, "devices:").expect("writing runbook to String cannot fail");
+        writeln!(runbook, "dispositivos:").expect("writing runbook to String cannot fail");
         for device in &self.devices {
             writeln!(
                 runbook,
@@ -164,7 +164,7 @@ impl NetworkRobotPlan {
             .expect("writing runbook to String cannot fail");
         }
         writeln!(runbook).expect("writing runbook to String cannot fail");
-        writeln!(runbook, "checks:").expect("writing runbook to String cannot fail");
+        writeln!(runbook, "checagens:").expect("writing runbook to String cannot fail");
         for check in &self.checks {
             writeln!(
                 runbook,
@@ -233,7 +233,7 @@ impl NetworkRobotPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NetworkRobotPlanError {
+pub enum MamoriPlanError {
     EmptyField(&'static str),
     DuplicateDevice(String),
     DuplicateCheck(String),
@@ -241,9 +241,9 @@ pub enum NetworkRobotPlanError {
     InvalidTimeout(String),
 }
 
-fn validate_non_empty(field: &'static str, value: &str) -> Result<(), NetworkRobotPlanError> {
+fn validate_non_empty(field: &'static str, value: &str) -> Result<(), MamoriPlanError> {
     if value.trim().is_empty() {
-        Err(NetworkRobotPlanError::EmptyField(field))
+        Err(MamoriPlanError::EmptyField(field))
     } else {
         Ok(())
     }
@@ -251,11 +251,11 @@ fn validate_non_empty(field: &'static str, value: &str) -> Result<(), NetworkRob
 
 #[cfg(test)]
 mod tests {
-    use super::{NetworkRobotDevice, NetworkRobotPlan, NetworkRobotPlanError};
+    use super::{MamoriDevice, MamoriPlan, MamoriPlanError};
 
     #[test]
     fn rack_acceptance_plan_renders_runbook() {
-        let plan = NetworkRobotPlan::rack_acceptance("100.104.1.7", "192.0.2.1");
+        let plan = MamoriPlan::rack_acceptance("100.104.1.7", "192.0.2.1");
         let runbook = plan.render_runbook().unwrap();
 
         assert!(runbook.contains("omoikane-rack-acceptance"));
@@ -265,19 +265,17 @@ mod tests {
 
     #[test]
     fn plan_rejects_duplicate_devices() {
-        let mut plan = NetworkRobotPlan::rack_acceptance("100.104.1.7", "192.0.2.1");
-        plan.devices.push(NetworkRobotDevice::new(
+        let mut plan = MamoriPlan::rack_acceptance("100.104.1.7", "192.0.2.1");
+        plan.devices.push(MamoriDevice::new(
             "rack-core",
             "router",
             "192.0.2.2",
-            "junos-netconf",
+            "kaminari-netconf",
         ));
 
         assert_eq!(
             plan.validate(),
-            Err(NetworkRobotPlanError::DuplicateDevice(
-                "rack-core".to_string()
-            ))
+            Err(MamoriPlanError::DuplicateDevice("rack-core".to_string()))
         );
     }
 }

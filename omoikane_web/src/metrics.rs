@@ -1,5 +1,5 @@
 use daikoku::ServerStatusSnapshot;
-use omoikane_control::OmoikaneLaunchManifest;
+use omoikane_control::{OmoikaneLaunchManifest, is_private_or_local_target};
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -116,12 +116,38 @@ impl OmoikaneRuntimeMetrics {
             u8::from(manifest.overlay.is_some())
         )
         .expect("writing metrics to String cannot fail");
+        out.push_str("# HELP omoikane_public_site_enabled Public test site enabled.\n");
+        out.push_str("# TYPE omoikane_public_site_enabled gauge\n");
+        writeln!(
+            out,
+            "omoikane_public_site_enabled {}",
+            u8::from(manifest.config.public_site_enabled)
+        )
+        .expect("writing metrics to String cannot fail");
+        out.push_str("# HELP omoikane_subservers_configured Published subserver entries.\n");
+        out.push_str("# TYPE omoikane_subservers_configured gauge\n");
+        writeln!(
+            out,
+            "omoikane_subservers_configured {}",
+            manifest.publication.subservers.len()
+        )
+        .expect("writing metrics to String cannot fail");
+        out.push_str("# HELP omoikane_publication_external_ready Publication target is not private or local.\n");
+        out.push_str("# TYPE omoikane_publication_external_ready gauge\n");
+        writeln!(
+            out,
+            "omoikane_publication_external_ready {}",
+            u8::from(!is_private_or_local_target(
+                &manifest.publication.target_host
+            ))
+        )
+        .expect("writing metrics to String cannot fail");
     }
 
-    pub fn write_grafana_dashboard(&self, out: &mut String) {
+    pub fn write_grakane_dashboard(&self, out: &mut String) {
         out.clear();
         out.push_str(
-            r#"{"title":"Omoikane Runtime","timezone":"browser","schemaVersion":39,"version":1,"refresh":"1s","panels":["#,
+            r#"{"title":"Omoikane Grakane Runtime","timezone":"browser","schemaVersion":39,"version":1,"refresh":"1s","tags":["omoikane","grakane","functional-stage"],"panels":["#,
         );
         push_stat_panel(out, 1, "Uptime", "omoikane_uptime_seconds", 0, 0);
         out.push(',');
@@ -148,6 +174,15 @@ impl OmoikaneRuntimeMetrics {
             6,
             8,
         );
+        out.push(',');
+        push_stat_panel(
+            out,
+            7,
+            "Subservers",
+            "omoikane_subservers_configured",
+            12,
+            8,
+        );
         out.push_str("]}");
     }
 }
@@ -167,7 +202,7 @@ mod tests {
     use omoikane_control::OmoikaneLaunchConfig;
 
     #[test]
-    fn metrics_emit_prometheus_and_grafana_shapes() {
+    fn metrics_emit_prometheus_and_grakane_shapes() {
         let mut server = DaikokuServer::new(ServerOptions::default());
         server.start();
         server.tick_update(0.016);
@@ -180,9 +215,10 @@ mod tests {
         metrics.write_prometheus(&snapshot, &manifest, false, &mut out);
         assert!(out.contains("omoikane_http_requests_total 1"));
         assert!(out.contains("omoikane_tick 1"));
+        assert!(out.contains("omoikane_subservers_configured"));
 
-        metrics.write_grafana_dashboard(&mut out);
-        assert!(out.contains("\"title\":\"Omoikane Runtime\""));
+        metrics.write_grakane_dashboard(&mut out);
+        assert!(out.contains("\"title\":\"Omoikane Grakane Runtime\""));
         assert!(out.contains("omoikane_machine_parallelism"));
     }
 }

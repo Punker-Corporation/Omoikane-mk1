@@ -1,55 +1,57 @@
-# Omoikane Map Format
+# Formato de Mapa da Omoikane
 
-Omoikane maps are deterministic snapshots of world topology, tile data and
-entity state. The Rust runtime models this through `sekai::MapManager`,
-`sekai::MapGrid`, `sekai::MapChunk`, `sekai::Tile`, transform components and
-serialized component payloads.
+Os mapas da Omoikane sao snapshots deterministicos de topologia, tiles e estado
+de entidades. O runtime Rust modela essa camada por `sekai::MapManager`,
+`sekai::MapGrid`, `sekai::MapChunk`, `sekai::Tile`, componentes de transform e
+payloads serializados.
 
-The current runtime representation is optimized for simulation correctness:
-maps own grids, grids own sparse chunks, chunks own packed tile arrays, and
-entities reference map or grid space through explicit `MapId`, `GridId` and
-`EntityUid` values.
+A representacao atual prioriza correcao de simulacao. Mapas possuem grids,
+grids possuem chunks esparsos, chunks possuem arrays compactos de tiles, e
+entidades referenciam espaco de mapa ou grid por `MapId`, `GridId` e
+`EntityUid`.
 
-## Sections
+## Secoes
 
 ### `meta`
 
-Stores format and provenance data.
+Guarda dados de formato e proveniencia.
 
-- `format`: integer format version.
-- `name`: optional human-readable map name.
-- `author`: optional author or generator identity.
-- `postmapinit`: whether generation and initialization have already run.
+- `format`: versao inteira do formato.
+- `name`: nome humano opcional do mapa.
+- `author`: autor ou gerador opcional.
+- `postmapinit`: indica se a geracao e a inicializacao ja foram executadas.
 
 ### `tilemap`
 
-Maps stable tile definition names to compact numeric tile ids used inside
-chunk tile arrays. Runtime code should never assume that numeric tile ids are
-stable across content packs.
+Mapeia nomes estaveis de definicoes de tile para ids numericos compactos usados
+nos arrays internos de chunks. Codigo de runtime nao deve assumir que ids
+numericos permanecem estaveis entre pacotes de conteudo.
 
 ### `grids`
 
-Stores one or more grid records. A grid record contains:
+Guarda um ou mais registros de grid. Cada registro contem:
 
-- `settings`: tile size, chunk size and snap size.
-- `chunks`: sparse chunk records keyed by chunk coordinates.
-- grid entity state, when the grid participates in ECS state.
+- `settings`: tamanho de tile, tamanho de chunk e snap size;
+- `chunks`: registros esparsos indexados por coordenadas de chunk;
+- estado da entidade de grid quando ela participa do ECS.
 
 ### `entities`
 
-Stores serialized entities and component payloads. Entity references use
-`EntityUid`, and grid references use `GridId`; absent or external references
-must be represented explicitly instead of silently remapped.
+Guarda entidades serializadas e payloads de componentes. Referencias de entidade
+usam `EntityUid`, e referencias de grid usam `GridId`. Referencias ausentes ou
+externas devem ser representadas explicitamente, nunca remapeadas de forma
+silenciosa.
 
-## Binary Tile Data
+## Dados Binarios de Tile
 
-Chunk tile data is packed in row-major order. Each tile currently carries a
-compact tile id and render/metadata flags. Runtime code should prefer the
-typed `Tile` API over parsing raw bytes directly.
+Dados de tile em chunk sao empacotados em ordem row-major. Cada tile carrega um
+id compacto e flags de renderizacao/metadados. Codigo de runtime deve preferir
+a API tipada `Tile` em vez de interpretar bytes crus.
 
-## Direction
+## Direcao
 
-The old YAML-heavy shape is acceptable as an interchange format, but the engine
-path should prefer binary or hybrid encodings once the serializer boundary is
-complete. The target is deterministic loading, lossless round-tripping,
-content-addressed chunks and cheap incremental replication.
+O formato antigo baseado em YAML ainda pode servir como intercambio, mas o
+caminho interno da engine deve preferir codificacao binaria ou hibrida quando a
+fronteira de serializacao estiver completa. O alvo e carregar mapas de forma
+deterministica, fazer roundtrip sem perda, enderecar chunks por conteudo e
+replicar incrementos com baixo custo.

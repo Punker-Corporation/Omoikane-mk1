@@ -11,6 +11,7 @@ target-*/
 
 *.bak
 *.log
+*.npk
 *.tmp
 
 __pycache__

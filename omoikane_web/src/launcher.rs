@@ -1,21 +1,42 @@
+use crate::config::load_launch_config_file;
 use crate::sql::OmoikaneSqlState;
 use crate::terminal::{render_boot_panel, render_live_panel};
-use crate::{OmoikaneActixState, configure_omoikane_routes};
+use crate::{OmoikaneHayateState, configure_omoikane_routes};
 use actix_web::{App, HttpServer, web};
 use daikoku::{DaikokuServer, ServerOptions};
 use omoikane_control::OmoikaneLaunchConfig;
 use std::env;
-use std::io;
+use std::io::{self, Write};
+use std::net::{TcpListener, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 pub fn run_omoikane_server_from_env() -> io::Result<()> {
-    let config = parse_launch_args(env::args().skip(1))?;
-    run_omoikane_server(config)
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let interactive = args.is_empty() && env::var_os("OMOIKANE_SKIP_WIZARD").is_none();
+    let allow_port_fallback = !args.iter().any(|arg| arg == "--port");
+    let mut config = parse_launch_args(args)?;
+    if interactive {
+        config = launch_interactive_terminal(config)?;
+    }
+    run_omoikane_server_with_port_fallback(config, allow_port_fallback)
 }
 
 pub fn run_omoikane_server(config: OmoikaneLaunchConfig) -> io::Result<()> {
+    run_omoikane_server_with_port_fallback(config, false)
+}
+
+fn run_omoikane_server_with_port_fallback(
+    mut config: OmoikaneLaunchConfig,
+    allow_port_fallback: bool,
+) -> io::Result<()> {
+    if let Some((requested, selected)) = select_runtime_port(&mut config, allow_port_fallback)? {
+        eprintln!(
+            "Porta {requested} ocupada; iniciando Omoikane em {selected}. Use --port <porta> para fixar uma porta."
+        );
+    }
+
     let manifest = config
         .build_manifest()
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, format!("{err:?}")))?;
@@ -37,7 +58,7 @@ pub fn run_omoikane_server(config: OmoikaneLaunchConfig) -> io::Result<()> {
             .map_err(|err| io::Error::other(format!("sqlx connection failed: {err}")))?;
         println!("{}", render_boot_panel(&manifest, sql.as_ref(), workers));
 
-        let state = OmoikaneActixState::from_shared_with_runtime(shared_server, manifest, sql);
+        let state = OmoikaneHayateState::from_shared_with_runtime(shared_server, manifest, sql);
         spawn_terminal_monitor(state.clone());
 
         let data = web::Data::new(state);
@@ -53,6 +74,33 @@ pub fn run_omoikane_server(config: OmoikaneLaunchConfig) -> io::Result<()> {
     })
 }
 
+fn select_runtime_port(
+    config: &mut OmoikaneLaunchConfig,
+    allow_port_fallback: bool,
+) -> io::Result<Option<(u16, u16)>> {
+    match reserve_port(&config.bind_host, config.port) {
+        Ok(()) => Ok(None),
+        Err(err) if allow_port_fallback && err.kind() == io::ErrorKind::AddrInUse => {
+            let requested = config.port;
+            for candidate in 8081..=8099 {
+                if reserve_port(&config.bind_host, candidate).is_ok() {
+                    config.port = candidate;
+                    return Ok(Some((requested, candidate)));
+                }
+            }
+            Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "ports 8080..8099 are already in use",
+            ))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn reserve_port(bind_host: &str, port: u16) -> io::Result<()> {
+    TcpListener::bind((bind_host, port)).map(drop)
+}
+
 pub fn parse_launch_args(
     args: impl IntoIterator<Item = String>,
 ) -> io::Result<OmoikaneLaunchConfig> {
@@ -63,6 +111,9 @@ pub fn parse_launch_args(
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
+            }
+            "--config" => {
+                config = load_launch_config_file(next_value(&mut args, "--config")?, config)?
             }
             "--name" => config.server_name = next_value(&mut args, "--name")?,
             "--bind" => config.bind_host = next_value(&mut args, "--bind")?,
@@ -88,8 +139,44 @@ pub fn parse_launch_args(
                     "--database-max-connections",
                 )?
             }
-            "--junos-host" => config.junos_host = next_value(&mut args, "--junos-host")?,
-            "--junos-user" => config.junos_username = next_value(&mut args, "--junos-user")?,
+            "--kaminari-host" => config.kaminari_host = next_value(&mut args, "--kaminari-host")?,
+            "--kaminari-user" => {
+                config.kaminari_username = next_value(&mut args, "--kaminari-user")?
+            }
+            "--public-dns" => config.public_dns_name = Some(next_value(&mut args, "--public-dns")?),
+            "--public-dns-target" => {
+                config.public_dns_target = Some(next_value(&mut args, "--public-dns-target")?)
+            }
+            "--public-site" => config.public_site_enabled = true,
+            "--no-public-site" => config.public_site_enabled = false,
+            "--grakane-admin-gmail" => {
+                config.grakane_admin_gmail = Some(next_value(&mut args, "--grakane-admin-gmail")?)
+            }
+            "--game-server" => config.game_server_enabled = true,
+            "--no-game-server" => config.game_server_enabled = false,
+            "--game-port" => {
+                config.game_server_port =
+                    parse_u16(&next_value(&mut args, "--game-port")?, "--game-port")?
+            }
+            "--vps-mode" => config.vps_mode_enabled = true,
+            "--no-vps-mode" => config.vps_mode_enabled = false,
+            "--vps-reality-sni" => {
+                config.vps_reality_sni = Some(next_value(&mut args, "--vps-reality-sni")?)
+            }
+            "--anti-ddos" => config.anti_ddos_enabled = true,
+            "--no-anti-ddos" => config.anti_ddos_enabled = false,
+            "--anti-ddos-window" => {
+                config.anti_ddos_window_seconds = parse_u16(
+                    &next_value(&mut args, "--anti-ddos-window")?,
+                    "--anti-ddos-window",
+                )?
+            }
+            "--anti-ddos-max-requests" => {
+                config.anti_ddos_max_requests = parse_u32(
+                    &next_value(&mut args, "--anti-ddos-max-requests")?,
+                    "--anti-ddos-max-requests",
+                )?
+            }
             unknown => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -99,6 +186,109 @@ pub fn parse_launch_args(
         }
     }
     Ok(config)
+}
+
+fn launch_interactive_terminal(
+    mut config: OmoikaneLaunchConfig,
+) -> io::Result<OmoikaneLaunchConfig> {
+    println!("\x1b[2J\x1b[H\x1b[38;5;81mOmoikane Mikado Terminal\x1b[0m");
+    println!("Selecione o IP que vai receber o servidor.");
+    let hosts = available_bind_hosts(&config);
+    for (index, host) in hosts.iter().enumerate() {
+        println!("  [{index}] {host}");
+    }
+    let selected_host = read_index("IP", hosts.len(), 0)?;
+    config.bind_host = hosts[selected_host].clone();
+
+    let preview = config
+        .build_manifest()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, format!("{err:?}")))?;
+    println!();
+    println!("Selecione o DNS/identidade publica para substituir o IP nos links.");
+    for (index, choice) in preview.dns.choices.iter().enumerate() {
+        println!(
+            "  [{index}] {} -> {} ({}, ttl={}s)",
+            choice.label, choice.host, choice.record_type, choice.ttl_seconds
+        );
+    }
+    let selected_dns = read_index("DNS", preview.dns.choices.len(), 0)?;
+    config.public_dns_name = Some(preview.dns.choices[selected_dns].host.clone());
+
+    println!();
+    println!("Informe o Gmail administrador do Grakane nesta maquina host.");
+    loop {
+        let gmail = read_line("gmail")?;
+        if is_valid_gmail(&gmail) {
+            config.grakane_admin_gmail = Some(gmail.trim().to_ascii_lowercase());
+            break;
+        }
+        println!("Use um endereco @gmail.com valido para destravar o Grakane.");
+    }
+
+    println!();
+    println!(
+        "Firewall logico anti-DDoS: {} requisicoes/{}s",
+        config.anti_ddos_max_requests, config.anti_ddos_window_seconds
+    );
+    println!("Iniciando servidor Omoikane...");
+    Ok(config)
+}
+
+fn available_bind_hosts(config: &OmoikaneLaunchConfig) -> Vec<String> {
+    let mut hosts = Vec::new();
+    push_unique(&mut hosts, config.bind_host.clone());
+    push_unique(&mut hosts, "127.0.0.1".to_string());
+    push_unique(&mut hosts, "0.0.0.0".to_string());
+    if let Some(primary) = primary_lan_ip() {
+        push_unique(&mut hosts, primary);
+    }
+    hosts
+}
+
+fn primary_lan_ip() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn read_index(label: &str, len: usize, default: usize) -> io::Result<usize> {
+    loop {
+        let line = read_line(&format!("{label} [{default}]"))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return Ok(default.min(len.saturating_sub(1)));
+        }
+        if let Ok(index) = trimmed.parse::<usize>()
+            && index < len
+        {
+            return Ok(index);
+        }
+        println!("Escolha um numero entre 0 e {}.", len.saturating_sub(1));
+    }
+}
+
+fn read_line(label: &str) -> io::Result<String> {
+    print!("{label}> ");
+    io::stdout().flush()?;
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    Ok(line)
+}
+
+fn is_valid_gmail(value: &str) -> bool {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    !value.is_empty()
+        && !value.starts_with('@')
+        && !value.chars().any(char::is_whitespace)
+        && lower.ends_with("@gmail.com")
 }
 
 fn spawn_tick_loop(server: Arc<Mutex<DaikokuServer>>, tick_rate: u16) {
@@ -117,7 +307,7 @@ fn spawn_tick_loop(server: Arc<Mutex<DaikokuServer>>, tick_rate: u16) {
     });
 }
 
-fn spawn_terminal_monitor(state: OmoikaneActixState) {
+fn spawn_terminal_monitor(state: OmoikaneHayateState) {
     thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_secs(1));
@@ -181,6 +371,7 @@ fn parse_usize(value: &str, name: &str) -> io::Result<usize> {
 fn print_help() {
     println!("omoikane --name Omoikane --bind 0.0.0.0 --port 8080 --overlay-seed rack-a");
     println!("options:");
+    println!("  --config <omoikane.toml|omoikane.json>");
     println!("  --name <name>");
     println!("  --bind <host>");
     println!("  --port <port>");
@@ -191,15 +382,37 @@ fn print_help() {
     println!("  --no-overlay");
     println!("  --database-url <postgres-url>");
     println!("  --database-max-connections <count>");
-    println!("  --junos-host <host>");
-    println!("  --junos-user <user>");
+    println!("  --kaminari-host <host>");
+    println!("  --kaminari-user <user>");
+    println!("  --public-dns <host>");
+    println!("  --public-dns-target <host-or-ip>");
+    println!("  --public-site | --no-public-site");
+    println!("  --grakane-admin-gmail <gmail>");
+    println!("  --game-server | --no-game-server");
+    println!("  --game-port <udp-port>");
+    println!("  --vps-mode | --no-vps-mode");
+    println!("  --vps-reality-sni <sni-host>");
+    println!("  --anti-ddos | --no-anti-ddos");
+    println!("  --anti-ddos-window <seconds>");
+    println!("  --anti-ddos-max-requests <count>");
+    println!("double-click:");
+    println!("  without arguments, Omoikane opens the IP/DNS/Gmail terminal before launch");
+    println!("  without --port, Omoikane uses 8080 or the first free port from 8081..8099");
     println!("endpoints:");
-    println!("  /status /launch /metrics /grafana/dashboard.json /database/status");
+    println!(
+        "  / /site /console /status /launch /servers /metrics /grakane/dashboard.json /database/status"
+    );
+    println!(
+        "  /network/publication /network/dns/routeros.rsc /network/dns/junos.set /vps/reality-blueprint"
+    );
+    println!("  /automation/mamori /automation/kaminari/tools /automation/michisuji/rb2011.rsc");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_launch_args;
+    use super::{parse_launch_args, select_runtime_port};
+    use omoikane_control::OmoikaneLaunchConfig;
+    use std::net::TcpListener;
 
     #[test]
     fn launch_args_parse_sql_and_overlay_options() {
@@ -211,6 +424,20 @@ mod tests {
                 "postgres://omoikane:secret@db.local/game",
                 "--database-max-connections",
                 "32",
+                "--public-dns",
+                "rack.example",
+                "--public-dns-target",
+                "203.0.113.10",
+                "--grakane-admin-gmail",
+                "host@gmail.com",
+                "--game-server",
+                "--game-port",
+                "7777",
+                "--vps-mode",
+                "--vps-reality-sni",
+                "front.example",
+                "--anti-ddos-max-requests",
+                "1200",
                 "--no-overlay",
             ]
             .into_iter()
@@ -222,5 +449,31 @@ mod tests {
         assert_eq!(config.database_max_connections, 32);
         assert!(config.database_url.is_some());
         assert!(!config.overlay_enabled);
+        assert_eq!(config.public_dns_name.as_deref(), Some("rack.example"));
+        assert_eq!(config.public_dns_target.as_deref(), Some("203.0.113.10"));
+        assert_eq!(
+            config.grakane_admin_gmail.as_deref(),
+            Some("host@gmail.com")
+        );
+        assert!(config.game_server_enabled);
+        assert_eq!(config.game_server_port, 7777);
+        assert!(config.vps_mode_enabled);
+        assert_eq!(config.vps_reality_sni.as_deref(), Some("front.example"));
+        assert_eq!(config.anti_ddos_max_requests, 1200);
+    }
+
+    #[test]
+    fn default_port_falls_back_when_busy() {
+        let _guard = TcpListener::bind(("127.0.0.1", 8080)).ok();
+        let mut config = OmoikaneLaunchConfig {
+            bind_host: "127.0.0.1".to_string(),
+            port: 8080,
+            ..OmoikaneLaunchConfig::default()
+        };
+
+        let selected = select_runtime_port(&mut config, true).unwrap();
+
+        assert!(matches!(selected, Some((8080, 8081..=8099))));
+        assert!((8081..=8099).contains(&config.port));
     }
 }

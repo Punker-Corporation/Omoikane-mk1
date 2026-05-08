@@ -1,7 +1,7 @@
 use crate::json;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JunosDeviceProfile {
+pub struct KaminariDeviceProfile {
     pub name: String,
     pub host: String,
     pub username: String,
@@ -10,7 +10,7 @@ pub struct JunosDeviceProfile {
     pub commit_confirm_timeout_minutes: u16,
 }
 
-impl JunosDeviceProfile {
+impl KaminariDeviceProfile {
     pub fn rack_default(
         name: impl Into<String>,
         host: impl Into<String>,
@@ -36,15 +36,15 @@ impl JunosDeviceProfile {
         self
     }
 
-    pub fn validate(&self) -> Result<(), JunosControlError> {
+    pub fn validate(&self) -> Result<(), KaminariControlError> {
         validate_non_empty("name", &self.name)?;
         validate_non_empty("host", &self.host)?;
         validate_non_empty("username", &self.username)?;
         if self.netconf_port == 0 {
-            return Err(JunosControlError::InvalidPort("netconf_port"));
+            return Err(KaminariControlError::InvalidPort("netconf_port"));
         }
         if self.commit_confirm_timeout_minutes == 0 {
-            return Err(JunosControlError::InvalidTimeout(
+            return Err(KaminariControlError::InvalidTimeout(
                 "commit_confirm_timeout_minutes",
             ));
         }
@@ -53,7 +53,7 @@ impl JunosDeviceProfile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JunosOperation {
+pub enum KaminariOperation {
     SystemFacts,
     InterfaceTerse,
     RouteSummary,
@@ -62,26 +62,26 @@ pub enum JunosOperation {
     RollbackZero,
 }
 
-impl JunosOperation {
+impl KaminariOperation {
     pub const fn tool_name(self) -> &'static str {
         match self {
-            Self::SystemFacts => "junos.system_facts",
-            Self::InterfaceTerse => "junos.interface_terse",
-            Self::RouteSummary => "junos.route_summary",
-            Self::CommitCheck => "junos.commit_check",
-            Self::CommitConfirmed => "junos.commit_confirmed",
-            Self::RollbackZero => "junos.rollback_zero",
+            Self::SystemFacts => "kaminari.system_facts",
+            Self::InterfaceTerse => "kaminari.interface_terse",
+            Self::RouteSummary => "kaminari.route_summary",
+            Self::CommitCheck => "kaminari.commit_check",
+            Self::CommitConfirmed => "kaminari.commit_confirmed",
+            Self::RollbackZero => "kaminari.rollback_zero",
         }
     }
 
     pub const fn description(self) -> &'static str {
         match self {
-            Self::SystemFacts => "Read hostname, model, version and chassis facts.",
-            Self::InterfaceTerse => "Read terse interface state for rack health checks.",
-            Self::RouteSummary => "Read route summary state before exposing Omoikane services.",
-            Self::CommitCheck => "Validate a candidate configuration without committing it.",
-            Self::CommitConfirmed => "Commit with an automatic rollback window.",
-            Self::RollbackZero => "Rollback to the active configuration checkpoint.",
+            Self::SystemFacts => "Le hostname, modelo, versao e fatos de chassis.",
+            Self::InterfaceTerse => "Le estado resumido das interfaces para saude do rack.",
+            Self::RouteSummary => "Le resumo de rotas antes de expor os servicos Omoikane.",
+            Self::CommitCheck => "Valida a configuracao candidata sem aplicar commit.",
+            Self::CommitConfirmed => "Aplica commit com janela automatica de rollback.",
+            Self::RollbackZero => "Retorna ao checkpoint ativo de configuracao.",
         }
     }
 
@@ -112,15 +112,15 @@ impl JunosOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JunosMcpTool {
+pub struct KaminariMcpTool {
     pub name: String,
     pub description: String,
-    pub operation: JunosOperation,
+    pub operation: KaminariOperation,
     pub requires_write: bool,
 }
 
-impl JunosMcpTool {
-    pub fn from_operation(operation: JunosOperation) -> Self {
+impl KaminariMcpTool {
+    pub fn from_operation(operation: KaminariOperation) -> Self {
         Self {
             name: operation.tool_name().to_string(),
             description: operation.description().to_string(),
@@ -131,35 +131,35 @@ impl JunosMcpTool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JunosMcpCatalog {
-    pub device: JunosDeviceProfile,
-    pub tools: Vec<JunosMcpTool>,
+pub struct KaminariMcpCatalog {
+    pub device: KaminariDeviceProfile,
+    pub tools: Vec<KaminariMcpTool>,
 }
 
-impl JunosMcpCatalog {
-    pub fn rack_default(device: JunosDeviceProfile) -> Self {
+impl KaminariMcpCatalog {
+    pub fn rack_default(device: KaminariDeviceProfile) -> Self {
         Self {
             device,
             tools: vec![
-                JunosMcpTool::from_operation(JunosOperation::SystemFacts),
-                JunosMcpTool::from_operation(JunosOperation::InterfaceTerse),
-                JunosMcpTool::from_operation(JunosOperation::RouteSummary),
-                JunosMcpTool::from_operation(JunosOperation::CommitCheck),
-                JunosMcpTool::from_operation(JunosOperation::CommitConfirmed),
-                JunosMcpTool::from_operation(JunosOperation::RollbackZero),
+                KaminariMcpTool::from_operation(KaminariOperation::SystemFacts),
+                KaminariMcpTool::from_operation(KaminariOperation::InterfaceTerse),
+                KaminariMcpTool::from_operation(KaminariOperation::RouteSummary),
+                KaminariMcpTool::from_operation(KaminariOperation::CommitCheck),
+                KaminariMcpTool::from_operation(KaminariOperation::CommitConfirmed),
+                KaminariMcpTool::from_operation(KaminariOperation::RollbackZero),
             ],
         }
     }
 
-    pub fn rpc_for_tool(&self, name: &str) -> Result<String, JunosControlError> {
+    pub fn rpc_for_tool(&self, name: &str) -> Result<String, KaminariControlError> {
         self.device.validate()?;
         let tool = self
             .tools
             .iter()
             .find(|tool| tool.name == name)
-            .ok_or_else(|| JunosControlError::UnknownTool(name.to_string()))?;
+            .ok_or_else(|| KaminariControlError::UnknownTool(name.to_string()))?;
         if self.device.read_only && tool.requires_write {
-            return Err(JunosControlError::WriteBlocked(tool.name.clone()));
+            return Err(KaminariControlError::WriteBlocked(tool.name.clone()));
         }
         Ok(tool
             .operation
@@ -191,7 +191,18 @@ impl JunosMcpCatalog {
             out.push('{');
             json::push_string_field(out, "name", &tool.name, true);
             json::push_string_field(out, "description", &tool.description, false);
+            json::push_string_field(out, "operation", tool.operation.tool_name(), false);
             json::push_bool_field(out, "requires_write", tool.requires_write, false);
+            json::push_string_field(
+                out,
+                "mode",
+                if tool.requires_write {
+                    "write-guarded"
+                } else {
+                    "read-only"
+                },
+                false,
+            );
             out.push('}');
         }
         out.push(']');
@@ -200,7 +211,7 @@ impl JunosMcpCatalog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JunosControlError {
+pub enum KaminariControlError {
     EmptyField(&'static str),
     InvalidPort(&'static str),
     InvalidTimeout(&'static str),
@@ -222,15 +233,15 @@ fn xml_name(name: &str) -> String {
     out
 }
 
-fn validate_non_empty(field: &'static str, value: &str) -> Result<(), JunosControlError> {
+fn validate_non_empty(field: &'static str, value: &str) -> Result<(), KaminariControlError> {
     if value.trim().is_empty() {
-        Err(JunosControlError::EmptyField(field))
+        Err(KaminariControlError::EmptyField(field))
     } else {
         Ok(())
     }
 }
 
-impl std::fmt::Display for JunosControlError {
+impl std::fmt::Display for KaminariControlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyField(field) => write!(f, "empty field: {field}"),
@@ -242,48 +253,48 @@ impl std::fmt::Display for JunosControlError {
     }
 }
 
-impl std::error::Error for JunosControlError {}
+impl std::error::Error for KaminariControlError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{JunosControlError, JunosDeviceProfile, JunosMcpCatalog};
+    use super::{KaminariControlError, KaminariDeviceProfile, KaminariMcpCatalog};
 
     #[test]
     fn catalog_exposes_read_rpcs() {
-        let catalog = JunosMcpCatalog::rack_default(JunosDeviceProfile::rack_default(
+        let catalog = KaminariMcpCatalog::rack_default(KaminariDeviceProfile::rack_default(
             "rack-core",
             "192.0.2.10",
             "netops",
         ));
 
-        let rpc = catalog.rpc_for_tool("junos.interface_terse").unwrap();
+        let rpc = catalog.rpc_for_tool("kaminari.interface_terse").unwrap();
         assert!(rpc.contains("<get-interface-information>"));
         assert!(rpc.contains("<terse/>"));
     }
 
     #[test]
     fn catalog_blocks_write_tools_when_read_only() {
-        let catalog = JunosMcpCatalog::rack_default(JunosDeviceProfile::rack_default(
+        let catalog = KaminariMcpCatalog::rack_default(KaminariDeviceProfile::rack_default(
             "rack-core",
             "192.0.2.10",
             "netops",
         ));
 
         assert_eq!(
-            catalog.rpc_for_tool("junos.commit_confirmed"),
-            Err(JunosControlError::WriteBlocked(
-                "junos.commit_confirmed".to_string()
+            catalog.rpc_for_tool("kaminari.commit_confirmed"),
+            Err(KaminariControlError::WriteBlocked(
+                "kaminari.commit_confirmed".to_string()
             ))
         );
     }
 
     #[test]
     fn catalog_allows_confirmed_commit_when_enabled() {
-        let catalog = JunosMcpCatalog::rack_default(
-            JunosDeviceProfile::rack_default("rack-core", "192.0.2.10", "netops").allow_write(),
+        let catalog = KaminariMcpCatalog::rack_default(
+            KaminariDeviceProfile::rack_default("rack-core", "192.0.2.10", "netops").allow_write(),
         );
 
-        let rpc = catalog.rpc_for_tool("junos.commit_confirmed").unwrap();
+        let rpc = catalog.rpc_for_tool("kaminari.commit_confirmed").unwrap();
         assert!(rpc.contains("<confirmed/>"));
         assert!(rpc.contains("<confirm-timeout>5</confirm-timeout>"));
     }

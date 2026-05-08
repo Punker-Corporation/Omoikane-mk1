@@ -4,8 +4,8 @@ Data: 2026-05-06
 
 Este documento e o roteiro tecnico de longo prazo para transformar a Omoikane
 mk1 em uma engine/runtime Rust-first capaz de sustentar jogos e projetos reais.
-Ele deve servir como memoria operacional para futuras sessoes de trabalho,
-incluindo trocas de chat, conta ou agente.
+Ele deve servir como memoria operacional para ciclos futuros de trabalho,
+independentemente de quem esteja editando o repositorio.
 
 O objetivo nao e listar desejos soltos. O objetivo e manter uma sequencia clara
 de evolucao, com criterios de pronto, fronteiras de arquitetura e proximas
@@ -30,16 +30,33 @@ A Omoikane ja possui uma base forte de runtime:
 - `omoikane_app`: host headless inicial para orquestrar servidor local, cliente
   local e ticks fixos sem janela.
 - `omoikane_control`: controle de rede Rust puro, manifesto de lancamento, IP
-  overlay fixo, catalogo NETCONF e plano de automacao de rack.
-- `omoikane_web`: borda Actix Web, rotas de status/health, SQLx opcional,
-  terminal ANSI vivo, metricas Prometheus-style, dashboard JSON para Grafana,
-  geracao de perfil RouterOS para racks com RB2011, endpoints de manifesto e
-  binario `omoikane-server`.
+  overlay fixo, catalogo NETCONF, plano de publicacao global, subservidores,
+  scripts DNS RouterOS/Junos e plano de automacao de rack.
+- `omoikane_web`: borda Hayate HTTP, rotas de status/health, SQLx opcional,
+  terminal ANSI vivo, metricas Prometheus-style, dashboard JSON para Grakane,
+  site publico de teste, geracao de perfil Michisuji para racks com RB2011,
+  endpoints de manifesto/publicacao e binario `omoikane-server`.
 - `xtask`: verificacoes de layout, mapa arquitetural e regras de dependencia.
 
 O projeto esta mais proximo de um runtime multiplayer/simulacao do que de uma
 engine de criacao completa. A prioridade dos proximos ciclos deve ser criar um
 corte vertical minimo de jogo sem enfraquecer a arquitetura.
+
+## Marco de Transicao Funcional
+
+Em 2026-05-07, a Omoikane encerrou o estagio inicial. A base deixa de ser
+apenas fundacao e passa a expor um servidor funcional com launcher raiz, rotas
+operacionais, SQL opcional, observabilidade, config por arquivo e ferramentas
+de validacao.
+
+O criterio para esse marco foi:
+
+- rodar o servidor completo por `omoikane.exe`;
+- consultar status, metricas, banco, overlay e automacao por HTTP;
+- gerar painel Grakane sem depender de codigo externo embutido;
+- gerar perfil Michisuji/RB2011 auditavel;
+- executar smoke test e bench local por `xtask`;
+- preservar fronteiras de crate e validacoes do workspace.
 
 ## Norte de Produto
 
@@ -103,8 +120,8 @@ Regras desejadas para fases futuras:
 - `omoikane_app` ou crate equivalente pode depender de `sekai`, `daikoku`,
   `shinobi` e `hikari`, mas nao deve ser dependencia de nenhum deles.
 - `omoikane_web` pode depender de `daikoku` e de dependencias web externas, mas
-  `daikoku` nao deve depender de Actix Web.
-- `omoikane_control` deve permanecer Rust puro e isolado de Actix, `daikoku`,
+  `daikoku` nao deve depender de Hayate HTTP.
+- `omoikane_control` deve permanecer Rust puro e isolado de Hayate, `daikoku`,
   firmware e scripts externos.
 - Asset pipeline deve ficar em crate proprio, por exemplo `kura`, sem puxar
   renderer para simulacao.
@@ -123,16 +140,24 @@ Concluido:
 - Workspace Rust-first organizado em crates.
 - `cargo fmt`, `clippy -D warnings` e testes passando.
 - `xtask verify-layout`.
-- `xtask architecture-map`.
+- `xtask architecture-map`, com saida texto, DOT e JSON.
 - `xtask verify-architecture`.
+- `xtask web-smoke` e `xtask web-bench` para endpoints Hayate.
+- `xtask michisuji-rb2011-profile` para materializar perfil de rack.
 - CI executando layout, arquitetura, fmt, clippy, testes e cargo-deny.
 - `deny.toml` com politica permissiva inicial.
 - Docs de renderer, pesquisa, mapa e servidor.
 
+Pendencias do estagio inicial resolvidas:
+
+- `xtask architecture-map --dot` gera grafo DOT simples.
+- `xtask architecture-map --json` gera snapshot consumivel por ferramentas.
+- `xtask web-smoke` valida servidor local rodando.
+- `xtask web-bench` mede latencia basica de endpoints.
+- `xtask michisuji-rb2011-profile` materializa perfil RB2011 auditavel.
+
 Proximos ajustes pequenos:
 
-- Adicionar `xtask architecture-map --dot` para gerar grafo visual simples.
-- Adicionar `xtask architecture-map --json` apenas se houver consumidor real.
 - Melhorar mensagens de erro de `verify-architecture` com nome da regra,
   crate origem, crate destino e sugestao.
 - Adicionar um teste que garanta que novos crates precisam aparecer no mapa
@@ -472,29 +497,40 @@ Fatias:
    `HttpStatusService` parseia `GET`/`HEAD` para `/status`, `/status.json`,
    `/health` e `/healthz`, emitindo JSON direto para buffer reutilizavel.
 
-0.1. Soldar Actix Web como borda HTTP externa ao servidor autoritativo.
+0.1. Soldar Hayate HTTP como borda HTTP externa ao servidor autoritativo.
      Concluido em 2026-05-07 com `omoikane_web`, que registra rotas
      `/health`, `/healthz`, `/status` e `/status.json` sobre
      `DaikokuServer::status_snapshot`.
 
-0.2. Adicionar suporte RouterOS/RB2011 sem vendorizar firmware. Concluido em
-     2026-05-07 com `RouterOsRackProfile`, gerando comandos para RouterOS
+0.2. Adicionar suporte Michisuji/RB2011 sem vendorizar firmware. Concluido em
+     2026-05-07 com `MichisujiRackProfile`, gerando comandos para Michisuji
      stable `7.22.2`, arquitetura `mipsbe`, NAT, FastTrack opcional e perfil
      de bridge para rack.
 
 0.3. Soldar controle de rede Rust nativo. Concluido em 2026-05-07 com
      `omoikane_control`, incluindo `OverlayFixedIpProfile`,
-     `JunosMcpCatalog`, `NetworkRobotPlan` e `OmoikaneLaunchManifest`.
+     `KaminariMcpCatalog`, `MamoriPlan` e `OmoikaneLaunchManifest`.
 
 0.4. Criar servidor executavel com terminal Omoikane. Concluido em 2026-05-07
      com `cargo run -p omoikane_web --bin omoikane-server`, que inicializa
-     `DaikokuServer`, sobe Actix, imprime IP overlay fixo e expoe manifestos de
+     `DaikokuServer`, sobe Hayate, imprime IP overlay fixo e expoe manifestos de
      lancamento, automacao e NETCONF.
 
 0.5. Criar launcher raiz e observabilidade operacional. Concluido em 2026-05-07
      com `omoikane.exe` na raiz, loop de tick autoritativo, terminal ANSI vivo,
-     metricas `/metrics`, dashboard `/grafana/dashboard.json` e suporte SQLx
+     metricas `/metrics`, dashboard `/grakane/dashboard.json` e suporte SQLx
      opcional para Postgres via `/database/status`.
+
+0.6. Fechar o estagio inicial e abrir o estagio funcional. Concluido em
+     2026-05-07 com config TOML/JSON, nomes operacionais Hayate, Grakane,
+     Kaminari, Mamori e Michisuji, smoke test, bench local e documentacao em
+     portugues.
+
+0.7. Adicionar publicacao global sem fingir controle de registrar. Concluido em
+     2026-05-08 com `OmoikanePublicationPlan`, subservidores publicados,
+     `/site`, root virtual por Host publico, scripts DNS RouterOS/Junos,
+     `/servers`, `/network/publication`, metricas de publicacao e blueprint
+     VPS/VLESS Reality sem vendorizar Xray ou scripts externos.
 
 1. Definir transporte inicial.
    Pode comecar in-process/local loopback e depois UDP/QUIC/WebSocket.
@@ -735,9 +771,9 @@ if (-not $target.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)
 Remove-Item -LiteralPath $target -Recurse -Force
 ```
 
-## Politica Para Futuras Sessoes Codex
+## Politica Para Ciclos Futuros
 
-Quando uma nova sessao assumir o trabalho, ela deve:
+Quando um novo ciclo de trabalho comecar, a rotina deve:
 
 1. Ler este documento.
 2. Ler `README.md`.
@@ -757,13 +793,13 @@ Evitar:
 - Introduzir dependencia externa sem atualizar `legal.md`/`deny.toml`.
 - Fazer `git reset --hard` ou reverter mudancas locais sem pedido explicito.
 
-## Prompt de Continuidade
+## Resumo Operacional
 
-Use este bloco quando precisar continuar em outro chat ou conta:
+Use este bloco como resumo local de continuidade:
 
 ```text
-Voce esta trabalhando no repositorio Omoikane-mk1-fresh, uma engine/runtime
-experimental Rust-first. Leia primeiro:
+Repositorio Omoikane-mk1, engine/runtime experimental Rust-first. Leia
+primeiro:
 
 - README.md
 - docs/Omoikane Roadmap.md
@@ -780,10 +816,11 @@ Estado arquitetural:
 - shinobi: cliente, prediction/interpolation.
 - hikari: renderer CPU-only, render graph, resources, command lists, pipelines,
   frame submissions e catalogo de validacao.
-- omoikane_control: launcher, overlay fixo, automacao de rack e NETCONF.
-- omoikane_web: integracao Actix Web, binario omoikane-server, launcher raiz,
-  SQLx, observabilidade e perfil RouterOS/RB2011.
-- xtask: verify-layout, architecture-map e verify-architecture.
+- omoikane_control: launcher, overlay fixo, Kaminari, Mamori e manifestos.
+- omoikane_web: Hayate HTTP, binario omoikane-server, launcher raiz, SQLx,
+  Grakane, terminal vivo e Michisuji/RB2011.
+- xtask: verify-layout, architecture-map, verify-architecture, web-smoke,
+  web-bench e michisuji-rb2011-profile.
 
 Regras:
 
@@ -796,14 +833,13 @@ Regras:
 
 Proxima direcao recomendada:
 
-1. Adicionar configuracao TOML/JSON para bind, workers, rotas, SQLx e perfil
-   RouterOS.
-2. Criar benchmark local para comparar `/health`, `/status`, `/metrics` e
-   `/database/status` entre o codec HTTP/1 minimo de `daikoku` e a borda Actix
-   Web de `omoikane_web`.
-3. Adicionar backend opcional para aplicar perfis de overlay usando ferramentas
+1. Criar transporte jogavel alem do loop local, ligado ao subservidor `game`.
+2. Adicionar backend opcional para aplicar perfis de overlay usando ferramentas
    legitimas ja instaladas pelo operador.
-4. Depois integrar renderer 2D real com backend isolado e feature-gated.
+3. Integrar renderer 2D real com backend isolado e feature-gated.
+4. Criar cliente executavel com janela e debug overlay.
+5. Criar provedor DNS autoritativo pluggable para ambientes onde o operador
+   fornece credenciais explicitas.
 
 Validacao padrao:
 
@@ -811,6 +847,8 @@ cargo fmt --all -- --check
 cargo run -p xtask -- verify-layout
 cargo run -p xtask -- verify-architecture
 cargo run -p xtask -- architecture-map
+cargo run -p xtask -- architecture-map --dot
+cargo run -p xtask -- architecture-map --json
 cargo test -p omoikane_control
 cargo test -p omoikane_web
 cargo run -p omoikane_web --bin omoikane-server -- --help

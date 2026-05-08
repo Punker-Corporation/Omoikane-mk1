@@ -1,4 +1,4 @@
-# Omoikane Research Intake
+# Intake Tecnico e Cientifico da Omoikane
 
 Data: 2026-05-03
 
@@ -80,6 +80,7 @@ Este documento registra a varredura inicial de artigos, TCCs, teses, talks tecni
 ## Primeiros alvos concretos
 
 1. Implementar `xtask architecture-map` para medir acoplamento real da Omoikane.
+   Concluido com saidas texto, DOT e JSON.
 2. Criar `docs/Renderer Architecture.md` com o contrato de `hikari`.
 3. Adicionar `cargo-deny` e uma politica de licencas permissivas. Concluido em 2026-05-05.
 4. Criar crate `hikari` vazio com testes de render graph puro em CPU, sem abrir janela. Concluido em 2026-05-05.
