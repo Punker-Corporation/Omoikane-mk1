@@ -27,12 +27,16 @@ renderer a conhecerem a borda web.
 `configure_omoikane_routes` registra:
 
 - `GET /` e `GET /console`
+- `GET /site`
 - `GET /health` e `GET /healthz`
 - `GET /status` e `HEAD /status`
 - `GET /status.json` e `HEAD /status.json`
 - `GET /launch` e `HEAD /launch`
 - `GET /launch.json` e `HEAD /launch.json`
 - `GET /network/dns`
+- `GET /network/publication`
+- `GET /network/dns/routeros.rsc`
+- `GET /network/dns/junos.set`
 - `GET /network/overlay`
 - `GET /network/overlay/server.conf`
 - `GET /network/overlay/peer.conf`
@@ -43,6 +47,8 @@ renderer a conhecerem a borda web.
 - `GET /database/status`
 - `GET /security/status`
 - `GET /security/monitoring`
+- `GET /servers`
+- `GET /vps/reality-blueprint`
 - `GET /metrics`
 - `GET /grakane/dashboard.json`
 
@@ -52,7 +58,8 @@ observabilidade, nao como segunda fonte de estado.
 
 Quando o cliente anuncia `Accept: text/html`, as rotas operacionais que seriam
 cruas no navegador entregam o console Mikado. O console une status, links, DNS,
-firewall, SQLx, Grakane, Sentinel, Michisuji e Kaminari em uma unica pagina.
+publicacao, subservidores, firewall, SQLx, Grakane, Sentinel, Michisuji,
+Kaminari e blueprint VPS em uma unica pagina.
 Requisicoes tecnicas com `Accept: application/json` ou `Accept: text/plain`
 continuam recebendo os formatos estaveis de automacao.
 
@@ -90,10 +97,16 @@ Campos aceitos:
 - `kaminari_host`
 - `kaminari_username`
 - `public_dns_name`
+- `public_dns_target`
 - `grakane_admin_gmail`
 - `anti_ddos_enabled`
 - `anti_ddos_window_seconds`
 - `anti_ddos_max_requests`
+- `public_site_enabled`
+- `game_server_enabled`
+- `game_server_port`
+- `vps_mode_enabled`
+- `vps_reality_sni`
 
 Argumentos de CLI aplicados depois de `--config` sobrescrevem o arquivo.
 
@@ -112,6 +125,35 @@ mantem lista de escolhas de host, TTL, tipo de registro e dica de provedor, sem
 executar Python ou scripts externos. O `public_dns_name` escolhido vira a base
 dos links publicos do manifesto. Na ausencia de DNS explicito, a Omoikane usa o
 endereco overlay ou o bind local.
+
+## Publicacao Global
+
+`OmoikanePublicationPlan` e o corte que transforma DNS em um plano operacional.
+Ele deriva:
+
+- site publico de teste;
+- subservidores `site`, `console`, `status`, `metrics`, `game` e
+  `vps-reality`;
+- registros DNS pretendidos quando o host escolhido e um dominio publicavel;
+- script RouterOS local em `/network/dns/routeros.rsc`;
+- comandos Junos de static host mapping em `/network/dns/junos.set`;
+- blueprint VPS/Reality em `/vps/reality-blueprint`.
+
+O site publico fica em `/site`. A raiz `/` continua sendo o console local, mas
+vira site publico quando o header `Host` bate com `public_dns_name`, evitando
+que `127.0.0.1:8080` perca o console de operacao.
+
+`public_dns_target` e o alvo do DNS autoritativo. Se ele nao for informado, a
+Omoikane usa o IP overlay ou bind atual como alvo de plano. Isso e util para
+laboratorio, mas nao torna um dominio acessivel na Internet sozinho. Para abrir
+`Omoikane.com` de outra rede, o operador precisa controlar o dominio, apontar o
+DNS autoritativo para um IP publico real e liberar NAT, firewall, tunnel ou VPS
+ate o processo Hayate.
+
+O blueprint VPS segue o modelo operacional de Xray/VLESS Reality somente como
+contrato de publicacao: host, porta, SNI, entradas que o operador deve fornecer
+e notas de seguranca. A Omoikane nao instala Xray, nao gera credenciais de
+proxy, nao embute 3x-ui e nao copia scripts externos.
 
 ## Overlay
 
@@ -180,9 +222,9 @@ cargo run -p xtask -- michisuji-rb2011-profile --server 100.104.1.10 --port 8080
 O script deve ser revisado antes de producao, porque enderecos, interfaces,
 politicas e topologia variam por rack.
 
-No console Mikado, os comandos `routeros` e `juniper` mostram a interface
-Rust-native de Michisuji e Kaminari no mesmo terminal web, sem embutir firmware
-ou clientes externos.
+No console Mikado, os comandos `publish`, `vps`, `routeros` e `juniper` mostram
+a publicacao global, o blueprint VPS, a interface Rust-native de Michisuji e
+Kaminari no mesmo terminal web, sem embutir firmware ou clientes externos.
 
 ## Ferramentas de Validacao
 

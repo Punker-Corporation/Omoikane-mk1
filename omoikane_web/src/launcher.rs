@@ -144,8 +144,24 @@ pub fn parse_launch_args(
                 config.kaminari_username = next_value(&mut args, "--kaminari-user")?
             }
             "--public-dns" => config.public_dns_name = Some(next_value(&mut args, "--public-dns")?),
+            "--public-dns-target" => {
+                config.public_dns_target = Some(next_value(&mut args, "--public-dns-target")?)
+            }
+            "--public-site" => config.public_site_enabled = true,
+            "--no-public-site" => config.public_site_enabled = false,
             "--grakane-admin-gmail" => {
                 config.grakane_admin_gmail = Some(next_value(&mut args, "--grakane-admin-gmail")?)
+            }
+            "--game-server" => config.game_server_enabled = true,
+            "--no-game-server" => config.game_server_enabled = false,
+            "--game-port" => {
+                config.game_server_port =
+                    parse_u16(&next_value(&mut args, "--game-port")?, "--game-port")?
+            }
+            "--vps-mode" => config.vps_mode_enabled = true,
+            "--no-vps-mode" => config.vps_mode_enabled = false,
+            "--vps-reality-sni" => {
+                config.vps_reality_sni = Some(next_value(&mut args, "--vps-reality-sni")?)
             }
             "--anti-ddos" => config.anti_ddos_enabled = true,
             "--no-anti-ddos" => config.anti_ddos_enabled = false,
@@ -249,10 +265,10 @@ fn read_index(label: &str, len: usize, default: usize) -> io::Result<usize> {
         if trimmed.is_empty() {
             return Ok(default.min(len.saturating_sub(1)));
         }
-        if let Ok(index) = trimmed.parse::<usize>() {
-            if index < len {
-                return Ok(index);
-            }
+        if let Ok(index) = trimmed.parse::<usize>()
+            && index < len
+        {
+            return Ok(index);
         }
         println!("Escolha um numero entre 0 e {}.", len.saturating_sub(1));
     }
@@ -369,7 +385,13 @@ fn print_help() {
     println!("  --kaminari-host <host>");
     println!("  --kaminari-user <user>");
     println!("  --public-dns <host>");
+    println!("  --public-dns-target <host-or-ip>");
+    println!("  --public-site | --no-public-site");
     println!("  --grakane-admin-gmail <gmail>");
+    println!("  --game-server | --no-game-server");
+    println!("  --game-port <udp-port>");
+    println!("  --vps-mode | --no-vps-mode");
+    println!("  --vps-reality-sni <sni-host>");
     println!("  --anti-ddos | --no-anti-ddos");
     println!("  --anti-ddos-window <seconds>");
     println!("  --anti-ddos-max-requests <count>");
@@ -377,7 +399,12 @@ fn print_help() {
     println!("  without arguments, Omoikane opens the IP/DNS/Gmail terminal before launch");
     println!("  without --port, Omoikane uses 8080 or the first free port from 8081..8099");
     println!("endpoints:");
-    println!("  / /console /status /launch /metrics /grakane/dashboard.json /database/status");
+    println!(
+        "  / /site /console /status /launch /servers /metrics /grakane/dashboard.json /database/status"
+    );
+    println!(
+        "  /network/publication /network/dns/routeros.rsc /network/dns/junos.set /vps/reality-blueprint"
+    );
     println!("  /automation/mamori /automation/kaminari/tools /automation/michisuji/rb2011.rsc");
 }
 
@@ -399,8 +426,16 @@ mod tests {
                 "32",
                 "--public-dns",
                 "rack.example",
+                "--public-dns-target",
+                "203.0.113.10",
                 "--grakane-admin-gmail",
                 "host@gmail.com",
+                "--game-server",
+                "--game-port",
+                "7777",
+                "--vps-mode",
+                "--vps-reality-sni",
+                "front.example",
                 "--anti-ddos-max-requests",
                 "1200",
                 "--no-overlay",
@@ -415,10 +450,15 @@ mod tests {
         assert!(config.database_url.is_some());
         assert!(!config.overlay_enabled);
         assert_eq!(config.public_dns_name.as_deref(), Some("rack.example"));
+        assert_eq!(config.public_dns_target.as_deref(), Some("203.0.113.10"));
         assert_eq!(
             config.grakane_admin_gmail.as_deref(),
             Some("host@gmail.com")
         );
+        assert!(config.game_server_enabled);
+        assert_eq!(config.game_server_port, 7777);
+        assert!(config.vps_mode_enabled);
+        assert_eq!(config.vps_reality_sni.as_deref(), Some("front.example"));
         assert_eq!(config.anti_ddos_max_requests, 1200);
     }
 

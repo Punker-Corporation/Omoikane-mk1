@@ -14,12 +14,19 @@ Agora a Omoikane possui:
 - binario Rust `omoikane-server` dentro de `omoikane_web`;
 - borda HTTP Hayate baseada em dependencia Rust versionada;
 - console unico Mikado em `/` e `/console`, com visual de terminal de rack;
+- site publico de teste em `/site` e na raiz quando o Host bate com o DNS
+  publico configurado;
 - painel Grakane em `/grakane/dashboard.json`;
 - DNS automatico Rust-native em `/network/dns`;
+- plano de publicacao global em `/network/publication` e `/servers`;
+- scripts DNS auditaveis para RouterOS e Junos em
+  `/network/dns/routeros.rsc` e `/network/dns/junos.set`;
 - firewall logico anti-DDoS e sentinel de monitoramento em `/security/status`;
 - automacao Kaminari para catalogo NETCONF;
 - plano Mamori para aceitacao de rack;
 - gerador Michisuji para RB2011 em `/automation/michisuji/rb2011.rsc`;
+- blueprint VPS/VLESS Reality em `/vps/reality-blueprint`, sem vendorizar Xray
+  ou scripts externos;
 - suporte SQL opcional via SQLx/PostgreSQL;
 - terminal ANSI vivo com metricas e analise de maquina;
 - ferramentas `xtask` para mapa arquitetural, smoke test, bench e perfil de
@@ -39,10 +46,10 @@ Agora a Omoikane possui:
   pipelines e fronteira futura de runtime grafico.
 - `omoikane_app`: host headless para orquestracao local de servidor, cliente,
   sandbox e cortes verticais.
-- `omoikane_control`: manifestos de lancamento, overlay fixo, Kaminari, Mamori
-  e automacao de rede em Rust puro.
+- `omoikane_control`: manifestos de lancamento, overlay fixo, publicacao
+  global, subservidores, Kaminari, Mamori e automacao de rede em Rust puro.
 - `omoikane_web`: launcher, Hayate HTTP, SQLx, terminal vivo, metricas,
-  Grakane e Michisuji.
+  Grakane, site publico, publicacao global e Michisuji.
 - `xtask`: verificacoes e ferramentas de manutencao do repositorio.
 
 ## Comandos
@@ -83,15 +90,21 @@ a estrutura inteira, imprime o terminal da Omoikane e expoe:
 
 - `/health` e `/healthz`;
 - `/` e `/console`;
+- `/site`;
 - `/status` e `/status.json`;
 - `/launch` e `/launch.json`;
 - `/metrics`;
 - `/database/status`;
 - `/grakane/dashboard.json`;
 - `/network/dns`;
+- `/network/publication`;
+- `/network/dns/routeros.rsc`;
+- `/network/dns/junos.set`;
 - `/network/overlay`;
 - `/network/overlay/server.conf`;
 - `/network/overlay/peer.conf`;
+- `/servers`;
+- `/vps/reality-blueprint`;
 - `/security/status`;
 - `/security/monitoring`;
 - `/automation/mamori`;
@@ -108,9 +121,21 @@ Config TOML ou JSON pode ser carregada com:
 Campos aceitos: `server_name`, `bind_host`, `port`, `max_players`,
 `tick_rate`, `overlay_seed`, `overlay_enabled`, `overlay_endpoint_hint`,
 `database_url`, `database_max_connections`, `kaminari_host` e
-`kaminari_username`, `public_dns_name`, `grakane_admin_gmail`,
-`anti_ddos_enabled`, `anti_ddos_window_seconds` e
-`anti_ddos_max_requests`.
+`kaminari_username`, `public_dns_name`, `public_dns_target`,
+`grakane_admin_gmail`, `anti_ddos_enabled`, `anti_ddos_window_seconds`,
+`anti_ddos_max_requests`, `public_site_enabled`, `game_server_enabled`,
+`game_server_port`, `vps_mode_enabled` e `vps_reality_sni`.
+
+Exemplo de publicacao para um dominio real:
+
+```powershell
+.\omoikane.exe --name Omoikane --bind 0.0.0.0 --port 8080 --public-dns Omoikane.com --public-dns-target edge.seu-dominio.net --game-server --vps-mode --vps-reality-sni front.seu-dominio.net
+```
+
+Omoikane gera o plano, os subservidores e os scripts de roteador. Para que
+`Omoikane.com` abra de outra rede, o operador ainda precisa controlar o
+dominio, apontar o DNS autoritativo para um IP publico real e liberar NAT,
+firewall ou tunnel ate a maquina que roda o servidor.
 
 Quando `/status`, `/metrics`, `/launch` ou `/grakane/dashboard.json` sao
 abertos por navegador com `Accept: text/html`, Hayate entrega o console unico.

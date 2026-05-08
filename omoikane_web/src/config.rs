@@ -18,10 +18,16 @@ struct LaunchFileConfig {
     kaminari_host: Option<String>,
     kaminari_username: Option<String>,
     public_dns_name: Option<String>,
+    public_dns_target: Option<String>,
     grakane_admin_gmail: Option<String>,
     anti_ddos_enabled: Option<bool>,
     anti_ddos_window_seconds: Option<u16>,
     anti_ddos_max_requests: Option<u32>,
+    public_site_enabled: Option<bool>,
+    game_server_enabled: Option<bool>,
+    game_server_port: Option<u16>,
+    vps_mode_enabled: Option<bool>,
+    vps_reality_sni: Option<String>,
 }
 
 pub fn load_launch_config_file(
@@ -94,6 +100,9 @@ fn apply_file_config(config: &mut OmoikaneLaunchConfig, file: LaunchFileConfig) 
     if let Some(value) = file.public_dns_name {
         config.public_dns_name = Some(value);
     }
+    if let Some(value) = file.public_dns_target {
+        config.public_dns_target = Some(value);
+    }
     if let Some(value) = file.grakane_admin_gmail {
         config.grakane_admin_gmail = Some(value);
     }
@@ -105,6 +114,21 @@ fn apply_file_config(config: &mut OmoikaneLaunchConfig, file: LaunchFileConfig) 
     }
     if let Some(value) = file.anti_ddos_max_requests {
         config.anti_ddos_max_requests = value;
+    }
+    if let Some(value) = file.public_site_enabled {
+        config.public_site_enabled = value;
+    }
+    if let Some(value) = file.game_server_enabled {
+        config.game_server_enabled = value;
+    }
+    if let Some(value) = file.game_server_port {
+        config.game_server_port = value;
+    }
+    if let Some(value) = file.vps_mode_enabled {
+        config.vps_mode_enabled = value;
+    }
+    if let Some(value) = file.vps_reality_sni {
+        config.vps_reality_sni = Some(value);
     }
 }
 
@@ -127,8 +151,14 @@ tick_rate = 120
 overlay_enabled = false
 kaminari_host = "192.0.2.1"
 public_dns_name = "rack.example"
+public_dns_target = "203.0.113.10"
 grakane_admin_gmail = "host@gmail.com"
 anti_ddos_max_requests = 1200
+public_site_enabled = true
+game_server_enabled = true
+game_server_port = 7777
+vps_mode_enabled = true
+vps_reality_sni = "front.example"
 "#,
         )
         .unwrap();
@@ -143,11 +173,17 @@ anti_ddos_max_requests = 1200
         assert!(!config.overlay_enabled);
         assert_eq!(config.kaminari_host, "192.0.2.1");
         assert_eq!(config.public_dns_name.as_deref(), Some("rack.example"));
+        assert_eq!(config.public_dns_target.as_deref(), Some("203.0.113.10"));
         assert_eq!(
             config.grakane_admin_gmail.as_deref(),
             Some("host@gmail.com")
         );
         assert_eq!(config.anti_ddos_max_requests, 1200);
+        assert!(config.public_site_enabled);
+        assert!(config.game_server_enabled);
+        assert_eq!(config.game_server_port, 7777);
+        assert!(config.vps_mode_enabled);
+        assert_eq!(config.vps_reality_sni.as_deref(), Some("front.example"));
     }
 
     #[test]

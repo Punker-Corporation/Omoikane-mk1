@@ -3,6 +3,9 @@ use crate::json;
 use crate::kaminari::{KaminariDeviceProfile, KaminariMcpCatalog};
 use crate::mamori::MamoriPlan;
 use crate::overlay::OverlayFixedIpProfile;
+use crate::publication::{
+    DEFAULT_GAME_SERVER_PORT, OmoikanePublicationOptions, OmoikanePublicationPlan,
+};
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,10 +23,16 @@ pub struct OmoikaneLaunchConfig {
     pub kaminari_host: String,
     pub kaminari_username: String,
     pub public_dns_name: Option<String>,
+    pub public_dns_target: Option<String>,
     pub grakane_admin_gmail: Option<String>,
     pub anti_ddos_enabled: bool,
     pub anti_ddos_window_seconds: u16,
     pub anti_ddos_max_requests: u32,
+    pub public_site_enabled: bool,
+    pub game_server_enabled: bool,
+    pub game_server_port: u16,
+    pub vps_mode_enabled: bool,
+    pub vps_reality_sni: Option<String>,
 }
 
 impl Default for OmoikaneLaunchConfig {
@@ -42,10 +51,16 @@ impl Default for OmoikaneLaunchConfig {
             kaminari_host: "192.168.88.1".to_string(),
             kaminari_username: "netops".to_string(),
             public_dns_name: None,
+            public_dns_target: None,
             grakane_admin_gmail: None,
             anti_ddos_enabled: true,
             anti_ddos_window_seconds: 60,
             anti_ddos_max_requests: 900,
+            public_site_enabled: true,
+            game_server_enabled: false,
+            game_server_port: DEFAULT_GAME_SERVER_PORT,
+            vps_mode_enabled: false,
+            vps_reality_sni: None,
         }
     }
 }
@@ -80,6 +95,28 @@ impl OmoikaneLaunchConfig {
             &self.kaminari_host,
             &self.kaminari_username,
         );
+        let publication_target = self
+            .public_dns_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                self.overlay_endpoint_hint
+                    .as_deref()
+                    .and_then(endpoint_host_hint)
+            })
+            .unwrap_or_else(|| public_address.clone());
+        let publication = OmoikanePublicationPlan::new(OmoikanePublicationOptions {
+            base_host: dns.selected_host.clone(),
+            target_host: publication_target,
+            http_port: self.port,
+            public_site_enabled: self.public_site_enabled,
+            game_server_enabled: self.game_server_enabled,
+            game_server_port: self.game_server_port,
+            vps_mode_enabled: self.vps_mode_enabled,
+            vps_reality_sni: self.vps_reality_sni.clone(),
+        });
 
         Ok(OmoikaneLaunchManifest {
             endpoint: ServerEndpoint {
@@ -90,6 +127,7 @@ impl OmoikaneLaunchConfig {
             },
             config: self.clone(),
             dns,
+            publication,
             overlay,
             kaminari: KaminariMcpCatalog::rack_default(kaminari_device),
             mamori: MamoriPlan::rack_acceptance(public_address, &self.kaminari_host),
@@ -128,6 +166,15 @@ impl OmoikaneLaunchConfig {
         if self.anti_ddos_max_requests == 0 {
             return Err(LaunchConfigError::InvalidCount("anti_ddos_max_requests"));
         }
+        if self.game_server_port == 0 {
+            return Err(LaunchConfigError::InvalidPort("game_server_port"));
+        }
+        if let Some(target) = &self.public_dns_target {
+            validate_non_empty("public_dns_target", target)?;
+        }
+        if let Some(sni) = &self.vps_reality_sni {
+            validate_non_empty("vps_reality_sni", sni)?;
+        }
         if let Some(gmail) = &self.grakane_admin_gmail {
             validate_gmail(gmail)?;
         }
@@ -148,6 +195,7 @@ pub struct OmoikaneLaunchManifest {
     pub config: OmoikaneLaunchConfig,
     pub endpoint: ServerEndpoint,
     pub dns: OmoikaneDnsPlan,
+    pub publication: OmoikanePublicationPlan,
     pub overlay: Option<OverlayFixedIpProfile>,
     pub kaminari: KaminariMcpCatalog,
     pub mamori: MamoriPlan,
@@ -194,6 +242,19 @@ impl OmoikaneLaunchManifest {
             .expect("writing terminal to String cannot fail");
         writeln!(out, " dns selected  : {}", self.dns.selected_host)
             .expect("writing terminal to String cannot fail");
+        writeln!(
+            out,
+            " public site   : {}",
+            self.publication.public_site_url()
+        )
+        .expect("writing terminal to String cannot fail");
+        writeln!(
+            out,
+            " subservers    : {} published / target {}",
+            self.publication.subservers.len(),
+            self.publication.target_host
+        )
+        .expect("writing terminal to String cannot fail");
         writeln!(
             out,
             " grakane gmail : {}",
@@ -273,6 +334,12 @@ impl OmoikaneLaunchManifest {
             json::push_field_name(out, "public_dns_name", false);
             out.push_str("null");
         }
+        if let Some(public_dns_target) = &self.config.public_dns_target {
+            json::push_string_field(out, "public_dns_target", public_dns_target, false);
+        } else {
+            json::push_field_name(out, "public_dns_target", false);
+            out.push_str("null");
+        }
         json::push_bool_field(
             out,
             "grakane_admin_gmail_configured",
@@ -297,7 +364,29 @@ impl OmoikaneLaunchManifest {
             self.config.anti_ddos_max_requests as usize,
             false,
         );
+        json::push_bool_field(
+            out,
+            "public_site_enabled",
+            self.config.public_site_enabled,
+            false,
+        );
+        json::push_bool_field(
+            out,
+            "game_server_enabled",
+            self.config.game_server_enabled,
+            false,
+        );
+        json::push_u16_field(out, "game_server_port", self.config.game_server_port, false);
+        json::push_bool_field(out, "vps_mode_enabled", self.config.vps_mode_enabled, false);
+        if let Some(vps_reality_sni) = &self.config.vps_reality_sni {
+            json::push_string_field(out, "vps_reality_sni", vps_reality_sni, false);
+        } else {
+            json::push_field_name(out, "vps_reality_sni", false);
+            out.push_str("null");
+        }
         out.push('}');
+        json::push_field_name(out, "publication", false);
+        self.publication.write_json(out);
         json::push_field_name(out, "overlay", false);
         if let Some(overlay) = &self.overlay {
             overlay.write_json(out);
@@ -355,6 +444,22 @@ fn mask_gmail(value: &str) -> String {
     format!("{visible}***@{domain}")
 }
 
+fn endpoint_host_hint(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(rest) = value.strip_prefix('[') {
+        let (host, _) = rest.split_once(']')?;
+        return (!host.is_empty()).then(|| host.to_string());
+    }
+    if value.matches(':').count() == 1 {
+        let (host, _) = value.split_once(':')?;
+        return (!host.is_empty()).then(|| host.to_string());
+    }
+    Some(value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::OmoikaneLaunchConfig;
@@ -376,6 +481,7 @@ mod tests {
         let terminal = manifest.render_terminal();
         assert!(terminal.contains("OMOIKANE SERVER TERMINAL"));
         assert!(terminal.contains("overlay ip"));
+        assert!(terminal.contains("public site"));
         assert!(terminal.contains("rack-core"));
     }
 
@@ -392,6 +498,35 @@ mod tests {
         assert_eq!(
             manifest.endpoint.public_status_url,
             "http://127.0.0.1:8080/status"
+        );
+    }
+
+    #[test]
+    fn launch_manifest_builds_publication_plan() {
+        let config = OmoikaneLaunchConfig {
+            public_dns_name: Some("omoikane.example".to_string()),
+            public_dns_target: Some("203.0.113.10".to_string()),
+            game_server_enabled: true,
+            vps_mode_enabled: true,
+            vps_reality_sni: Some("front.example".to_string()),
+            ..OmoikaneLaunchConfig::default()
+        };
+        let manifest = config.build_manifest().unwrap();
+
+        assert_eq!(manifest.publication.base_host, "omoikane.example");
+        assert!(
+            manifest
+                .publication
+                .dns_records
+                .iter()
+                .any(|record| record.name == "omoikane.example" && record.value == "203.0.113.10")
+        );
+        assert!(
+            manifest
+                .publication
+                .subservers
+                .iter()
+                .any(|server| server.id == "vps-reality" && server.enabled)
         );
     }
 }

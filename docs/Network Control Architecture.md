@@ -15,6 +15,8 @@ opacos ou firmware embutido.
   WireGuard-style e URL publica de status.
 - `OmoikaneDnsPlan`: gera lista DNS/local/overlay para publicacao automatica
   dos links.
+- `OmoikanePublicationPlan`: gera subservidores, registros DNS pretendidos,
+  scripts RouterOS/Junos de resolvedor local e blueprint VPS/Reality.
 - `OmoikaneLaunchConfig` e `OmoikaneLaunchManifest`: descrevem bind, porta,
   tick rate, jogadores, overlay, DNS, Gmail do Grakane, budget anti-DDoS,
   banco e automacao.
@@ -56,10 +58,47 @@ sem depender de crate externo. A Omoikane gera a configuracao e deixa a parte
 fisica do tunel explicita: peers, chaves e endpoints precisam ser legitimos e
 fornecidos pelo operador.
 
+## DNS, Subservidores e Publicacao
+
+O DNS automatico agora tem duas camadas:
+
+1. `OmoikaneDnsPlan` escolhe a identidade de acesso do servidor.
+2. `OmoikanePublicationPlan` transforma essa identidade em subservidores e
+   registros de publicacao.
+
+Quando `public_dns_name` e um dominio publicavel, o plano gera um registro apex
+para `public_dns_target` e CNAMEs para `console`, `status`, `metrics`, `game` e
+`vps`. Quando o host escolhido e local, IP cru ou `.localhost`, o plano nao
+finge DNS publico: ele retorna scripts com comentarios e deixa o operador ver
+que nao ha registros autoritativos aplicaveis.
+
+RouterOS e Junos entram como saidas auditaveis:
+
+- RouterOS recebe entradas em `/ip dns static`, adequadas para resolvedor local
+  do rack.
+- Junos recebe `set system static-host-mapping` para registros A/AAAA e comenta
+  CNAMEs, porque static host mapping nao substitui DNS autoritativo.
+
+Essas saidas nao registram dominio em provedor externo. Elas ajudam a preparar
+o rack, validar nomes localmente e reduzir erro operacional antes da mudanca no
+DNS real.
+
+O site publico de teste fica em `/site`. A raiz `/` so entrega esse site quando
+o header `Host` bate com `public_dns_name`; acessos locais continuam vendo o
+console Mikado.
+
+O blueprint VPS/Reality registra a opcao de rodar a Omoikane atras de uma borda
+VPS gerenciada pelo operador. O manifesto publica host, porta, SNI e entradas
+necessarias, mas nao baixa, instala ou empacota Xray, 3x-ui, chaves ou scripts
+de terceiros.
+
 ## Rotas de Controle
 
 - `/launch`: manifesto completo de lancamento.
 - `/network/dns`: plano DNS automatico e escolhas disponiveis.
+- `/network/publication`: plano de publicacao global, subservidores e DNS.
+- `/network/dns/routeros.rsc`: script RouterOS para entradas DNS locais.
+- `/network/dns/junos.set`: comandos Junos de static host mapping.
 - `/network/overlay`: perfil overlay em JSON.
 - `/network/overlay/server.conf`: config WireGuard-style do lado servidor.
 - `/network/overlay/peer.conf`: bloco peer para cliente ou roteador.
@@ -73,7 +112,10 @@ fornecidos pelo operador.
 - `/security/monitoring`: Sentinel com DNS watch e forense da maquina host.
 - `/metrics`: metricas de runtime.
 - `/grakane/dashboard.json`: painel Grakane em JSON.
+- `/servers`: lista de subservidores publicados ou planejados.
+- `/vps/reality-blueprint`: contrato VPS/VLESS Reality sem instalador externo.
 - `/` e `/console`: console unico Mikado para operacao humana.
+- `/site`: site publico de teste.
 
 ## Comandos de Manutencao
 
@@ -100,6 +142,10 @@ cargo run -p xtask -- web-bench --host 127.0.0.1 --port 8080 --path /status --re
 - O arquivo de firmware ou pacote de roteador que existir localmente nao entra
   no manifesto, nao e convertido e nao e empacotado. Michisuji representa a
   interface de configuracao em Rust puro.
+- Arquivos `*.npk` ficam ignorados pelo git para evitar que firmware RouterOS
+  local entre em PR por acidente.
+- O plano VPS/Reality e somente blueprint. Credenciais, chaves, UUIDs,
+  politicas de uso e instalacao de Xray ficam fora do repositorio.
 
 ## Marco Funcional
 
@@ -109,6 +155,8 @@ Os cortes pendentes do controle de rede foram fechados neste marco:
 - terminal Mikado com selecao de IP, DNS e Gmail;
 - console unico em HTML para navegador;
 - plano DNS automatico Rust-native;
+- plano de publicacao global com subservidores, scripts RouterOS/Junos e site
+  publico de teste;
 - guardiao anti-DDoS e Sentinel;
 - gerador `xtask` de perfil Michisuji/RB2011;
 - smoke test ativo contra servidor local;

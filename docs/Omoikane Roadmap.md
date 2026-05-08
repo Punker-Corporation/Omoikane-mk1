@@ -30,11 +30,12 @@ A Omoikane ja possui uma base forte de runtime:
 - `omoikane_app`: host headless inicial para orquestrar servidor local, cliente
   local e ticks fixos sem janela.
 - `omoikane_control`: controle de rede Rust puro, manifesto de lancamento, IP
-  overlay fixo, catalogo NETCONF e plano de automacao de rack.
+  overlay fixo, catalogo NETCONF, plano de publicacao global, subservidores,
+  scripts DNS RouterOS/Junos e plano de automacao de rack.
 - `omoikane_web`: borda Hayate HTTP, rotas de status/health, SQLx opcional,
   terminal ANSI vivo, metricas Prometheus-style, dashboard JSON para Grakane,
-  geracao de perfil Michisuji para racks com RB2011, endpoints de manifesto e
-  binario `omoikane-server`.
+  site publico de teste, geracao de perfil Michisuji para racks com RB2011,
+  endpoints de manifesto/publicacao e binario `omoikane-server`.
 - `xtask`: verificacoes de layout, mapa arquitetural e regras de dependencia.
 
 O projeto esta mais proximo de um runtime multiplayer/simulacao do que de uma
@@ -525,6 +526,12 @@ Fatias:
      Kaminari, Mamori e Michisuji, smoke test, bench local e documentacao em
      portugues.
 
+0.7. Adicionar publicacao global sem fingir controle de registrar. Concluido em
+     2026-05-08 com `OmoikanePublicationPlan`, subservidores publicados,
+     `/site`, root virtual por Host publico, scripts DNS RouterOS/Junos,
+     `/servers`, `/network/publication`, metricas de publicacao e blueprint
+     VPS/VLESS Reality sem vendorizar Xray ou scripts externos.
+
 1. Definir transporte inicial.
    Pode comecar in-process/local loopback e depois UDP/QUIC/WebSocket.
 
@@ -826,11 +833,13 @@ Regras:
 
 Proxima direcao recomendada:
 
-1. Adicionar backend opcional para aplicar perfis de overlay usando ferramentas
+1. Criar transporte jogavel alem do loop local, ligado ao subservidor `game`.
+2. Adicionar backend opcional para aplicar perfis de overlay usando ferramentas
    legitimas ja instaladas pelo operador.
-2. Criar transporte jogavel alem do loop local.
 3. Integrar renderer 2D real com backend isolado e feature-gated.
 4. Criar cliente executavel com janela e debug overlay.
+5. Criar provedor DNS autoritativo pluggable para ambientes onde o operador
+   fornece credenciais explicitas.
 
 Validacao padrao:
 

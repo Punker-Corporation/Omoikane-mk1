@@ -19,7 +19,17 @@ pub fn render_boot_panel(
     );
     push_row(&mut out, "local", &manifest.endpoint.local_status_url);
     push_row(&mut out, "public", &manifest.endpoint.public_status_url);
+    push_row(&mut out, "site", &manifest.publication.public_site_url());
     push_row(&mut out, "dns", &manifest.dns.selected_host);
+    push_row(
+        &mut out,
+        "subservers",
+        &format!(
+            "{} target={}",
+            manifest.publication.subservers.len(),
+            manifest.publication.target_host
+        ),
+    );
     push_row(
         &mut out,
         "overlay",
@@ -106,7 +116,17 @@ pub fn render_live_panel(
     );
     push_row(&mut out, "local", &manifest.endpoint.local_status_url);
     push_row(&mut out, "public", &manifest.endpoint.public_status_url);
+    push_row(&mut out, "site", &manifest.publication.public_site_url());
     push_row(&mut out, "dns", &manifest.dns.selected_host);
+    push_row(
+        &mut out,
+        "subservers",
+        &format!(
+            "{} target={}",
+            manifest.publication.subservers.len(),
+            manifest.publication.target_host
+        ),
+    );
     push_row(
         &mut out,
         "firewall",

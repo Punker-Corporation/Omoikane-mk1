@@ -40,11 +40,22 @@ habilita SQLite, MySQL ou MariaDB neste corte.
 Michisuji gera texto de configuracao para equipamentos RB2011, mas nao
 vendoriza firmware, pacotes proprietarios ou imagens de sistema de rede. O
 operador deve fornecer software, credenciais, chaves e endpoints legitimos.
+Arquivos de firmware/pacotes RouterOS (`*.npk`) sao ignorados pelo git e nao
+devem entrar em PRs.
 
 Kaminari gera catalogo e RPC NETCONF em XML, com perfil read-only por padrao.
 Mamori descreve plano de aceitacao, checks e rollback como dados Rust
 estruturados. Nenhuma dessas camadas copia scripts externos, clientes
 proprietarios, ativadores, instaladores quebrados ou downloads por short-link.
+
+O plano de publicacao global gera registros DNS pretendidos e saidas auditaveis
+para RouterOS/Junos, mas nao atualiza registradores ou provedores DNS sem
+credenciais explicitas do operador.
+
+O blueprint VPS/VLESS Reality e apenas um contrato operacional inspirado em
+modelos de VPS gerenciados pelo operador. A Omoikane nao vendoriza Xray, 3x-ui,
+chaves, UUIDs, instaladores ou scripts externos, e nao assume politica de uso
+de provedores de rede.
 
 ## Grakane
 

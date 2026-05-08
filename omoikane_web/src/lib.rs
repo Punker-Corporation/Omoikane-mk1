@@ -4,6 +4,7 @@ mod launcher;
 mod metrics;
 mod michisuji;
 mod monitoring;
+mod public_site;
 mod security;
 mod sql;
 mod terminal;
@@ -22,8 +23,9 @@ pub use michisuji::{
 pub use omoikane_control::{
     KaminariControlError, KaminariDeviceProfile, KaminariMcpCatalog, KaminariMcpTool,
     KaminariOperation, LaunchConfigError, MamoriCheck, MamoriDevice, MamoriPlan, MamoriPlanError,
-    OmoikaneLaunchConfig as WebLaunchConfig, OmoikaneLaunchManifest, OverlayConfigError,
-    OverlayFixedIpProfile, ServerEndpoint, stable_overlay_ip,
+    OmoikaneLaunchConfig as WebLaunchConfig, OmoikaneLaunchManifest, OmoikanePublicationPlan,
+    OmoikaneSubserver, OmoikaneVpsBlueprint, OverlayConfigError, OverlayFixedIpProfile,
+    ServerEndpoint, stable_overlay_ip,
 };
 pub use security::OmoikaneSecurityState;
 pub use sql::OmoikaneSqlState;
@@ -133,6 +135,7 @@ pub enum OmoikaneHayateError {
 
 pub fn configure_omoikane_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/", web::get().to(console_home))
+        .route("/site", web::get().to(public_site_page))
         .route("/console", web::get().to(console_home))
         .route("/health", web::get().to(health))
         .route("/healthz", web::get().to(health))
@@ -146,6 +149,14 @@ pub fn configure_omoikane_routes(cfg: &mut web::ServiceConfig) {
         .route("/launch.json", web::head().to(launch_manifest_head))
         .route("/network/overlay", web::get().to(overlay_manifest))
         .route("/network/dns", web::get().to(dns_manifest))
+        .route("/network/publication", web::get().to(publication_manifest))
+        .route(
+            "/network/dns/routeros.rsc",
+            web::get().to(routeros_dns_script),
+        )
+        .route("/network/dns/junos.set", web::get().to(junos_dns_set))
+        .route("/servers", web::get().to(subservers_manifest))
+        .route("/vps/reality-blueprint", web::get().to(vps_blueprint))
         .route(
             "/network/overlay/server.conf",
             web::get().to(overlay_server_config),
@@ -182,7 +193,21 @@ pub async fn console_home(req: HttpRequest, state: web::Data<OmoikaneHayateState
     if let Some(response) = state.security.guard(&req) {
         return response;
     }
+    if public_site::should_serve_public_site(&req, &state.launch_manifest()) {
+        return public_site::public_site_response(state.get_ref());
+    }
     console::console_response(&req, state.get_ref())
+}
+
+pub async fn public_site_page(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    public_site::public_site_response(state.get_ref())
 }
 
 pub async fn status(req: HttpRequest, state: web::Data<OmoikaneHayateState>) -> HttpResponse {
@@ -278,6 +303,82 @@ pub async fn dns_manifest(req: HttpRequest, state: web::Data<OmoikaneHayateState
     let manifest = state.launch_manifest();
     let mut body = String::new();
     manifest.dns.write_json(&mut body);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(body)
+}
+
+pub async fn publication_manifest(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    let mut body = String::new();
+    manifest.publication.write_json(&mut body);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(body)
+}
+
+pub async fn subservers_manifest(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    let mut body = String::new();
+    manifest.publication.write_subservers_json(&mut body);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(body)
+}
+
+pub async fn routeros_dns_script(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(manifest.publication.render_routeros_dns_script())
+}
+
+pub async fn junos_dns_set(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(manifest.publication.render_junos_dns_set())
+}
+
+pub async fn vps_blueprint(
+    req: HttpRequest,
+    state: web::Data<OmoikaneHayateState>,
+) -> HttpResponse {
+    state.metrics.record_http_request();
+    if let Some(response) = state.security.guard(&req) {
+        return response;
+    }
+    let manifest = state.launch_manifest();
+    let mut body = String::new();
+    manifest.publication.write_vps_json(&mut body);
     HttpResponse::Ok()
         .content_type("application/json")
         .body(body)
@@ -654,6 +755,7 @@ mod tests {
             assert!(body.contains("\"overlay\""));
             assert!(body.contains("\"kaminari\""));
             assert!(body.contains("\"mamori\""));
+            assert!(body.contains("\"publication\""));
 
             let response = test::call_service(
                 &app,
@@ -713,6 +815,70 @@ mod tests {
             let body = std::str::from_utf8(&body).unwrap();
             assert!(body.contains("Omoikane Michisuji rack profile"));
 
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/network/publication")
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("\"subservers\""));
+            assert!(body.contains("\"routeros_script_url\""));
+
+            let response =
+                test::call_service(&app, test::TestRequest::get().uri("/servers").to_request())
+                    .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("\"id\":\"site\""));
+
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/network/dns/routeros.rsc")
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("Omoikane public DNS publication plan"));
+
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/network/dns/junos.set")
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("Omoikane public DNS publication plan"));
+
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/vps/reality-blueprint")
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("VLESS Reality"));
+
+            let response =
+                test::call_service(&app, test::TestRequest::get().uri("/site").to_request()).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("<h1>Omoikane</h1>"));
+
             let response =
                 test::call_service(&app, test::TestRequest::get().uri("/metrics").to_request())
                     .await;
@@ -721,6 +887,7 @@ mod tests {
             let body = std::str::from_utf8(&body).unwrap();
             assert!(body.contains("omoikane_http_requests_total"));
             assert!(body.contains("omoikane_machine_parallelism"));
+            assert!(body.contains("omoikane_subservers_configured"));
 
             let response = test::call_service(
                 &app,
@@ -744,6 +911,41 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let body = test::read_body(response).await;
             assert_eq!(body, r#"{"enabled":false,"status":"disabled"}"#);
+        });
+    }
+
+    #[test]
+    fn hayate_root_serves_public_site_for_matching_dns_host() {
+        actix_web::rt::System::new().block_on(async {
+            let config = omoikane_control::OmoikaneLaunchConfig {
+                public_dns_name: Some("omoikane.example".to_string()),
+                public_dns_target: Some("203.0.113.10".to_string()),
+                ..omoikane_control::OmoikaneLaunchConfig::default()
+            };
+            let state = web::Data::new(OmoikaneHayateState::with_launch_config(
+                status_server(),
+                config,
+            ));
+            let app = test::init_service(
+                App::new()
+                    .app_data(state.clone())
+                    .configure(configure_omoikane_routes),
+            )
+            .await;
+
+            let response = test::call_service(
+                &app,
+                test::TestRequest::get()
+                    .uri("/")
+                    .insert_header((actix_web::http::header::HOST, "omoikane.example:8080"))
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = test::read_body(response).await;
+            let body = std::str::from_utf8(&body).unwrap();
+            assert!(body.contains("Servidor Hayate ativo"));
+            assert!(body.contains("203.0.113.10"));
         });
     }
 }

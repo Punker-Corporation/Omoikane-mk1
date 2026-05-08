@@ -600,6 +600,17 @@ fn web_smoke(args: Vec<String>) -> Result<(), String> {
         ("/metrics", "omoikane_http_requests_total"),
         ("/database/status", "\"status\""),
         ("/grakane/dashboard.json", "Omoikane Grakane Runtime"),
+        ("/network/publication", "\"subservers\""),
+        ("/servers", "\"id\":\"site\""),
+        (
+            "/network/dns/routeros.rsc",
+            "Omoikane public DNS publication plan",
+        ),
+        (
+            "/network/dns/junos.set",
+            "Omoikane public DNS publication plan",
+        ),
+        ("/vps/reality-blueprint", "VLESS Reality"),
         ("/automation/mamori", "omoikane-rack-acceptance"),
         ("/automation/kaminari/tools", "kaminari.interface_terse"),
         (

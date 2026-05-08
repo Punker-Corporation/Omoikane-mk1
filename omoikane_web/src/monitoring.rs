@@ -1,5 +1,5 @@
 use crate::security::OmoikaneSecurityState;
-use omoikane_control::OmoikaneLaunchManifest;
+use omoikane_control::{OmoikaneLaunchManifest, is_private_or_local_target};
 use std::fmt::Write as _;
 
 pub fn write_sentinel_json(
@@ -40,6 +40,15 @@ pub fn write_sentinel_json(
         security.blocked_total(),
         security.events_total(),
         security.active_clients()
+    )
+    .expect("writing sentinel json");
+    write!(
+        out,
+        r#","publication":{{"target_host":"{}","subservers":{},"external_ready":{},"site_url":"{}"}}"#,
+        json_escape(&manifest.publication.target_host),
+        manifest.publication.subservers.len(),
+        !is_private_or_local_target(&manifest.publication.target_host),
+        json_escape(&manifest.publication.public_site_url())
     )
     .expect("writing sentinel json");
     out.push_str(
@@ -115,6 +124,7 @@ mod tests {
 
         assert!(out.contains("\"phishing_risk_score\":"));
         assert!(out.contains("\"forensics\""));
+        assert!(out.contains("\"publication\""));
         assert!(out.contains("michisuji-routeros-terminal"));
     }
 }

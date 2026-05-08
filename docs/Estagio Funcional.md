@@ -15,9 +15,13 @@ automacao de rack e validacao de endpoints.
   `omoikane_web`.
 - Hayate sobe a borda HTTP do servidor.
 - Mikado entrega console unico em `/` e `/console`.
+- `/site` entrega um site publico de teste e `/` tambem entrega esse site
+  quando o Host bate com `public_dns_name`.
 - Grakane gera painel JSON em `/grakane/dashboard.json`.
 - Grakane pode exigir Gmail administrador configurado no host.
 - DNS automatico Rust-native publica escolhas em `/network/dns`.
+- Publicacao global publica `/network/publication`, `/servers`, scripts DNS
+  RouterOS/Junos e blueprint VPS/Reality.
 - Anti-DDoS e Sentinel publicam postura em `/security/status` e
   `/security/monitoring`.
 - Kaminari expoe catalogo NETCONF read-only por padrao.
@@ -43,6 +47,9 @@ O estagio funcional exige que qualquer mudanca mantenha:
 - rotas observacionais sem mutacao acidental de simulacao.
 - navegador deve receber console unico quando anunciar `Accept: text/html`;
 - automacao deve continuar recebendo JSON/Prometheus com `Accept` tecnico.
+- DNS publico real exige dominio, alvo publico e credenciais do operador; a
+  Omoikane nao deve fingir registrar `Omoikane.com` sozinha.
+- firmware `*.npk`, Xray, 3x-ui e scripts externos nao entram no repositorio.
 
 ## Checklist de Operacao
 
@@ -60,6 +67,9 @@ cargo run -p xtask -- web-bench --host 127.0.0.1 --port 8080 --path /status --re
 Abra `http://127.0.0.1:8080/` para operar a pagina unica. Abrir `/status`,
 `/metrics` ou `/grakane/dashboard.json` diretamente pelo navegador tambem deve
 cair no console, enquanto clientes tecnicos continuam recebendo os dados crus.
+Abra `http://127.0.0.1:8080/site` para ver o site publico de teste. Em dominio
+real, configure `--public-dns` e `--public-dns-target`, aplique DNS/NAT fora da
+Omoikane e valide `/network/publication`.
 
 ## Proximo Nivel
 

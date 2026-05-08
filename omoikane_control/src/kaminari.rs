@@ -191,7 +191,18 @@ impl KaminariMcpCatalog {
             out.push('{');
             json::push_string_field(out, "name", &tool.name, true);
             json::push_string_field(out, "description", &tool.description, false);
+            json::push_string_field(out, "operation", tool.operation.tool_name(), false);
             json::push_bool_field(out, "requires_write", tool.requires_write, false);
+            json::push_string_field(
+                out,
+                "mode",
+                if tool.requires_write {
+                    "write-guarded"
+                } else {
+                    "read-only"
+                },
+                false,
+            );
             out.push('}');
         }
         out.push(']');

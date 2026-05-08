@@ -225,7 +225,7 @@ button:hover, .linkbtn:hover {{ border-color:var(--cyan); color:var(--cyan); }}
         <div class="body">
           <div class="term" id="terminalOut"></div>
           <div class="cmdbar">
-            <input id="command" autocomplete="off" spellcheck="false" placeholder="status | dns | firewall | sqlx | grakane | routeros | juniper | sentinel | metrics">
+            <input id="command" autocomplete="off" spellcheck="false" placeholder="status | dns | publish | vps | firewall | sqlx | grakane | routeros | juniper | sentinel | metrics">
             <button id="runCommand">executar</button>
           </div>
         </div>
@@ -249,7 +249,7 @@ button:hover, .linkbtn:hover {{ border-color:var(--cyan); color:var(--cyan); }}
 const locked = {locked};
 const $ = (id) => document.getElementById(id);
 const terminal = $('terminalOut');
-const state = {{ status:null, launch:null, security:null, db:null, grakane:null, sentinel:null, metrics:'' }};
+const state = {{ status:null, launch:null, publication:null, security:null, db:null, grakane:null, sentinel:null, metrics:'' }};
 
 function esc(value) {{
   return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
@@ -286,6 +286,7 @@ function render() {{
   const launch = state.launch || {{}};
   const endpoint = launch.endpoint || {{}};
   const dns = launch.dns || {{ choices: [] }};
+  const publication = state.publication || {{}};
   const sec = state.security || {{}};
   const db = state.db || {{}};
   const sentinel = state.sentinel || {{}};
@@ -303,6 +304,9 @@ function render() {{
     ['bind', `${{endpoint.bind_host || '--'}}:${{endpoint.port || '--'}}`],
     ['local', endpoint.local_status_url || '--'],
     ['publico', endpoint.public_status_url || '--'],
+    ['site', publication.public_site_url || '--'],
+    ['target dns', publication.target_host || '--'],
+    ['subservidores', (publication.subservers || []).length],
     ['dns ativo', dns.selected_host || '--'],
     ['overlay', launch.overlay ? launch.overlay.address : 'desativado']
   ]);
@@ -338,11 +342,11 @@ function render() {{
 }}
 async function refresh() {{
   try {{
-    const [status, launch, security, db, grakane, sentinel, metrics] = await Promise.all([
-      getJson('/status'), getJson('/launch'), getJson('/security/status'), getJson('/database/status'),
+    const [status, launch, publication, security, db, grakane, sentinel, metrics] = await Promise.all([
+      getJson('/status'), getJson('/launch'), getJson('/network/publication'), getJson('/security/status'), getJson('/database/status'),
       getJson('/grakane/dashboard.json'), getJson('/security/monitoring'), getText('/metrics')
     ]);
-    Object.assign(state, {{ status, launch, security, db, grakane, sentinel, metrics }});
+    Object.assign(state, {{ status, launch, publication, security, db, grakane, sentinel, metrics }});
     render();
   }} catch (err) {{
     write('falha de refresh: ' + err.message, 'bad');
@@ -357,6 +361,13 @@ async function command(value) {{
       write([`estado=${{state.status?.state}} tick=${{state.status?.tick}} players=${{state.status?.players}}`, `public=${{state.launch?.endpoint?.public_status_url}}`], 'ok');
     }} else if (cmd === 'dns') {{
       write((state.launch?.dns?.choices || []).map(c => `${{c.selected ? '*' : ' '}} ${{c.label}} -> ${{c.host}} (${{c.record_type}})`));
+    }} else if (cmd === 'publish') {{
+      const records = state.publication?.dns_records || [];
+      write([`site=${{state.publication?.public_site_url || '--'}}`, `target=${{state.publication?.target_host || '--'}}`, `routeros=/network/dns/routeros.rsc`, `junos=/network/dns/junos.set`], 'ok');
+      write(records.length ? records.map(r => `${{r.record_type}} ${{r.name}} -> ${{r.value}}`) : ['sem registros DNS publicaveis para o host atual'], records.length ? '' : 'warn');
+    }} else if (cmd === 'vps') {{
+      const vps = state.publication?.vps || {{}};
+      write([`enabled=${{vps.enabled}} entry=${{vps.entry_host}}:${{vps.entry_port}} sni=${{vps.reality_sni || '--'}}`, ...((vps.safety_notes || []).map(note => 'note: ' + note))], 'warn');
     }} else if (cmd === 'firewall') {{
       write([`anti-ddos=${{state.security?.enabled}} budget=${{state.security?.max_requests}}/${{state.security?.window_seconds}}s`, `blocked=${{state.security?.blocked_total}} active_clients=${{state.security?.active_clients}}`], 'warn');
     }} else if (cmd === 'sqlx') {{
@@ -373,7 +384,7 @@ async function command(value) {{
     }} else if (cmd === 'metrics') {{
       write((state.metrics || '').trim().split('\n').slice(0, 30));
     }} else {{
-      write('comandos: status, dns, firewall, sqlx, grakane, routeros, juniper, sentinel, metrics', 'muted');
+      write('comandos: status, dns, publish, vps, firewall, sqlx, grakane, routeros, juniper, sentinel, metrics', 'muted');
     }}
   }} catch (err) {{
     write('erro: ' + err.message, 'bad');
@@ -445,12 +456,12 @@ fn percent_decode(value: &str) -> String {
                 index += 1;
             }
             b'%' if index + 2 < bytes.len() => {
-                if let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3]) {
-                    if let Ok(byte) = u8::from_str_radix(hex, 16) {
-                        out.push(byte as char);
-                        index += 3;
-                        continue;
-                    }
+                if let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3])
+                    && let Ok(byte) = u8::from_str_radix(hex, 16)
+                {
+                    out.push(byte as char);
+                    index += 3;
+                    continue;
                 }
                 out.push('%');
                 index += 1;
