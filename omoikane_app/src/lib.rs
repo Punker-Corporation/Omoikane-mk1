@@ -906,6 +906,25 @@ impl ProjectRenderPipelineConfig {
                 reason: "render pipeline must declare at least one target".to_string(),
             });
         }
+        if self
+            .color_targets
+            .iter()
+            .any(|format| TextureFormat::from(*format).is_depth())
+        {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "color targets must use color formats".to_string(),
+            });
+        }
+        if self
+            .depth_target
+            .is_some_and(|format| TextureFormat::from(format).is_color())
+        {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "depth target must use a depth format".to_string(),
+            });
+        }
         for layout in &self.vertex_buffers {
             if layout.stride_bytes == 0 {
                 return Err(ProjectConfigError::InvalidRenderPipelineResource {
@@ -2702,6 +2721,53 @@ mod tests {
             Err(ProjectConfigError::InvalidRenderPipelineResource {
                 pipeline: 67,
                 reason: "render pipeline must declare at least one target".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_render_pipeline_target_format_mismatches() {
+        let frame = CpuFrameOptions::default();
+        let mut pipeline = ProjectRenderPipelineConfig {
+            id: 68,
+            label: "mismatched_target_pipeline".to_string(),
+            vertex_shader: frame.vertex_shader.raw(),
+            fragment_shader: Some(frame.fragment_shader.raw()),
+            vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                slot: 0,
+                stride_bytes: 16,
+                step_mode: ProjectVertexStepMode::Vertex,
+            }],
+            color_targets: vec![ProjectTextureFormat::Depth32Float],
+            depth_target: None,
+            bind_group_layouts: Vec::new(),
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "mismatched-pipeline-targets".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![pipeline.clone()],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 68,
+                reason: "color targets must use color formats".to_string(),
+            })
+        );
+
+        pipeline.color_targets = Vec::new();
+        pipeline.depth_target = Some(ProjectTextureFormat::Rgba8Unorm);
+        project.resources.render_pipelines = vec![pipeline];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 68,
+                reason: "depth target must use a depth format".to_string(),
             })
         );
     }

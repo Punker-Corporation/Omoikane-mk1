@@ -184,6 +184,9 @@ como erro de projeto antes de construir o descriptor CPU-only.
 O mesmo preflight tambem rejeita pipelines sem target de cor nem depth,
 mantendo a falha no dominio do projeto em vez de delegar tudo ao descriptor
 grafico.
+Ele tambem confere a compatibilidade dos formatos de target: targets de cor
+precisam usar formatos de cor, e o target de depth precisa usar formato de
+depth.
 
 O corte seguinte adicionou cenas headless serializaveis. `ProjectSceneConfig`
 descreve camera, textura de sandbox, viewport, world view e parametros do

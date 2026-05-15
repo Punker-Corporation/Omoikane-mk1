@@ -402,6 +402,9 @@ Fatias:
 45. Validar targets de pipelines declarados no projeto. Concluido em
     2026-05-15; pipelines sem target de cor nem depth sao rejeitados como
     `ProjectConfigError` antes de construir o descriptor de `hikari`.
+46. Validar formatos de targets em pipelines declarados no projeto. Concluido
+    em 2026-05-15; color targets precisam usar formatos de cor e depth target
+    precisa usar formato de depth antes do descriptor de `hikari`.
 
 Criterios de pronto:
 
