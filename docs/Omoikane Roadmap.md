@@ -396,6 +396,9 @@ Fatias:
 43. Validar dimensoes de texturas declaradas no projeto. Concluido em
     2026-05-15; `ProjectTextureConfig` rejeita width, height ou depth/layers
     zerados como `ProjectConfigError` antes de construir recursos `hikari`.
+44. Validar stride de vertex buffers em pipelines declarados no projeto.
+    Concluido em 2026-05-15; `ProjectRenderPipelineConfig` rejeita layouts com
+    stride zero como `ProjectConfigError` antes do descriptor de `hikari`.
 
 Criterios de pronto:
 

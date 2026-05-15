@@ -191,7 +191,7 @@ impl OmoikaneProjectConfig {
             if !pipeline_ids.insert(pipeline.id) {
                 return Err(ProjectConfigError::DuplicateRenderPipelineId(pipeline.id));
             }
-            resource_config = resource_config.with_render_pipeline(pipeline.to_cpu_config());
+            resource_config = resource_config.with_render_pipeline(pipeline.to_cpu_config()?);
         }
         Ok(resource_config)
     }
@@ -899,7 +899,15 @@ pub struct ProjectRenderPipelineConfig {
 }
 
 impl ProjectRenderPipelineConfig {
-    pub fn to_cpu_config(&self) -> CpuRenderPipelineResourceConfig {
+    pub fn to_cpu_config(&self) -> Result<CpuRenderPipelineResourceConfig, ProjectConfigError> {
+        for layout in &self.vertex_buffers {
+            if layout.stride_bytes == 0 {
+                return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                    pipeline: self.id,
+                    reason: "vertex buffer stride must be non-zero".to_string(),
+                });
+            }
+        }
         let descriptor = RenderPipelineDescriptor::new(
             self.label.clone(),
             PipelineShader::new(ShaderModuleId::new(self.vertex_shader), ShaderStage::Vertex),
@@ -916,7 +924,10 @@ impl ProjectRenderPipelineConfig {
                 .copied()
                 .map(BindGroupLayoutId::new),
         );
-        CpuRenderPipelineResourceConfig::new(RenderPipelineId::new(self.id), descriptor)
+        Ok(CpuRenderPipelineResourceConfig::new(
+            RenderPipelineId::new(self.id),
+            descriptor,
+        ))
     }
 }
 
@@ -1021,6 +1032,10 @@ pub enum ProjectConfigError {
     },
     InvalidTextureResource {
         texture: u64,
+        reason: String,
+    },
+    InvalidRenderPipelineResource {
+        pipeline: u64,
         reason: String,
     },
     MissingSceneEntityId {
@@ -2614,6 +2629,40 @@ mod tests {
         assert_eq!(
             project.to_cpu_frame_resource_config(frame),
             Err(ProjectConfigError::DuplicateRenderPipelineId(64))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_render_pipeline_vertex_buffer_stride() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "empty-pipeline-vertex-buffer-stride".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 66,
+                    label: "empty_stride_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 0,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 66,
+                reason: "vertex buffer stride must be non-zero".to_string(),
+            })
         );
     }
 
