@@ -245,6 +245,9 @@ projeto explicita antes de criar entidades runtime.
 O mesmo caminho valida os dados visuais das entidades dinamicas: posicao,
 rotacao, tamanho, tint e depth precisam ser finitos, e o tamanho precisa ser
 positivo antes de alimentar o servidor autoritativo ou o `RenderExtract`.
+O extract de cena tambem ganhou uma barreira propria para dados renderizaveis:
+world view, viewport, sprite base da cena e sprites estaticos sao validados
+como configuracao de projeto antes que o app host construa o `RenderExtract`.
 
 A cena tambem pode declarar qual entidade autoral deve ser controlada pelo
 jogador local. `ProjectSceneConfig::controlled_entity` referencia um id de

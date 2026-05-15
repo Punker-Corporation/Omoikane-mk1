@@ -282,6 +282,37 @@ impl ProjectSceneConfig {
             .collect()
     }
 
+    pub fn validate_render_data(&self) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneRenderData {
+            scene: self.name.clone(),
+            reason: reason.to_string(),
+        };
+        if !is_finite_box(self.world_view) {
+            return Err(invalid("world view must be finite"));
+        }
+        if self.world_view.right <= self.world_view.left
+            || self.world_view.top <= self.world_view.bottom
+        {
+            return Err(invalid("world view must have positive width and height"));
+        }
+        if !is_positive_finite_vector(self.viewport_size) {
+            return Err(invalid("viewport size must be finite and positive"));
+        }
+        if !is_positive_finite_vector(self.sprite_size) {
+            return Err(invalid("sandbox sprite size must be finite and positive"));
+        }
+        if !is_finite_color(self.sprite_tint) {
+            return Err(invalid("sandbox sprite tint must be finite"));
+        }
+        if !self.sprite_depth.is_finite() {
+            return Err(invalid("sandbox sprite depth must be finite"));
+        }
+        for (index, sprite) in self.sprites.iter().enumerate() {
+            sprite.validate_visuals(&self.name, index)?;
+        }
+        Ok(())
+    }
+
     pub fn input_function_for_action(
         &self,
         action: &str,
@@ -669,6 +700,30 @@ impl ProjectSpriteConfig {
         Vector2::ONE
     }
 
+    fn validate_visuals(&self, scene: &str, index: usize) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneSpriteVisual {
+            scene: scene.to_string(),
+            index,
+            reason: reason.to_string(),
+        };
+        if !is_finite_vector(self.position) {
+            return Err(invalid("position must be finite"));
+        }
+        if !is_positive_finite_vector(self.size) {
+            return Err(invalid("size must be finite and positive"));
+        }
+        if !self.rotation.is_finite() {
+            return Err(invalid("rotation must be finite"));
+        }
+        if !is_finite_color(self.tint) {
+            return Err(invalid("tint must be finite"));
+        }
+        if !self.depth.is_finite() {
+            return Err(invalid("depth must be finite"));
+        }
+        Ok(())
+    }
+
     pub fn to_sprite_extract(&self, camera: ExtractCameraId) -> SpriteExtract {
         SpriteExtract::new(
             camera,
@@ -922,6 +977,15 @@ pub enum ProjectConfigError {
     InvalidScenePhysicsValue {
         scene: String,
         entity: String,
+        reason: String,
+    },
+    InvalidSceneRenderData {
+        scene: String,
+        reason: String,
+    },
+    InvalidSceneSpriteVisual {
+        scene: String,
+        index: usize,
         reason: String,
     },
     MissingSceneEntityId {
@@ -1594,6 +1658,7 @@ impl HeadlessApp {
         scene_name: &str,
     ) -> Result<RenderExtract, ProjectSceneRenderError> {
         let scene = project.scene(scene_name)?;
+        scene.validate_render_data()?;
         let mut extract = self
             .build_render_extract(scene.to_render_options())
             .map_err(ProjectSceneRenderError::InvalidExtract)?;
@@ -2555,6 +2620,120 @@ mod tests {
         assert_eq!(extract.sprites()[2].position(), Vector2::new(-1.0, -2.0));
         assert_eq!(extract.sprites()[2].rotation(), 0.5);
         assert_eq!(extract.validate().expect("valid extract").sprite_count(), 3);
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_render_data_before_extract() {
+        let app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-render-data".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 101,
+                sandbox_texture: 102,
+                world_view: Box2::new(1.0, -1.0, 1.0, 1.0),
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "world view must have positive width and height".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.world_view = RenderFrameOptions::default().world_view;
+        scene.sprite_size = Vector2::new(1.0, 0.0);
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "sandbox sprite size must be finite and positive".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.sprite_size = Vector2::ONE;
+        scene.sprite_tint.r = f32::NAN;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "sandbox sprite tint must be finite".to_string(),
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_static_sprites_before_extract() {
+        let app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-static-sprites".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 101,
+                sandbox_texture: 102,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: vec![ProjectSpriteConfig {
+                    texture: 103,
+                    position: Vector2::ZERO,
+                    size: Vector2::new(f32::INFINITY, 1.0),
+                    rotation: 0.0,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneSpriteVisual {
+                    scene: "main".to_string(),
+                    index: 0,
+                    reason: "size must be finite and positive".to_string(),
+                }
+            ))
+        );
+
+        let sprite = &mut project.scenes[0].sprites[0];
+        sprite.size = Vector2::ONE;
+        sprite.depth = f32::NEG_INFINITY;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneSpriteVisual {
+                    scene: "main".to_string(),
+                    index: 0,
+                    reason: "depth must be finite".to_string(),
+                }
+            ))
+        );
     }
 
     #[test]

@@ -372,6 +372,9 @@ Fatias:
 35. Validar dados visuais de entidades dinamicas antes do spawn. Concluido em
     2026-05-15; posicao, rotacao, tamanho, tint e depth passam por validacao
     finita/positiva antes de alimentar servidor autoritativo ou render extract.
+36. Validar dados de renderizacao de cena antes do extract. Concluido em
+    2026-05-15; world view, viewport, sprite base e sprites estaticos de
+    `ProjectSceneConfig` sao validados antes de montar o `RenderExtract`.
 
 Criterios de pronto:
 
