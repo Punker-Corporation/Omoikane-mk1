@@ -260,6 +260,9 @@ recurso ausente antes de qualquer backend grafico real.
 Essa barreira tambem cobre texturas declaradas por sprites estaticos e
 entidades dinamicas da cena, mesmo quando uma entidade dinamica ainda nao foi
 replicada para o cliente e, portanto, ainda nao apareceu no `RenderExtract`.
+Em 2026-05-15, a mesma checagem passou a cobrir tambem a textura base
+`ProjectSceneConfig::sandbox_texture`, mantendo todas as referencias de textura
+declaradas pela cena no mesmo preflight de recursos.
 Frames CPU sem draws tambem sao reportados pelo app host como
 `CpuFrameError::EmptyQueuedFrame`, antes de gerar uma command list com draw de
 zero instancias.

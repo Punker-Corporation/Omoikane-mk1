@@ -390,6 +390,9 @@ Fatias:
 41. Estender recursos CPU registrados a partir de configuracoes posteriores.
     Concluido em 2026-05-15; `HeadlessApp` agora incorpora texturas e pipelines
     novos em um registro persistente ja existente antes de validar cenas.
+42. Validar a textura base declarada pela cena antes do frame CPU. Concluido
+    em 2026-05-15; `ProjectSceneConfig::sandbox_texture` tambem precisa existir
+    em `CpuFrameResources`, mesmo quando nao ha sprite sandbox extraido.
 
 Criterios de pronto:
 

@@ -1808,6 +1808,7 @@ impl HeadlessApp {
         resources: &CpuFrameResources,
     ) -> Result<(), ProjectConfigError> {
         let mut textures = BTreeSet::new();
+        textures.insert(ExtractTextureId::new(scene.sandbox_texture));
         for sprite in &scene.sprites {
             textures.insert(ExtractTextureId::new(sprite.texture));
         }
@@ -2202,15 +2203,26 @@ mod tests {
         let project = OmoikaneProjectConfig {
             name: "late-resource-project".to_string(),
             resources: ProjectResourceConfig {
-                textures: vec![ProjectTextureConfig {
-                    id: 150,
-                    label: "late_scene_texture".to_string(),
-                    width: 64,
-                    height: 64,
-                    depth_or_layers: 1,
-                    format: ProjectTextureFormat::Rgba8Unorm,
-                    usages: vec![ProjectTextureUsage::Sampled],
-                }],
+                textures: vec![
+                    ProjectTextureConfig {
+                        id: 120,
+                        label: "late_scene_sandbox_texture".to_string(),
+                        width: 1,
+                        height: 1,
+                        depth_or_layers: 1,
+                        format: ProjectTextureFormat::Rgba8Unorm,
+                        usages: vec![ProjectTextureUsage::Sampled],
+                    },
+                    ProjectTextureConfig {
+                        id: 150,
+                        label: "late_scene_texture".to_string(),
+                        width: 64,
+                        height: 64,
+                        depth_or_layers: 1,
+                        format: ProjectTextureFormat::Rgba8Unorm,
+                        usages: vec![ProjectTextureUsage::Sampled],
+                    },
+                ],
                 render_pipelines: Vec::new(),
             },
             scenes: vec![ProjectSceneConfig {
@@ -4051,12 +4063,69 @@ mod tests {
             app.build_project_scene_registered_cpu_frame(
                 &project,
                 "main",
-                CpuFrameResourceConfig::new(CpuFrameOptions::default()),
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
             ),
             Err(ProjectSceneCpuFrameError::Scene(
                 ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
                     scene: "main".to_string(),
                     texture: 999,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_missing_project_scene_sandbox_texture_resource() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "missing-scene-sandbox-texture".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 777,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
+            ),
+            Err(ProjectSceneCpuFrameError::Scene(
+                ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
+                    scene: "main".to_string(),
+                    texture: 777,
                 })
             ))
         );
@@ -4100,7 +4169,17 @@ mod tests {
             app.build_project_scene_registered_cpu_frame(
                 &project,
                 "main",
-                CpuFrameResourceConfig::new(CpuFrameOptions::default()),
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
             ),
             Err(ProjectSceneCpuFrameError::Scene(
                 ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
@@ -4137,7 +4216,17 @@ mod tests {
             app.build_project_scene_registered_cpu_frame(
                 &project,
                 "main",
-                CpuFrameResourceConfig::new(CpuFrameOptions::default()),
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "empty_scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
             ),
             Err(ProjectSceneCpuFrameError::Frame(
                 CpuFrameError::EmptyQueuedFrame
