@@ -342,6 +342,10 @@ Fatias:
     `OmoikaneProjectConfig`, cria a entidade dinamica controlada no servidor,
     envia input por `ProjectSceneInputBindingConfig` e valida um frame CPU da
     cena registrada em vez de depender apenas do sandbox manual.
+28. Fazer o exemplo headless passar pelo formato JSON de projeto. Concluido em
+    2026-05-15; `examples/headless_sandbox.rs` serializa o
+    `OmoikaneProjectConfig`, recarrega por `OmoikaneProjectConfig::from_json_str`
+    e usa a configuracao reidratada para spawn, input autoritativo e frame CPU.
 
 Criterios de pronto:
 

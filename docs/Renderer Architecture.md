@@ -255,6 +255,11 @@ entidade dinamica controlada, resolve input por acao autoral, bombeia o loop
 cliente/servidor local e constroi o frame CPU registrado a partir do extract da
 cena.
 
+O mesmo exemplo tambem passa pelo formato serializado antes de tocar o runtime:
+o `OmoikaneProjectConfig` e emitido como JSON, recarregado e so entao usado para
+spawn, input e frame. Isso aproxima o corte headless do fluxo esperado para
+projetos authored sem introduzir asset pipeline ou backend grafico real.
+
 ## Render Graph
 
 O render graph deve ser testavel sem abrir janela. Passes declaram:

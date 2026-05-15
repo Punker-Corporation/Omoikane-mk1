@@ -15,7 +15,7 @@ fn main() -> Result<(), String> {
     });
 
     app.startup();
-    let project = OmoikaneProjectConfig {
+    let project_config = OmoikaneProjectConfig {
         name: "Headless Sandbox Project".to_string(),
         resources: ProjectResourceConfig::default(),
         scenes: vec![ProjectSceneConfig {
@@ -48,6 +48,11 @@ fn main() -> Result<(), String> {
             }],
         }],
     };
+    let project_json = project_config
+        .to_json_string_pretty()
+        .map_err(|error| format!("{error:?}"))?;
+    let project = OmoikaneProjectConfig::from_json_str(&project_json)
+        .map_err(|error| format!("{error:?}"))?;
 
     let spawned = app
         .spawn_project_scene_entities(&project, "main")
