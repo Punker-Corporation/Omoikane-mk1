@@ -286,7 +286,20 @@ impl ProjectSceneConfig {
         &self,
         action: &str,
     ) -> Result<BoundKeyFunction, ProjectConfigError> {
-        let mut matched = None;
+        self.validate_input_bindings()?;
+        for binding in &self.input_bindings {
+            if binding.action == action {
+                return Ok(BoundKeyFunction::new(binding.function.clone()));
+            }
+        }
+        Err(ProjectConfigError::MissingSceneInputAction {
+            scene: self.name.clone(),
+            action: action.to_string(),
+        })
+    }
+
+    pub fn validate_input_bindings(&self) -> Result<(), ProjectConfigError> {
+        let mut actions = BTreeSet::new();
         for binding in &self.input_bindings {
             if binding.action.is_empty() {
                 return Err(ProjectConfigError::EmptySceneInputAction {
@@ -299,20 +312,14 @@ impl ProjectSceneConfig {
                     action: binding.action.clone(),
                 });
             }
-            if binding.action == action {
-                if matched.is_some() {
-                    return Err(ProjectConfigError::DuplicateSceneInputAction {
-                        scene: self.name.clone(),
-                        action: action.to_string(),
-                    });
-                }
-                matched = Some(BoundKeyFunction::new(binding.function.clone()));
+            if !actions.insert(binding.action.clone()) {
+                return Err(ProjectConfigError::DuplicateSceneInputAction {
+                    scene: self.name.clone(),
+                    action: binding.action.clone(),
+                });
             }
         }
-        matched.ok_or_else(|| ProjectConfigError::MissingSceneInputAction {
-            scene: self.name.clone(),
-            action: action.to_string(),
-        })
+        Ok(())
     }
 }
 
@@ -2513,7 +2520,28 @@ mod tests {
     #[test]
     fn headless_app_reports_project_scene_input_binding_errors() {
         let mut app = HeadlessApp::default();
-        let project = OmoikaneProjectConfig {
+        let missing_project = OmoikaneProjectConfig {
+            name: "missing-input-binding".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 110,
+                sandbox_texture: 111,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: vec![ProjectSceneInputBindingConfig {
+                    action: "move_right".to_string(),
+                    function: "MoveRight".to_string(),
+                }],
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+        let duplicate_project = OmoikaneProjectConfig {
             name: "input-bindings".to_string(),
             resources: ProjectResourceConfig::default(),
             scenes: vec![ProjectSceneConfig {
@@ -2542,17 +2570,66 @@ mod tests {
         };
 
         assert_eq!(
-            app.handle_project_scene_input(&project, "main", "jump", BoundKeyState::Down),
+            app.handle_project_scene_input(&missing_project, "main", "jump", BoundKeyState::Down),
             Err(ProjectConfigError::MissingSceneInputAction {
                 scene: "main".to_string(),
                 action: "jump".to_string(),
             })
         );
         assert_eq!(
-            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            app.handle_project_scene_input(
+                &duplicate_project,
+                "main",
+                "move_right",
+                BoundKeyState::Down
+            ),
             Err(ProjectConfigError::DuplicateSceneInputAction {
                 scene: "main".to_string(),
                 action: "move_right".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn headless_app_rejects_duplicate_project_scene_input_bindings_before_lookup() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "hidden-duplicate-input-bindings".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 110,
+                sandbox_texture: 111,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: vec![
+                    ProjectSceneInputBindingConfig {
+                        action: "move_right".to_string(),
+                        function: "MoveRight".to_string(),
+                    },
+                    ProjectSceneInputBindingConfig {
+                        action: "jump".to_string(),
+                        function: "Jump".to_string(),
+                    },
+                    ProjectSceneInputBindingConfig {
+                        action: "jump".to_string(),
+                        function: "AltJump".to_string(),
+                    },
+                ],
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            Err(ProjectConfigError::DuplicateSceneInputAction {
+                scene: "main".to_string(),
+                action: "jump".to_string(),
             })
         );
     }

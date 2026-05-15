@@ -346,6 +346,10 @@ Fatias:
     2026-05-15; `examples/headless_sandbox.rs` serializa o
     `OmoikaneProjectConfig`, recarrega por `OmoikaneProjectConfig::from_json_str`
     e usa a configuracao reidratada para spawn, input autoritativo e frame CPU.
+29. Validar todos os bindings de input de cena antes do lookup. Concluido em
+    2026-05-15; `ProjectSceneConfig::validate_input_bindings` rejeita acoes
+    vazias, funcoes vazias e acoes duplicadas em qualquer binding da cena antes
+    de resolver a acao pedida pelo runtime headless.
 
 Criterios de pronto:
 

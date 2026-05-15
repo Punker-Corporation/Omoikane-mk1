@@ -248,6 +248,9 @@ Esses bindings tambem sao validados como dados de projeto: acoes vazias,
 funcoes runtime vazias, acoes ausentes e acoes duplicadas sao reportadas como
 `ProjectConfigError` no app host. O cliente e o servidor continuam recebendo
 apenas comandos resolvidos para uma funcao runtime explicita.
+Em 2026-05-15, essa validacao passou a cobrir todos os bindings da cena antes
+do lookup da acao pedida, impedindo que uma duplicata nao usada no momento
+fique escondida em uma cena aparentemente valida.
 
 Em 2026-05-15, o exemplo `omoikane_app/examples/headless_sandbox.rs` passou a
 usar esse caminho de projeto de ponta a ponta. Ele declara uma cena com
