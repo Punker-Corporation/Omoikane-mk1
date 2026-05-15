@@ -393,6 +393,9 @@ Fatias:
 42. Validar a textura base declarada pela cena antes do frame CPU. Concluido
     em 2026-05-15; `ProjectSceneConfig::sandbox_texture` tambem precisa existir
     em `CpuFrameResources`, mesmo quando nao ha sprite sandbox extraido.
+43. Validar dimensoes de texturas declaradas no projeto. Concluido em
+    2026-05-15; `ProjectTextureConfig` rejeita width, height ou depth/layers
+    zerados como `ProjectConfigError` antes de construir recursos `hikari`.
 
 Criterios de pronto:
 

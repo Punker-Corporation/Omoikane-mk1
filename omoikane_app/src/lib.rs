@@ -820,6 +820,12 @@ impl ProjectTextureConfig {
     }
 
     pub fn to_cpu_config(&self) -> Result<CpuTextureResourceConfig, ProjectConfigError> {
+        if self.width == 0 || self.height == 0 || self.depth_or_layers == 0 {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "texture size must be non-zero".to_string(),
+            });
+        }
         if self.usages.is_empty() {
             return Err(ProjectConfigError::MissingTextureUsage(self.id));
         }
@@ -1011,6 +1017,10 @@ pub enum ProjectConfigError {
     InvalidSceneSpriteVisual {
         scene: String,
         index: usize,
+        reason: String,
+    },
+    InvalidTextureResource {
+        texture: u64,
         reason: String,
     },
     MissingSceneEntityId {
@@ -2531,6 +2541,47 @@ mod tests {
         assert_eq!(
             project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
             Err(ProjectConfigError::DuplicateTextureId(61))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_texture_resources() {
+        let mut texture = ProjectTextureConfig {
+            id: 62,
+            label: "empty_texture".to_string(),
+            width: 0,
+            height: 1,
+            depth_or_layers: 1,
+            format: ProjectTextureFormat::Rgba8Unorm,
+            usages: vec![ProjectTextureUsage::Sampled],
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-texture-resource".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![texture.clone()],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 62,
+                reason: "texture size must be non-zero".to_string(),
+            })
+        );
+
+        texture.width = 1;
+        texture.depth_or_layers = 0;
+        project.resources.textures = vec![texture];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 62,
+                reason: "texture size must be non-zero".to_string(),
+            })
         );
     }
 

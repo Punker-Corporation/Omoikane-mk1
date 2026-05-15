@@ -170,6 +170,9 @@ O primeiro formato serializavel acima dessa camada tambem foi introduzido em
 texturas CPU em JSON, converte para `CpuFrameResourceConfig` e valida
 duplicidade de ids antes de construir os descriptors de `hikari`. Pipelines e
 cenas serializadas permanecem fora desse primeiro corte.
+Em 2026-05-15, `ProjectTextureConfig` tambem passou a validar dimensoes
+nao-zero antes de criar descriptors CPU, reportando o erro como dado de projeto
+em vez de deixar a falha chegar apenas no catalogo grafico.
 
 No mesmo dia, o formato foi expandido para render pipelines. O projeto pode
 declarar `ProjectRenderPipelineConfig` com ids de shader, layouts de vertex
