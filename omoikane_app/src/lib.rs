@@ -383,6 +383,26 @@ impl ProjectScenePhysicsConfig {
     const fn default_predict() -> bool {
         true
     }
+
+    pub fn validate_fixtures(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        let mut fixture_ids = BTreeSet::new();
+        for fixture in &self.fixtures {
+            if fixture.id.is_empty() {
+                return Err(ProjectConfigError::EmptySceneFixtureId {
+                    scene: scene.to_string(),
+                    entity: entity.to_string(),
+                });
+            }
+            if !fixture_ids.insert(fixture.id.clone()) {
+                return Err(ProjectConfigError::DuplicateSceneFixtureId {
+                    scene: scene.to_string(),
+                    entity: entity.to_string(),
+                    id: fixture.id.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for ProjectScenePhysicsConfig {
@@ -703,12 +723,38 @@ pub enum ProjectConfigError {
     DuplicateTextureId(u64),
     DuplicateRenderPipelineId(u64),
     DuplicateSceneName(String),
-    DuplicateSceneEntityId { scene: String, id: String },
-    DuplicateSceneInputAction { scene: String, action: String },
-    EmptySceneInputAction { scene: String },
-    EmptySceneInputFunction { scene: String, action: String },
-    MissingSceneEntityId { scene: String, id: String },
-    MissingSceneInputAction { scene: String, action: String },
+    DuplicateSceneEntityId {
+        scene: String,
+        id: String,
+    },
+    DuplicateSceneFixtureId {
+        scene: String,
+        entity: String,
+        id: String,
+    },
+    DuplicateSceneInputAction {
+        scene: String,
+        action: String,
+    },
+    EmptySceneFixtureId {
+        scene: String,
+        entity: String,
+    },
+    EmptySceneInputAction {
+        scene: String,
+    },
+    EmptySceneInputFunction {
+        scene: String,
+        action: String,
+    },
+    MissingSceneEntityId {
+        scene: String,
+        id: String,
+    },
+    MissingSceneInputAction {
+        scene: String,
+        action: String,
+    },
     MissingScene(String),
     MissingTextureUsage(u64),
 }
@@ -1285,6 +1331,9 @@ impl HeadlessApp {
                     scene: scene.name.clone(),
                     id: entity_config.id.clone(),
                 });
+            }
+            if let Some(physics) = &entity_config.physics {
+                physics.validate_fixtures(&scene.name, &entity_config.id)?;
             }
         }
         if let Some(controlled_entity) = &scene.controlled_entity
@@ -2867,6 +2916,82 @@ mod tests {
         assert_eq!(extract.sprites()[0].texture(), ExtractTextureId::new(119));
         assert_eq!(extract.sprites()[0].rotation(), 0.5);
         assert!(extract.sprites()[0].position().x > 0.0);
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_fixture_ids_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-fixture-ids".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: String::new(),
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneFixtureId {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+
+        let fixtures = &mut project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics")
+            .fixtures;
+        *fixtures = vec![
+            ProjectSceneFixtureConfig {
+                id: "body".to_string(),
+                ..ProjectSceneFixtureConfig::default()
+            },
+            ProjectSceneFixtureConfig {
+                id: "body".to_string(),
+                ..ProjectSceneFixtureConfig::default()
+            },
+        ];
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::DuplicateSceneFixtureId {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                id: "body".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
     }
 
     #[test]

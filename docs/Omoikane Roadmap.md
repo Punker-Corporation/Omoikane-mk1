@@ -354,6 +354,10 @@ Fatias:
     2026-05-15; `HeadlessApp::spawn_project_scene_entities` chama
     `ProjectSceneConfig::validate_input_bindings` antes de criar entidades no
     servidor, evitando spawns parciais para cenas com input invalido.
+31. Validar ids de fixtures declarativas antes do spawn. Concluido em
+    2026-05-15; `ProjectScenePhysicsConfig::validate_fixtures` rejeita ids
+    vazios ou duplicados dentro da mesma entidade de cena antes que fixtures
+    possam substituir umas as outras no servidor.
 
 Criterios de pronto:
 

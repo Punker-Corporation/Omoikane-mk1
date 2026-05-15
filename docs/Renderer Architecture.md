@@ -217,6 +217,9 @@ O mesmo bloco de physics agora aceita fixtures declarativas por
 material e bits de colisao; o app host converte esses descriptors em
 `butsuri::Fixture` no servidor durante o spawn. O renderer continua vendo apenas
 a posicao replicada e os dados visuais extraidos.
+Em 2026-05-15, o app host tambem passou a validar ids de fixtures declarativas
+antes do spawn, rejeitando ids vazios ou duplicados dentro da mesma entidade
+para evitar substituicao silenciosa no componente de fixtures do servidor.
 
 As entidades dinamicas de cena tambem preservam rotacao inicial pelo mesmo
 caminho autoritativo. A configuracao serializada alimenta o transform do
