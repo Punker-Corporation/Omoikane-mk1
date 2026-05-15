@@ -381,6 +381,9 @@ Fatias:
 38. Validar recursos de textura usados pela cena antes do frame CPU registrado.
     Concluido em 2026-05-15; texturas referenciadas pelo `RenderExtract` da
     cena precisam existir em `CpuFrameResources` antes da submissao CPU.
+39. Reportar frames CPU sem draws como erro de app. Concluido em 2026-05-15;
+    `CpuFrameError::EmptyQueuedFrame` evita transformar uma cena vazia em
+    `DrawCall` com zero instancias.
 
 Criterios de pronto:
 

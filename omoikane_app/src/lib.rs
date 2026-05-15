@@ -1181,6 +1181,7 @@ impl CpuFrame {
 pub enum CpuFrameError {
     InvalidExtract(Vec<RenderExtractError>),
     Prepare(Vec<hikari::PrepareFrameError>),
+    EmptyQueuedFrame,
     Graphics(GraphicsResourceError),
 }
 
@@ -1752,6 +1753,9 @@ impl HeadlessApp {
     ) -> Result<CpuFrame, CpuFrameError> {
         let prepared = PreparedFrame::from_extract(&extract).map_err(CpuFrameError::Prepare)?;
         let queued = prepared.queue();
+        if queued.draws().is_empty() {
+            return Err(CpuFrameError::EmptyQueuedFrame);
+        }
         let draw_instances = queued
             .draws()
             .iter()
@@ -1939,7 +1943,7 @@ impl Default for HeadlessApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        CpuFrameOptions, CpuFrameResourceConfig, CpuFrameResources,
+        CpuFrameError, CpuFrameOptions, CpuFrameResourceConfig, CpuFrameResources,
         CpuRenderPipelineResourceConfig, CpuTextureResourceConfig, FrameHandleAllocator,
         HeadlessApp, HeadlessAppOptions, OmoikaneProjectConfig, ProjectColorConfig,
         ProjectConfigError, ProjectRenderPipelineConfig, ProjectResourceConfig, ProjectSceneConfig,
@@ -2060,6 +2064,16 @@ mod tests {
         assert_eq!(
             frame.submission().command_lists()[0].debug_dump(),
             "command_list id=10 label=\"frame_commands\" commands=5\n  0: begin_render_pass label=\"main\" color_targets=[5]\n  1: set_pipeline pipeline=9\n  2: set_vertex_buffer slot=0 buffer=6\n  3: draw vertices=6 instances=1\n  4: end_render_pass\n"
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_empty_queued_cpu_frames() {
+        let app = HeadlessApp::default();
+
+        assert_eq!(
+            app.build_cpu_frame(RenderFrameOptions::default(), CpuFrameOptions::default()),
+            Err(CpuFrameError::EmptyQueuedFrame)
         );
     }
 
@@ -3967,6 +3981,40 @@ mod tests {
                     scene: "main".to_string(),
                     texture: 999,
                 })
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_empty_project_scene_cpu_frames() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "empty-scene-frame".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()),
+            ),
+            Err(ProjectSceneCpuFrameError::Frame(
+                CpuFrameError::EmptyQueuedFrame
             ))
         );
     }
