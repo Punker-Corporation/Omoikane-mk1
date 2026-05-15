@@ -161,6 +161,9 @@ Ainda em 2026-05-06, o app host ganhou `CpuFrameResourceConfig` e configs
 menores para texturas e render pipelines. Essa camada ainda nao e um formato de
 arquivo nem asset pipeline, mas ja separa "descriptor vindo do projeto" de
 "recurso registrado em CPU", que e a fronteira esperada para loaders futuros.
+Em 2026-05-15, o registro persistente tambem passou a aceitar configuracoes
+posteriores: texturas e pipelines novos sao incorporados ao catalogo CPU mesmo
+depois do primeiro frame registrado.
 
 O primeiro formato serializavel acima dessa camada tambem foi introduzido em
 2026-05-06 no app host. `OmoikaneProjectConfig` cobre nome de projeto e

@@ -387,6 +387,9 @@ Fatias:
 40. Validar texturas declaradas por entidades dinamicas antes do frame CPU.
     Concluido em 2026-05-15; texturas de entidades autorais sao conferidas em
     `CpuFrameResources` mesmo antes de a entidade aparecer no `RenderExtract`.
+41. Estender recursos CPU registrados a partir de configuracoes posteriores.
+    Concluido em 2026-05-15; `HeadlessApp` agora incorpora texturas e pipelines
+    novos em um registro persistente ja existente antes de validar cenas.
 
 Criterios de pronto:
 

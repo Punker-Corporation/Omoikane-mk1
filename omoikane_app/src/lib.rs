@@ -1288,13 +1288,21 @@ impl CpuFrameResources {
 
     pub fn from_config(config: CpuFrameResourceConfig) -> Result<Self, GraphicsResourceError> {
         let mut resources = Self::from_options(config.frame)?;
+        resources.extend_from_config(config)?;
+        Ok(resources)
+    }
+
+    pub fn extend_from_config(
+        &mut self,
+        config: CpuFrameResourceConfig,
+    ) -> Result<(), GraphicsResourceError> {
         for texture in config.textures {
-            resources.register_texture(texture.build()?);
+            self.register_texture(texture.build()?);
         }
         for pipeline in config.render_pipelines {
-            resources.register_render_pipeline(pipeline.build()?);
+            self.register_render_pipeline(pipeline.build()?);
         }
-        Ok(resources)
+        Ok(())
     }
 
     pub const fn device(&self) -> &GraphicsDevice {
@@ -1463,7 +1471,9 @@ impl HeadlessApp {
         &mut self,
         config: CpuFrameResourceConfig,
     ) -> Result<&CpuFrameResources, CpuFrameError> {
-        if self.cpu_frame_resources.is_none() {
+        if let Some(resources) = &mut self.cpu_frame_resources {
+            resources.extend_from_config(config)?;
+        } else {
             self.cpu_frame_resources = Some(CpuFrameResources::from_config(config)?);
         }
         Ok(self
@@ -2181,6 +2191,63 @@ mod tests {
             second.submission().command_lists()[0].id()
         );
         assert_eq!(app.frame_handle_allocator().next_raw(), 9);
+    }
+
+    #[test]
+    fn headless_app_extends_registered_cpu_resources_from_later_config() {
+        let mut app = HeadlessApp::default();
+        app.ensure_cpu_frame_resources(CpuFrameOptions::default())
+            .expect("initial registered resources");
+
+        let project = OmoikaneProjectConfig {
+            name: "late-resource-project".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![ProjectTextureConfig {
+                    id: 150,
+                    label: "late_scene_texture".to_string(),
+                    width: 64,
+                    height: 64,
+                    depth_or_layers: 1,
+                    format: ProjectTextureFormat::Rgba8Unorm,
+                    usages: vec![ProjectTextureUsage::Sampled],
+                }],
+                render_pipelines: Vec::new(),
+            },
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: vec![ProjectSpriteConfig {
+                    texture: 150,
+                    position: Vector2::ZERO,
+                    size: Vector2::ONE,
+                    rotation: 0.0,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+                dynamic_entities: Vec::new(),
+            }],
+        };
+        let resource_config = project
+            .to_cpu_frame_resource_config(CpuFrameOptions::default())
+            .expect("late project resources");
+
+        app.build_project_scene_registered_cpu_frame(&project, "main", resource_config)
+            .expect("project scene frame with late resources");
+
+        assert!(
+            app.cpu_frame_resources()
+                .expect("resources")
+                .catalog()
+                .contains_texture(GpuTextureId::new(150))
+        );
     }
 
     #[test]
