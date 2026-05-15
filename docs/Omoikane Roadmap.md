@@ -384,6 +384,9 @@ Fatias:
 39. Reportar frames CPU sem draws como erro de app. Concluido em 2026-05-15;
     `CpuFrameError::EmptyQueuedFrame` evita transformar uma cena vazia em
     `DrawCall` com zero instancias.
+40. Validar texturas declaradas por entidades dinamicas antes do frame CPU.
+    Concluido em 2026-05-15; texturas de entidades autorais sao conferidas em
+    `CpuFrameResources` mesmo antes de a entidade aparecer no `RenderExtract`.
 
 Criterios de pronto:
 

@@ -1793,11 +1793,17 @@ impl HeadlessApp {
 
     fn validate_project_scene_texture_resources(
         &self,
-        scene_name: &str,
+        scene: &ProjectSceneConfig,
         extract: &RenderExtract,
         resources: &CpuFrameResources,
     ) -> Result<(), ProjectConfigError> {
         let mut textures = BTreeSet::new();
+        for sprite in &scene.sprites {
+            textures.insert(ExtractTextureId::new(sprite.texture));
+        }
+        for entity in &scene.dynamic_entities {
+            textures.insert(ExtractTextureId::new(entity.texture));
+        }
         for sprite in extract.sprites() {
             textures.insert(sprite.texture());
         }
@@ -1810,7 +1816,7 @@ impl HeadlessApp {
                 .is_none()
             {
                 return Err(ProjectConfigError::MissingSceneTextureResource {
-                    scene: scene_name.to_string(),
+                    scene: scene.name.clone(),
                     texture: texture.raw(),
                 });
             }
@@ -1870,6 +1876,10 @@ impl HeadlessApp {
         let extract = self
             .build_project_scene_render_extract(project, scene_name)
             .map_err(ProjectSceneCpuFrameError::Scene)?;
+        let scene = project
+            .scene(scene_name)
+            .map_err(ProjectSceneRenderError::Project)
+            .map_err(ProjectSceneCpuFrameError::Scene)?;
         let frame_options = self
             .frame_handles
             .allocate_transient_cpu_options(frame_options);
@@ -1878,7 +1888,7 @@ impl HeadlessApp {
             .as_ref()
             .expect("resources ensured")
             .clone();
-        self.validate_project_scene_texture_resources(scene_name, &extract, &resources)
+        self.validate_project_scene_texture_resources(scene, &extract, &resources)
             .map_err(ProjectSceneRenderError::Project)
             .map_err(ProjectSceneCpuFrameError::Scene)?;
         self.build_cpu_frame_from_extract_with_resources(extract, frame_options, &resources)
@@ -3967,6 +3977,55 @@ mod tests {
                     depth: 1.0,
                 }],
                 dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()),
+            ),
+            Err(ProjectSceneCpuFrameError::Scene(
+                ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
+                    scene: "main".to_string(),
+                    texture: 999,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_missing_dynamic_scene_texture_resource_before_extract() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "missing-dynamic-scene-texture".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "unspawned_actor".to_string(),
+                    appearance_name: "unspawned_actor".to_string(),
+                    texture: 999,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
             }],
         };
 

@@ -254,6 +254,9 @@ como configuracao de projeto antes que o app host construa o `RenderExtract`.
 Quando a cena e transformada em frame CPU registrado, as texturas referenciadas
 pelo extract precisam existir em `CpuFrameResources`, antecipando erros de
 recurso ausente antes de qualquer backend grafico real.
+Essa barreira tambem cobre texturas declaradas por sprites estaticos e
+entidades dinamicas da cena, mesmo quando uma entidade dinamica ainda nao foi
+replicada para o cliente e, portanto, ainda nao apareceu no `RenderExtract`.
 Frames CPU sem draws tambem sao reportados pelo app host como
 `CpuFrameError::EmptyQueuedFrame`, antes de gerar uma command list com draw de
 zero instancias.
