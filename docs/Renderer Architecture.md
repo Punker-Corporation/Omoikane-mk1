@@ -181,6 +181,9 @@ buffer, targets e bind group layouts; o app host converte isso para
 cargo de `hikari`.
 Em 2026-05-15, esse formato passou a rejeitar vertex buffers com stride zero
 como erro de projeto antes de construir o descriptor CPU-only.
+O mesmo preflight tambem rejeita pipelines sem target de cor nem depth,
+mantendo a falha no dominio do projeto em vez de delegar tudo ao descriptor
+grafico.
 
 O corte seguinte adicionou cenas headless serializaveis. `ProjectSceneConfig`
 descreve camera, textura de sandbox, viewport, world view e parametros do

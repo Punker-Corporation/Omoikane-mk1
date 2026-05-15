@@ -900,6 +900,12 @@ pub struct ProjectRenderPipelineConfig {
 
 impl ProjectRenderPipelineConfig {
     pub fn to_cpu_config(&self) -> Result<CpuRenderPipelineResourceConfig, ProjectConfigError> {
+        if self.color_targets.is_empty() && self.depth_target.is_none() {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "render pipeline must declare at least one target".to_string(),
+            });
+        }
         for layout in &self.vertex_buffers {
             if layout.stride_bytes == 0 {
                 return Err(ProjectConfigError::InvalidRenderPipelineResource {
@@ -2662,6 +2668,40 @@ mod tests {
             Err(ProjectConfigError::InvalidRenderPipelineResource {
                 pipeline: 66,
                 reason: "vertex buffer stride must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_render_pipeline_without_targets() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "targetless-pipeline".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 67,
+                    label: "targetless_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 16,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: Vec::new(),
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 67,
+                reason: "render pipeline must declare at least one target".to_string(),
             })
         );
     }

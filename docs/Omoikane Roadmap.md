@@ -399,6 +399,9 @@ Fatias:
 44. Validar stride de vertex buffers em pipelines declarados no projeto.
     Concluido em 2026-05-15; `ProjectRenderPipelineConfig` rejeita layouts com
     stride zero como `ProjectConfigError` antes do descriptor de `hikari`.
+45. Validar targets de pipelines declarados no projeto. Concluido em
+    2026-05-15; pipelines sem target de cor nem depth sao rejeitados como
+    `ProjectConfigError` antes de construir o descriptor de `hikari`.
 
 Criterios de pronto:
 
