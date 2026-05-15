@@ -337,6 +337,11 @@ Fatias:
     acoes autorais vazias e funcoes runtime vazias agora geram
     `ProjectConfigError` no app host antes que comandos invalidos possam ser
     enviados ao cliente local.
+27. Atualizar o exemplo headless para usar cena declarativa de projeto.
+    Concluido em 2026-05-15; `examples/headless_sandbox.rs` agora monta um
+    `OmoikaneProjectConfig`, cria a entidade dinamica controlada no servidor,
+    envia input por `ProjectSceneInputBindingConfig` e valida um frame CPU da
+    cena registrada em vez de depender apenas do sandbox manual.
 
 Criterios de pronto:
 

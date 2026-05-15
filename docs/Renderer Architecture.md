@@ -249,6 +249,12 @@ funcoes runtime vazias, acoes ausentes e acoes duplicadas sao reportadas como
 `ProjectConfigError` no app host. O cliente e o servidor continuam recebendo
 apenas comandos resolvidos para uma funcao runtime explicita.
 
+Em 2026-05-15, o exemplo `omoikane_app/examples/headless_sandbox.rs` passou a
+usar esse caminho de projeto de ponta a ponta. Ele declara uma cena com
+entidade dinamica controlada, resolve input por acao autoral, bombeia o loop
+cliente/servidor local e constroi o frame CPU registrado a partir do extract da
+cena.
+
 ## Render Graph
 
 O render graph deve ser testavel sem abrir janela. Passes declaram:
