@@ -400,6 +400,7 @@ impl ProjectScenePhysicsConfig {
                     id: fixture.id.clone(),
                 });
             }
+            fixture.validate_shape(scene, entity)?;
         }
         Ok(())
     }
@@ -458,6 +459,42 @@ impl ProjectSceneFixtureConfig {
         fixture.collision_mask = self.collision_mask;
         fixture.body_type = self.body_type.into();
         fixture
+    }
+
+    fn validate_shape(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneFixtureShape {
+            scene: scene.to_string(),
+            entity: entity.to_string(),
+            fixture: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        match self.shape {
+            ProjectSceneFixtureShapeConfig::Aabb {
+                local_bounds,
+                radius,
+            } => {
+                if !is_finite_box(local_bounds) {
+                    return Err(invalid("aabb bounds must be finite"));
+                }
+                if local_bounds.right <= local_bounds.left
+                    || local_bounds.top <= local_bounds.bottom
+                {
+                    return Err(invalid("aabb bounds must have positive width and height"));
+                }
+                if !radius.is_finite() || radius < 0.0 {
+                    return Err(invalid("aabb radius must be finite and non-negative"));
+                }
+            }
+            ProjectSceneFixtureShapeConfig::Circle { position, radius } => {
+                if !is_finite_vector(position) {
+                    return Err(invalid("circle position must be finite"));
+                }
+                if !radius.is_finite() || radius <= 0.0 {
+                    return Err(invalid("circle radius must be finite and positive"));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -575,6 +612,17 @@ impl From<ProjectColorConfig> for Color {
     fn from(value: ProjectColorConfig) -> Self {
         Self::new(value.r, value.g, value.b, value.a)
     }
+}
+
+fn is_finite_vector(value: Vector2) -> bool {
+    value.x.is_finite() && value.y.is_finite()
+}
+
+fn is_finite_box(value: Box2) -> bool {
+    value.left.is_finite()
+        && value.bottom.is_finite()
+        && value.right.is_finite()
+        && value.top.is_finite()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -746,6 +794,12 @@ pub enum ProjectConfigError {
     EmptySceneInputFunction {
         scene: String,
         action: String,
+    },
+    InvalidSceneFixtureShape {
+        scene: String,
+        entity: String,
+        fixture: String,
+        reason: String,
     },
     MissingSceneEntityId {
         scene: String,
@@ -2989,6 +3043,82 @@ mod tests {
                 scene: "main".to_string(),
                 entity: "actor".to_string(),
                 id: "body".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_fixture_shapes_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-fixture-shapes".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: "body".to_string(),
+                            shape: ProjectSceneFixtureShapeConfig::Aabb {
+                                local_bounds: Box2::new(1.0, -1.0, 1.0, 1.0),
+                                radius: 0.0,
+                            },
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureShape {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "aabb bounds must have positive width and height".to_string(),
+            })
+        );
+
+        project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics")
+            .fixtures[0]
+            .shape = ProjectSceneFixtureShapeConfig::Circle {
+            position: Vector2::ZERO,
+            radius: 0.0,
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureShape {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "circle radius must be finite and positive".to_string(),
             })
         );
         assert!(app.project_scene_entities().is_empty());

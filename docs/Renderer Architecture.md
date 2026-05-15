@@ -220,6 +220,9 @@ a posicao replicada e os dados visuais extraidos.
 Em 2026-05-15, o app host tambem passou a validar ids de fixtures declarativas
 antes do spawn, rejeitando ids vazios ou duplicados dentro da mesma entidade
 para evitar substituicao silenciosa no componente de fixtures do servidor.
+O mesmo caminho valida a geometria das fixtures: AABBs precisam de bounds
+finitos e dimensoes positivas, raios de AABB nao podem ser negativos e circulos
+precisam de centro finito e raio positivo.
 
 As entidades dinamicas de cena tambem preservam rotacao inicial pelo mesmo
 caminho autoritativo. A configuracao serializada alimenta o transform do

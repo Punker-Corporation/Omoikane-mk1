@@ -358,6 +358,10 @@ Fatias:
     2026-05-15; `ProjectScenePhysicsConfig::validate_fixtures` rejeita ids
     vazios ou duplicados dentro da mesma entidade de cena antes que fixtures
     possam substituir umas as outras no servidor.
+32. Validar geometria de fixtures declarativas antes do spawn. Concluido em
+    2026-05-15; AABBs precisam de bounds finitos e dimensoes positivas, raios
+    de AABB precisam ser finitos e nao negativos, e circulos precisam de centro
+    finito e raio positivo.
 
 Criterios de pronto:
 
