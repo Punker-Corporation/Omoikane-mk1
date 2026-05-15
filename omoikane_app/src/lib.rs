@@ -1021,6 +1021,10 @@ pub enum ProjectConfigError {
         scene: String,
         action: String,
     },
+    MissingSceneTextureResource {
+        scene: String,
+        texture: u64,
+    },
     MissingScene(String),
     MissingTextureUsage(u64),
 }
@@ -1783,6 +1787,33 @@ impl HeadlessApp {
         })
     }
 
+    fn validate_project_scene_texture_resources(
+        &self,
+        scene_name: &str,
+        extract: &RenderExtract,
+        resources: &CpuFrameResources,
+    ) -> Result<(), ProjectConfigError> {
+        let mut textures = BTreeSet::new();
+        for sprite in extract.sprites() {
+            textures.insert(sprite.texture());
+        }
+        for batch in extract.tile_batches() {
+            textures.insert(batch.texture());
+        }
+        for texture in textures {
+            if resources
+                .texture(GpuTextureId::new(texture.raw()))
+                .is_none()
+            {
+                return Err(ProjectConfigError::MissingSceneTextureResource {
+                    scene: scene_name.to_string(),
+                    texture: texture.raw(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn build_allocated_cpu_frame(
         &mut self,
         render_options: RenderFrameOptions,
@@ -1843,6 +1874,9 @@ impl HeadlessApp {
             .as_ref()
             .expect("resources ensured")
             .clone();
+        self.validate_project_scene_texture_resources(scene_name, &extract, &resources)
+            .map_err(ProjectSceneRenderError::Project)
+            .map_err(ProjectSceneCpuFrameError::Scene)?;
         self.build_cpu_frame_from_extract_with_resources(extract, frame_options, &resources)
             .map_err(ProjectSceneCpuFrameError::Frame)
     }
@@ -3890,6 +3924,50 @@ mod tests {
                 .expect("resources")
                 .catalog()
                 .contains_render_pipeline(RenderPipelineId::new(121))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_missing_project_scene_texture_resource_for_cpu_frame() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "missing-scene-texture".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: vec![ProjectSpriteConfig {
+                    texture: 999,
+                    position: Vector2::ZERO,
+                    size: Vector2::ONE,
+                    rotation: 0.0,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()),
+            ),
+            Err(ProjectSceneCpuFrameError::Scene(
+                ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
+                    scene: "main".to_string(),
+                    texture: 999,
+                })
+            ))
         );
     }
 

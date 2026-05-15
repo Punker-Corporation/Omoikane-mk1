@@ -251,6 +251,9 @@ positivo antes de alimentar o servidor autoritativo ou o `RenderExtract`.
 O extract de cena tambem ganhou uma barreira propria para dados renderizaveis:
 world view, viewport, sprite base da cena e sprites estaticos sao validados
 como configuracao de projeto antes que o app host construa o `RenderExtract`.
+Quando a cena e transformada em frame CPU registrado, as texturas referenciadas
+pelo extract precisam existir em `CpuFrameResources`, antecipando erros de
+recurso ausente antes de qualquer backend grafico real.
 
 A cena tambem pode declarar qual entidade autoral deve ser controlada pelo
 jogador local. `ProjectSceneConfig::controlled_entity` referencia um id de

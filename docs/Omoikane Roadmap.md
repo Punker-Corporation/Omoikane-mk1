@@ -378,6 +378,9 @@ Fatias:
 37. Validar metadata autoral de entidades dinamicas antes do spawn. Concluido
     em 2026-05-15; `appearance_name` vazio e `prototype` vazio quando presente
     sao rejeitados antes de criar metadata ECS no servidor.
+38. Validar recursos de textura usados pela cena antes do frame CPU registrado.
+    Concluido em 2026-05-15; texturas referenciadas pelo `RenderExtract` da
+    cena precisam existir em `CpuFrameResources` antes da submissao CPU.
 
 Criterios de pronto:
 

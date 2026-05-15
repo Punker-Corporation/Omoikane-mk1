@@ -3,7 +3,8 @@ use keisan::{Box2, Vector2};
 use omoikane_app::{
     App, AppOptions, CpuFrameOptions, OmoikaneProjectConfig, ProjectColorConfig,
     ProjectResourceConfig, ProjectSceneConfig, ProjectSceneEntityConfig,
-    ProjectSceneInputBindingConfig,
+    ProjectSceneInputBindingConfig, ProjectTextureConfig, ProjectTextureFormat,
+    ProjectTextureUsage,
 };
 use shinobi::ClientRunLevel;
 
@@ -17,7 +18,18 @@ fn main() -> Result<(), String> {
     app.startup();
     let project_config = OmoikaneProjectConfig {
         name: "Headless Sandbox Project".to_string(),
-        resources: ProjectResourceConfig::default(),
+        resources: ProjectResourceConfig {
+            textures: vec![ProjectTextureConfig {
+                id: 1,
+                label: "sandbox_atlas".to_string(),
+                width: 16,
+                height: 16,
+                depth_or_layers: 1,
+                format: ProjectTextureFormat::Rgba8Unorm,
+                usages: vec![ProjectTextureUsage::Sampled],
+            }],
+            ..ProjectResourceConfig::default()
+        },
         scenes: vec![ProjectSceneConfig {
             name: "main".to_string(),
             camera: 1,
