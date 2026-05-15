@@ -405,6 +405,9 @@ Fatias:
 46. Validar formatos de targets em pipelines declarados no projeto. Concluido
     em 2026-05-15; color targets precisam usar formatos de cor e depth target
     precisa usar formato de depth antes do descriptor de `hikari`.
+47. Validar bind group layouts duplicados em pipelines declarados no projeto.
+    Concluido em 2026-05-15; layouts repetidos sao rejeitados como
+    `ProjectConfigError` antes de construir o descriptor de `hikari`.
 
 Criterios de pronto:
 

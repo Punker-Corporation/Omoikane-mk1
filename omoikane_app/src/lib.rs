@@ -933,6 +933,15 @@ impl ProjectRenderPipelineConfig {
                 });
             }
         }
+        let mut bind_group_layouts = BTreeSet::new();
+        for layout in &self.bind_group_layouts {
+            if !bind_group_layouts.insert(*layout) {
+                return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                    pipeline: self.id,
+                    reason: "bind group layouts must be unique".to_string(),
+                });
+            }
+        }
         let descriptor = RenderPipelineDescriptor::new(
             self.label.clone(),
             PipelineShader::new(ShaderModuleId::new(self.vertex_shader), ShaderStage::Vertex),
@@ -2768,6 +2777,40 @@ mod tests {
             Err(ProjectConfigError::InvalidRenderPipelineResource {
                 pipeline: 68,
                 reason: "depth target must use a depth format".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_render_pipeline_bind_group_layouts() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "duplicate-pipeline-bind-group-layouts".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 69,
+                    label: "duplicate_bind_group_layout_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 16,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: vec![4, 4],
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 69,
+                reason: "bind group layouts must be unique".to_string(),
             })
         );
     }

@@ -187,6 +187,8 @@ grafico.
 Ele tambem confere a compatibilidade dos formatos de target: targets de cor
 precisam usar formatos de cor, e o target de depth precisa usar formato de
 depth.
+Bind group layouts declarados em pipelines de projeto tambem passam por
+preflight de duplicidade antes de virar descriptor `hikari`.
 
 O corte seguinte adicionou cenas headless serializaveis. `ProjectSceneConfig`
 descreve camera, textura de sandbox, viewport, world view e parametros do
