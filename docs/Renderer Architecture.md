@@ -223,6 +223,10 @@ para evitar substituicao silenciosa no componente de fixtures do servidor.
 O mesmo caminho valida a geometria das fixtures: AABBs precisam de bounds
 finitos e dimensoes positivas, raios de AABB nao podem ser negativos e circulos
 precisam de centro finito e raio positivo.
+Os valores fisicos declarativos tambem passam por uma barreira antes do spawn:
+velocidades linear/angular precisam ser finitas, e propriedades de fixture como
+friction, restitution e mass precisam ser finitas e nao negativas antes de
+chegar ao servidor autoritativo.
 
 As entidades dinamicas de cena tambem preservam rotacao inicial pelo mesmo
 caminho autoritativo. A configuracao serializada alimenta o transform do

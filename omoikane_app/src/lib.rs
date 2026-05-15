@@ -384,7 +384,21 @@ impl ProjectScenePhysicsConfig {
         true
     }
 
-    pub fn validate_fixtures(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+    pub fn validate(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        if !is_finite_vector(self.linear_velocity) {
+            return Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: scene.to_string(),
+                entity: entity.to_string(),
+                reason: "linear velocity must be finite".to_string(),
+            });
+        }
+        if !self.angular_velocity.is_finite() {
+            return Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: scene.to_string(),
+                entity: entity.to_string(),
+                reason: "angular velocity must be finite".to_string(),
+            });
+        }
         let mut fixture_ids = BTreeSet::new();
         for fixture in &self.fixtures {
             if fixture.id.is_empty() {
@@ -401,6 +415,7 @@ impl ProjectScenePhysicsConfig {
                 });
             }
             fixture.validate_shape(scene, entity)?;
+            fixture.validate_material(scene, entity)?;
         }
         Ok(())
     }
@@ -493,6 +508,25 @@ impl ProjectSceneFixtureConfig {
                     return Err(invalid("circle radius must be finite and positive"));
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn validate_material(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneFixtureMaterial {
+            scene: scene.to_string(),
+            entity: entity.to_string(),
+            fixture: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        if !self.friction.is_finite() || self.friction < 0.0 {
+            return Err(invalid("friction must be finite and non-negative"));
+        }
+        if !self.restitution.is_finite() || self.restitution < 0.0 {
+            return Err(invalid("restitution must be finite and non-negative"));
+        }
+        if !self.mass.is_finite() || self.mass < 0.0 {
+            return Err(invalid("mass must be finite and non-negative"));
         }
         Ok(())
     }
@@ -799,6 +833,17 @@ pub enum ProjectConfigError {
         scene: String,
         entity: String,
         fixture: String,
+        reason: String,
+    },
+    InvalidSceneFixtureMaterial {
+        scene: String,
+        entity: String,
+        fixture: String,
+        reason: String,
+    },
+    InvalidScenePhysicsValue {
+        scene: String,
+        entity: String,
         reason: String,
     },
     MissingSceneEntityId {
@@ -1387,7 +1432,7 @@ impl HeadlessApp {
                 });
             }
             if let Some(physics) = &entity_config.physics {
-                physics.validate_fixtures(&scene.name, &entity_config.id)?;
+                physics.validate(&scene.name, &entity_config.id)?;
             }
         }
         if let Some(controlled_entity) = &scene.controlled_entity
@@ -3119,6 +3164,145 @@ mod tests {
                 entity: "actor".to_string(),
                 fixture: "body".to_string(),
                 reason: "circle radius must be finite and positive".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_physics_values_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-physics-values".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        linear_velocity: Vector2::new(f32::NAN, 0.0),
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: "body".to_string(),
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "linear velocity must be finite".to_string(),
+            })
+        );
+
+        let physics = project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics");
+        physics.linear_velocity = Vector2::ZERO;
+        physics.angular_velocity = f32::INFINITY;
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "angular velocity must be finite".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_fixture_material_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-fixture-material".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: "body".to_string(),
+                            friction: -0.1,
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureMaterial {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "friction must be finite and non-negative".to_string(),
+            })
+        );
+
+        let fixture = &mut project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics")
+            .fixtures[0];
+        fixture.friction = 0.0;
+        fixture.mass = f32::NAN;
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureMaterial {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "mass must be finite and non-negative".to_string(),
             })
         );
         assert!(app.project_scene_entities().is_empty());

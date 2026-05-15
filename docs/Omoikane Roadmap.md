@@ -362,6 +362,10 @@ Fatias:
     2026-05-15; AABBs precisam de bounds finitos e dimensoes positivas, raios
     de AABB precisam ser finitos e nao negativos, e circulos precisam de centro
     finito e raio positivo.
+33. Validar valores fisicos declarativos antes do spawn. Concluido em
+    2026-05-15; velocidades linear/angular precisam ser finitas, e propriedades
+    de fixture como friction, restitution e mass precisam ser finitas e nao
+    negativas antes de tocar o servidor autoritativo.
 
 Criterios de pronto:
 
