@@ -251,6 +251,9 @@ apenas comandos resolvidos para uma funcao runtime explicita.
 Em 2026-05-15, essa validacao passou a cobrir todos os bindings da cena antes
 do lookup da acao pedida, impedindo que uma duplicata nao usada no momento
 fique escondida em uma cena aparentemente valida.
+O spawn de entidades de cena tambem executa essa validacao antes de criar
+entidades no servidor, mantendo cenas com input invalido fora do runtime
+autoritativo.
 
 Em 2026-05-15, o exemplo `omoikane_app/examples/headless_sandbox.rs` passou a
 usar esse caminho de projeto de ponta a ponta. Ele declara uma cena com

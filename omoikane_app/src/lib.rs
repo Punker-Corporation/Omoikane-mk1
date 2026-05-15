@@ -1277,6 +1277,7 @@ impl HeadlessApp {
         scene_name: &str,
     ) -> Result<Vec<ProjectSceneEntity>, ProjectConfigError> {
         let scene = project.scene(scene_name)?;
+        scene.validate_input_bindings()?;
         let mut entity_ids = BTreeSet::new();
         for entity_config in &scene.dynamic_entities {
             if !entity_ids.insert(entity_config.id.clone()) {
@@ -2632,6 +2633,53 @@ mod tests {
                 action: "jump".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_input_bindings_before_scene_spawn() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "invalid-input-binding-spawn".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 110,
+                sandbox_texture: 111,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: vec![ProjectSceneInputBindingConfig {
+                    action: "move_right".to_string(),
+                    function: String::new(),
+                }],
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 112,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 0.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneInputFunction {
+                scene: "main".to_string(),
+                action: "move_right".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
     }
 
     #[test]

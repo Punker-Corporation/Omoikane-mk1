@@ -350,6 +350,10 @@ Fatias:
     2026-05-15; `ProjectSceneConfig::validate_input_bindings` rejeita acoes
     vazias, funcoes vazias e acoes duplicadas em qualquer binding da cena antes
     de resolver a acao pedida pelo runtime headless.
+30. Validar bindings de input antes de spawnar entidades de cena. Concluido em
+    2026-05-15; `HeadlessApp::spawn_project_scene_entities` chama
+    `ProjectSceneConfig::validate_input_bindings` antes de criar entidades no
+    servidor, evitando spawns parciais para cenas com input invalido.
 
 Criterios de pronto:
 
