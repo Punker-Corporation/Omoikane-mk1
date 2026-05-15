@@ -336,6 +336,7 @@ impl ProjectSceneConfig {
                     id: entity_config.id.clone(),
                 });
             }
+            entity_config.validate_visuals(&self.name)?;
             if let Some(physics) = &entity_config.physics {
                 physics.validate(&self.name, &entity_config.id)?;
             }
@@ -388,6 +389,30 @@ pub struct ProjectSceneEntityConfig {
 impl ProjectSceneEntityConfig {
     const fn default_size() -> Vector2 {
         Vector2::ONE
+    }
+
+    fn validate_visuals(&self, scene: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneEntityVisual {
+            scene: scene.to_string(),
+            entity: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        if !is_finite_vector(self.position) {
+            return Err(invalid("position must be finite"));
+        }
+        if !self.rotation.is_finite() {
+            return Err(invalid("rotation must be finite"));
+        }
+        if !is_positive_finite_vector(self.size) {
+            return Err(invalid("size must be finite and positive"));
+        }
+        if !is_finite_color(self.tint) {
+            return Err(invalid("tint must be finite"));
+        }
+        if !self.depth.is_finite() {
+            return Err(invalid("depth must be finite"));
+        }
+        Ok(())
     }
 }
 
@@ -686,11 +711,19 @@ fn is_finite_vector(value: Vector2) -> bool {
     value.x.is_finite() && value.y.is_finite()
 }
 
+fn is_positive_finite_vector(value: Vector2) -> bool {
+    is_finite_vector(value) && value.x > 0.0 && value.y > 0.0
+}
+
 fn is_finite_box(value: Box2) -> bool {
     value.left.is_finite()
         && value.bottom.is_finite()
         && value.right.is_finite()
         && value.top.is_finite()
+}
+
+fn is_finite_color(value: ProjectColorConfig) -> bool {
+    value.r.is_finite() && value.g.is_finite() && value.b.is_finite() && value.a.is_finite()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -879,6 +912,11 @@ pub enum ProjectConfigError {
         scene: String,
         entity: String,
         fixture: String,
+        reason: String,
+    },
+    InvalidSceneEntityVisual {
+        scene: String,
+        entity: String,
         reason: String,
     },
     InvalidScenePhysicsValue {
@@ -2756,6 +2794,99 @@ mod tests {
             app.spawn_project_scene_entities(&project, "main"),
             Err(ProjectConfigError::EmptyControlledSceneEntityId {
                 scene: "main".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_entity_visuals_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-entity-visuals".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::new(f32::NAN, 0.0),
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "position must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.position = Vector2::ZERO;
+        entity.rotation = f32::INFINITY;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "rotation must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.rotation = 0.0;
+        entity.size = Vector2::new(0.0, 1.0);
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "size must be finite and positive".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.size = Vector2::ONE;
+        entity.tint.a = f32::NAN;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "tint must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.tint = ProjectColorConfig::default();
+        entity.depth = f32::NEG_INFINITY;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "depth must be finite".to_string(),
             })
         );
         assert!(app.project_scene_entities().is_empty());

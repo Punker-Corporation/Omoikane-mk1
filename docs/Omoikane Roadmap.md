@@ -369,6 +369,9 @@ Fatias:
 34. Validar ids autorais vazios de entidades de cena. Concluido em 2026-05-15;
     `ProjectSceneConfig::validate_dynamic_entities` rejeita entidade dinamica
     sem id e `controlled_entity` vazio antes de qualquer spawn no servidor.
+35. Validar dados visuais de entidades dinamicas antes do spawn. Concluido em
+    2026-05-15; posicao, rotacao, tamanho, tint e depth passam por validacao
+    finita/positiva antes de alimentar servidor autoritativo ou render extract.
 
 Criterios de pronto:
 
