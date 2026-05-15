@@ -242,6 +242,9 @@ gameplay apontem para uma entidade ambigua.
 Em 2026-05-15, essa barreira passou a rejeitar tambem ids autorais vazios e
 referencias `controlled_entity` vazias antes do spawn, mantendo a identidade de
 projeto explicita antes de criar entidades runtime.
+O mesmo pre-spawn tambem valida a metadata autoral da entidade dinamica:
+`appearance_name` vazio e `prototype` vazio quando presente sao rejeitados antes
+de escrever metadata ECS no servidor.
 O mesmo caminho valida os dados visuais das entidades dinamicas: posicao,
 rotacao, tamanho, tint e depth precisam ser finitos, e o tamanho precisa ser
 positivo antes de alimentar o servidor autoritativo ou o `RenderExtract`.

@@ -375,6 +375,9 @@ Fatias:
 36. Validar dados de renderizacao de cena antes do extract. Concluido em
     2026-05-15; world view, viewport, sprite base e sprites estaticos de
     `ProjectSceneConfig` sao validados antes de montar o `RenderExtract`.
+37. Validar metadata autoral de entidades dinamicas antes do spawn. Concluido
+    em 2026-05-15; `appearance_name` vazio e `prototype` vazio quando presente
+    sao rejeitados antes de criar metadata ECS no servidor.
 
 Criterios de pronto:
 
