@@ -366,6 +366,9 @@ Fatias:
     2026-05-15; velocidades linear/angular precisam ser finitas, e propriedades
     de fixture como friction, restitution e mass precisam ser finitas e nao
     negativas antes de tocar o servidor autoritativo.
+34. Validar ids autorais vazios de entidades de cena. Concluido em 2026-05-15;
+    `ProjectSceneConfig::validate_dynamic_entities` rejeita entidade dinamica
+    sem id e `controlled_entity` vazio antes de qualquer spawn no servidor.
 
 Criterios de pronto:
 

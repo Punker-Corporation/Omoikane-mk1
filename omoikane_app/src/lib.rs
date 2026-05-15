@@ -321,6 +321,40 @@ impl ProjectSceneConfig {
         }
         Ok(())
     }
+
+    pub fn validate_dynamic_entities(&self) -> Result<(), ProjectConfigError> {
+        let mut entity_ids = BTreeSet::new();
+        for entity_config in &self.dynamic_entities {
+            if entity_config.id.is_empty() {
+                return Err(ProjectConfigError::EmptySceneEntityId {
+                    scene: self.name.clone(),
+                });
+            }
+            if !entity_ids.insert(entity_config.id.clone()) {
+                return Err(ProjectConfigError::DuplicateSceneEntityId {
+                    scene: self.name.clone(),
+                    id: entity_config.id.clone(),
+                });
+            }
+            if let Some(physics) = &entity_config.physics {
+                physics.validate(&self.name, &entity_config.id)?;
+            }
+        }
+        if let Some(controlled_entity) = &self.controlled_entity {
+            if controlled_entity.is_empty() {
+                return Err(ProjectConfigError::EmptyControlledSceneEntityId {
+                    scene: self.name.clone(),
+                });
+            }
+            if !entity_ids.contains(controlled_entity) {
+                return Err(ProjectConfigError::MissingSceneEntityId {
+                    scene: self.name.clone(),
+                    id: controlled_entity.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -817,6 +851,12 @@ pub enum ProjectConfigError {
     DuplicateSceneInputAction {
         scene: String,
         action: String,
+    },
+    EmptyControlledSceneEntityId {
+        scene: String,
+    },
+    EmptySceneEntityId {
+        scene: String,
     },
     EmptySceneFixtureId {
         scene: String,
@@ -1423,26 +1463,7 @@ impl HeadlessApp {
     ) -> Result<Vec<ProjectSceneEntity>, ProjectConfigError> {
         let scene = project.scene(scene_name)?;
         scene.validate_input_bindings()?;
-        let mut entity_ids = BTreeSet::new();
-        for entity_config in &scene.dynamic_entities {
-            if !entity_ids.insert(entity_config.id.clone()) {
-                return Err(ProjectConfigError::DuplicateSceneEntityId {
-                    scene: scene.name.clone(),
-                    id: entity_config.id.clone(),
-                });
-            }
-            if let Some(physics) = &entity_config.physics {
-                physics.validate(&scene.name, &entity_config.id)?;
-            }
-        }
-        if let Some(controlled_entity) = &scene.controlled_entity
-            && !entity_ids.contains(controlled_entity)
-        {
-            return Err(ProjectConfigError::MissingSceneEntityId {
-                scene: scene.name.clone(),
-                id: controlled_entity.clone(),
-            });
-        }
+        scene.validate_dynamic_entities()?;
 
         let mut spawned = Vec::with_capacity(scene.dynamic_entities.len());
         for entity_config in &scene.dynamic_entities {
@@ -2623,6 +2644,49 @@ mod tests {
     }
 
     #[test]
+    fn headless_app_rejects_empty_project_scene_entity_ids() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "empty-entity-id".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: String::new(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
     fn headless_app_rejects_missing_controlled_project_scene_entity() {
         let mut app = HeadlessApp::default();
         let project = OmoikaneProjectConfig {
@@ -2661,6 +2725,37 @@ mod tests {
             Err(ProjectConfigError::MissingSceneEntityId {
                 scene: "main".to_string(),
                 id: "missing".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_empty_controlled_project_scene_entity() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "empty-controlled-entity".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: Some(String::new()),
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptyControlledSceneEntityId {
+                scene: "main".to_string(),
             })
         );
         assert!(app.project_scene_entities().is_empty());

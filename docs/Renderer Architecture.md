@@ -239,6 +239,9 @@ substitui o `EntityUid` runtime; ele serve para a camada de projeto consultar a
 entidade criada pelo servidor depois do spawn. O app host rejeita ids duplicados
 dentro da mesma cena antes de criar entidades, evitando que sistemas futuros de
 gameplay apontem para uma entidade ambigua.
+Em 2026-05-15, essa barreira passou a rejeitar tambem ids autorais vazios e
+referencias `controlled_entity` vazias antes do spawn, mantendo a identidade de
+projeto explicita antes de criar entidades runtime.
 
 A cena tambem pode declarar qual entidade autoral deve ser controlada pelo
 jogador local. `ProjectSceneConfig::controlled_entity` referencia um id de
