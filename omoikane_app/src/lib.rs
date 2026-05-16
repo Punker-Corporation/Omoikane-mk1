@@ -310,6 +310,9 @@ impl ProjectSceneConfig {
         if !self.sprite_depth.is_finite() {
             return Err(invalid("sandbox sprite depth must be finite"));
         }
+        if self.camera == 0 {
+            return Err(invalid("camera id must be non-zero"));
+        }
         if self.sandbox_texture == 0 {
             return Err(invalid("sandbox texture id must be non-zero"));
         }
@@ -3441,6 +3444,19 @@ mod tests {
 
         let scene = &mut project.scenes[0];
         scene.sprite_tint = ProjectColorConfig::default();
+        scene.camera = 0;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "camera id must be non-zero".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.camera = 101;
         scene.sandbox_texture = 0;
         assert_eq!(
             app.build_project_scene_render_extract(&project, "main"),

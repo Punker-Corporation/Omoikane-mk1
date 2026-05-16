@@ -432,6 +432,9 @@ Fatias:
 55. Rejeitar referencias de textura zero em cenas serializadas. Concluido em
     2026-05-15; textura base, sprites estaticos e entidades dinamicas agora
     falham como dados de projeto invalidos antes de montar extracts.
+56. Rejeitar ids de camera zero em cenas serializadas. Concluido em
+    2026-05-15; cameras declaradas por projeto agora usam o mesmo espaco
+    nao-zero dos demais handles autorais antes de montar o `RenderExtract`.
 
 Criterios de pronto:
 

@@ -290,6 +290,9 @@ como configuracao de projeto antes que o app host construa o `RenderExtract`.
 Referencias de textura zero tambem sao rejeitadas nesse preflight para textura
 base da cena, sprites estaticos e entidades dinamicas, mantendo ids autorais no
 mesmo espaco nao-zero dos recursos declarados.
+Ids de camera zero seguem a mesma regra, entao cenas serializadas precisam
+declarar uma camera autoral nao-zero antes de produzir qualquer
+`Camera2dExtract`.
 Quando a cena e transformada em frame CPU registrado, as texturas referenciadas
 pelo extract precisam existir em `CpuFrameResources`, antecipando erros de
 recurso ausente antes de qualquer backend grafico real.
