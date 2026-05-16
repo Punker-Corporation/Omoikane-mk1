@@ -173,6 +173,8 @@ cenas serializadas permanecem fora desse primeiro corte.
 Em 2026-05-15, `ProjectTextureConfig` tambem passou a validar dimensoes
 nao-zero antes de criar descriptors CPU, reportando o erro como dado de projeto
 em vez de deixar a falha chegar apenas no catalogo grafico.
+O preflight de textura tambem rejeita usos duplicados no JSON autoral, antes
+que o `BTreeSet` do descriptor grafico normalize esses dados silenciosamente.
 
 No mesmo dia, o formato foi expandido para render pipelines. O projeto pode
 declarar `ProjectRenderPipelineConfig` com ids de shader, layouts de vertex

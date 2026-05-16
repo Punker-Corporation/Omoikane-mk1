@@ -829,6 +829,15 @@ impl ProjectTextureConfig {
         if self.usages.is_empty() {
             return Err(ProjectConfigError::MissingTextureUsage(self.id));
         }
+        let mut usages = BTreeSet::new();
+        for usage in &self.usages {
+            if !usages.insert(*usage) {
+                return Err(ProjectConfigError::InvalidTextureResource {
+                    texture: self.id,
+                    reason: "texture usages must be unique".to_string(),
+                });
+            }
+        }
         Ok(CpuTextureResourceConfig::new(
             GpuTextureId::new(self.id),
             GpuTextureDescriptor::new(
@@ -860,7 +869,7 @@ impl From<ProjectTextureFormat> for TextureFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ProjectTextureUsage {
     Sampled,
     RenderTarget,
@@ -2637,6 +2646,34 @@ mod tests {
             Err(ProjectConfigError::InvalidTextureResource {
                 texture: 62,
                 reason: "texture size must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_texture_usages() {
+        let project = OmoikaneProjectConfig {
+            name: "duplicate-texture-usages".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![ProjectTextureConfig {
+                    id: 63,
+                    label: "duplicate_usage_texture".to_string(),
+                    width: 1,
+                    height: 1,
+                    depth_or_layers: 1,
+                    format: ProjectTextureFormat::Rgba8Unorm,
+                    usages: vec![ProjectTextureUsage::Sampled, ProjectTextureUsage::Sampled],
+                }],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 63,
+                reason: "texture usages must be unique".to_string(),
             })
         );
     }
