@@ -287,6 +287,9 @@ positivo antes de alimentar o servidor autoritativo ou o `RenderExtract`.
 O extract de cena tambem ganhou uma barreira propria para dados renderizaveis:
 world view, viewport, sprite base da cena e sprites estaticos sao validados
 como configuracao de projeto antes que o app host construa o `RenderExtract`.
+Referencias de textura zero tambem sao rejeitadas nesse preflight para textura
+base da cena, sprites estaticos e entidades dinamicas, mantendo ids autorais no
+mesmo espaco nao-zero dos recursos declarados.
 Quando a cena e transformada em frame CPU registrado, as texturas referenciadas
 pelo extract precisam existir em `CpuFrameResources`, antecipando erros de
 recurso ausente antes de qualquer backend grafico real.

@@ -310,6 +310,9 @@ impl ProjectSceneConfig {
         if !self.sprite_depth.is_finite() {
             return Err(invalid("sandbox sprite depth must be finite"));
         }
+        if self.sandbox_texture == 0 {
+            return Err(invalid("sandbox texture id must be non-zero"));
+        }
         for (index, sprite) in self.sprites.iter().enumerate() {
             sprite.validate_visuals(&self.name, index)?;
         }
@@ -465,6 +468,9 @@ impl ProjectSceneEntityConfig {
         }
         if !self.depth.is_finite() {
             return Err(invalid("depth must be finite"));
+        }
+        if self.texture == 0 {
+            return Err(invalid("texture id must be non-zero"));
         }
         Ok(())
     }
@@ -743,6 +749,9 @@ impl ProjectSpriteConfig {
         }
         if !self.depth.is_finite() {
             return Err(invalid("depth must be finite"));
+        }
+        if self.texture == 0 {
+            return Err(invalid("texture id must be non-zero"));
         }
         Ok(())
     }
@@ -3429,6 +3438,19 @@ mod tests {
                 }
             ))
         );
+
+        let scene = &mut project.scenes[0];
+        scene.sprite_tint = ProjectColorConfig::default();
+        scene.sandbox_texture = 0;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "sandbox texture id must be non-zero".to_string(),
+                }
+            ))
+        );
     }
 
     #[test]
@@ -3481,6 +3503,20 @@ mod tests {
                     scene: "main".to_string(),
                     index: 0,
                     reason: "depth must be finite".to_string(),
+                }
+            ))
+        );
+
+        let sprite = &mut project.scenes[0].sprites[0];
+        sprite.depth = 1.0;
+        sprite.texture = 0;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneSpriteVisual {
+                    scene: "main".to_string(),
+                    index: 0,
+                    reason: "texture id must be non-zero".to_string(),
                 }
             ))
         );
@@ -3900,6 +3936,18 @@ mod tests {
                 scene: "main".to_string(),
                 entity: "actor".to_string(),
                 reason: "depth must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.depth = 1.0;
+        entity.texture = 0;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "texture id must be non-zero".to_string(),
             })
         );
         assert!(app.project_scene_entities().is_empty());

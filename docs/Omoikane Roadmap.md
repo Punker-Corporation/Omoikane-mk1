@@ -429,6 +429,9 @@ Fatias:
 54. Rejeitar ids zero em recursos declarados no projeto. Concluido em
     2026-05-15; texturas e render pipelines autorais agora precisam usar ids
     nao-zero antes de entrar nos handles estruturais de `hikari`.
+55. Rejeitar referencias de textura zero em cenas serializadas. Concluido em
+    2026-05-15; textura base, sprites estaticos e entidades dinamicas agora
+    falham como dados de projeto invalidos antes de montar extracts.
 
 Criterios de pronto:
 
