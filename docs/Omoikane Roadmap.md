@@ -426,6 +426,9 @@ Fatias:
 53. Rejeitar nomes de cena vazios em projetos serializados. Concluido em
     2026-05-15; `ProjectSceneConfig::name` em branco agora falha como
     `ProjectConfigError` antes de lookup/render/spawn.
+54. Rejeitar ids zero em recursos declarados no projeto. Concluido em
+    2026-05-15; texturas e render pipelines autorais agora precisam usar ids
+    nao-zero antes de entrar nos handles estruturais de `hikari`.
 
 Criterios de pronto:
 

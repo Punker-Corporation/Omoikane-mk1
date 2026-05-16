@@ -827,6 +827,12 @@ impl ProjectTextureConfig {
     }
 
     pub fn to_cpu_config(&self) -> Result<CpuTextureResourceConfig, ProjectConfigError> {
+        if self.id == 0 {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "texture id must be non-zero".to_string(),
+            });
+        }
         if is_blank(&self.label) {
             return Err(ProjectConfigError::InvalidTextureResource {
                 texture: self.id,
@@ -935,6 +941,12 @@ pub struct ProjectRenderPipelineConfig {
 
 impl ProjectRenderPipelineConfig {
     pub fn to_cpu_config(&self) -> Result<CpuRenderPipelineResourceConfig, ProjectConfigError> {
+        if self.id == 0 {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "render pipeline id must be non-zero".to_string(),
+            });
+        }
         if is_blank(&self.label) {
             return Err(ProjectConfigError::InvalidRenderPipelineResource {
                 pipeline: self.id,
@@ -2643,6 +2655,34 @@ mod tests {
     }
 
     #[test]
+    fn project_config_rejects_zero_texture_ids() {
+        let project = OmoikaneProjectConfig {
+            name: "zero-texture-id".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![ProjectTextureConfig {
+                    id: 0,
+                    label: "zero_texture".to_string(),
+                    width: 1,
+                    height: 1,
+                    depth_or_layers: 1,
+                    format: ProjectTextureFormat::Rgba8Unorm,
+                    usages: vec![ProjectTextureUsage::Sampled],
+                }],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 0,
+                reason: "texture id must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn project_config_rejects_empty_texture_resources() {
         let mut texture = ProjectTextureConfig {
             id: 62,
@@ -2821,6 +2861,40 @@ mod tests {
         assert_eq!(
             project.to_cpu_frame_resource_config(frame),
             Err(ProjectConfigError::DuplicateRenderPipelineId(64))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_zero_render_pipeline_ids() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "zero-pipeline-id".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 0,
+                    label: "zero_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 16,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 0,
+                reason: "render pipeline id must be non-zero".to_string(),
+            })
         );
     }
 
