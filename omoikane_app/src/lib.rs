@@ -838,6 +838,19 @@ impl ProjectTextureConfig {
                 });
             }
         }
+        let format = TextureFormat::from(self.format);
+        if format.is_color() && usages.contains(&ProjectTextureUsage::DepthStencil) {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "color textures must not use depth stencil usage".to_string(),
+            });
+        }
+        if format.is_depth() && usages.contains(&ProjectTextureUsage::RenderTarget) {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "depth textures must not use render target usage".to_string(),
+            });
+        }
         Ok(CpuTextureResourceConfig::new(
             GpuTextureId::new(self.id),
             GpuTextureDescriptor::new(
@@ -2674,6 +2687,47 @@ mod tests {
             Err(ProjectConfigError::InvalidTextureResource {
                 texture: 63,
                 reason: "texture usages must be unique".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_texture_usage_format_mismatches() {
+        let mut texture = ProjectTextureConfig {
+            id: 65,
+            label: "mismatched_texture_usage".to_string(),
+            width: 1,
+            height: 1,
+            depth_or_layers: 1,
+            format: ProjectTextureFormat::Rgba8Unorm,
+            usages: vec![ProjectTextureUsage::DepthStencil],
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "mismatched-texture-usage".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![texture.clone()],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 65,
+                reason: "color textures must not use depth stencil usage".to_string(),
+            })
+        );
+
+        texture.format = ProjectTextureFormat::Depth32Float;
+        texture.usages = vec![ProjectTextureUsage::RenderTarget];
+        project.resources.textures = vec![texture];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 65,
+                reason: "depth textures must not use render target usage".to_string(),
             })
         );
     }

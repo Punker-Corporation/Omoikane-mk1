@@ -175,6 +175,8 @@ nao-zero antes de criar descriptors CPU, reportando o erro como dado de projeto
 em vez de deixar a falha chegar apenas no catalogo grafico.
 O preflight de textura tambem rejeita usos duplicados no JSON autoral, antes
 que o `BTreeSet` do descriptor grafico normalize esses dados silenciosamente.
+Ele ainda confere pares obvios de formato/uso: texturas de cor nao podem
+declarar `DepthStencil`, e texturas de depth nao podem declarar `RenderTarget`.
 
 No mesmo dia, o formato foi expandido para render pipelines. O projeto pode
 declarar `ProjectRenderPipelineConfig` com ids de shader, layouts de vertex

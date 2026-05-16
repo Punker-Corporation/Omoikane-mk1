@@ -414,6 +414,9 @@ Fatias:
 49. Validar usos duplicados de texturas declaradas no projeto. Concluido em
     2026-05-15; `ProjectTextureConfig` rejeita flags repetidas em `usages`
     como `ProjectConfigError` antes de construir o descriptor de `hikari`.
+50. Validar compatibilidade entre formato e uso de texturas declaradas no
+    projeto. Concluido em 2026-05-15; texturas de cor nao aceitam
+    `DepthStencil`, e texturas de depth nao aceitam `RenderTarget`.
 
 Criterios de pronto:
 
