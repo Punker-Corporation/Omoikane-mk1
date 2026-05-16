@@ -423,6 +423,9 @@ Fatias:
 52. Rejeitar labels vazios em recursos declarados no projeto. Concluido em
     2026-05-15; texturas e render pipelines agora exigem labels nao vazios
     antes de construir descriptors de `hikari`.
+53. Rejeitar nomes de cena vazios em projetos serializados. Concluido em
+    2026-05-15; `ProjectSceneConfig::name` em branco agora falha como
+    `ProjectConfigError` antes de lookup/render/spawn.
 
 Criterios de pronto:
 

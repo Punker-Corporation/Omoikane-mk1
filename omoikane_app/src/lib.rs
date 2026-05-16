@@ -206,6 +206,9 @@ impl OmoikaneProjectConfig {
     pub fn scene(&self, name: &str) -> Result<&ProjectSceneConfig, ProjectConfigError> {
         let mut matched = None;
         for scene in &self.scenes {
+            if is_blank(&scene.name) {
+                return Err(ProjectConfigError::EmptySceneName);
+            }
             if scene.name == name {
                 if matched.is_some() {
                     return Err(ProjectConfigError::DuplicateSceneName(name.to_string()));
@@ -1043,6 +1046,7 @@ pub enum ProjectConfigError {
     DuplicateTextureId(u64),
     DuplicateRenderPipelineId(u64),
     DuplicateSceneName(String),
+    EmptySceneName,
     DuplicateSceneEntityId {
         scene: String,
         id: String,
@@ -3090,7 +3094,7 @@ mod tests {
 
     #[test]
     fn project_config_rejects_missing_and_duplicate_scenes() {
-        let scene = ProjectSceneConfig {
+        let mut scene = ProjectSceneConfig {
             name: "main".to_string(),
             camera: 90,
             sandbox_texture: 91,
@@ -3107,7 +3111,7 @@ mod tests {
         let project = OmoikaneProjectConfig {
             name: "duplicate-scenes".to_string(),
             resources: ProjectResourceConfig::default(),
-            scenes: vec![scene.clone(), scene],
+            scenes: vec![scene.clone(), scene.clone()],
         };
 
         assert_eq!(
@@ -3117,6 +3121,26 @@ mod tests {
         assert_eq!(
             project.render_frame_options_for_scene("missing"),
             Err(ProjectConfigError::MissingScene("missing".to_string()))
+        );
+
+        scene.name = String::new();
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-scene-name".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![scene.clone()],
+        };
+
+        assert_eq!(
+            project.render_frame_options_for_scene("main"),
+            Err(ProjectConfigError::EmptySceneName)
+        );
+
+        scene.name = " \t ".to_string();
+        project.scenes = vec![scene];
+
+        assert_eq!(
+            project.render_frame_options_for_scene("main"),
+            Err(ProjectConfigError::EmptySceneName)
         );
     }
 

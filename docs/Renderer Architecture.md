@@ -205,6 +205,9 @@ descreve camera, textura de sandbox, viewport, world view e parametros do
 sprite principal, e converte diretamente para `RenderFrameOptions`. Isso ainda
 nao substitui um formato completo de cena ou mapa; por enquanto e a ponte
 minima entre projeto JSON e o frame CPU-only do sandbox.
+Em 2026-05-15, o lookup de cenas passou a rejeitar `ProjectSceneConfig::name`
+vazio ou composto apenas por whitespace, mantendo nomes de cena explicitos
+antes de render, input ou spawn de entidades.
 
 Em seguida, cenas passaram a poder declarar sprites estaticos por
 `ProjectSpriteConfig`. O app host combina esses sprites com o sprite de sandbox
