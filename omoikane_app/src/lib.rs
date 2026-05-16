@@ -191,7 +191,7 @@ impl OmoikaneProjectConfig {
             if !pipeline_ids.insert(pipeline.id) {
                 return Err(ProjectConfigError::DuplicateRenderPipelineId(pipeline.id));
             }
-            resource_config = resource_config.with_render_pipeline(pipeline.to_cpu_config());
+            resource_config = resource_config.with_render_pipeline(pipeline.to_cpu_config()?);
         }
         Ok(resource_config)
     }
@@ -206,6 +206,9 @@ impl OmoikaneProjectConfig {
     pub fn scene(&self, name: &str) -> Result<&ProjectSceneConfig, ProjectConfigError> {
         let mut matched = None;
         for scene in &self.scenes {
+            if is_blank(&scene.name) {
+                return Err(ProjectConfigError::EmptySceneName);
+            }
             if scene.name == name {
                 if matched.is_some() {
                     return Err(ProjectConfigError::DuplicateSceneName(name.to_string()));
@@ -282,37 +285,117 @@ impl ProjectSceneConfig {
             .collect()
     }
 
+    pub fn validate_render_data(&self) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneRenderData {
+            scene: self.name.clone(),
+            reason: reason.to_string(),
+        };
+        if !is_finite_box(self.world_view) {
+            return Err(invalid("world view must be finite"));
+        }
+        if self.world_view.right <= self.world_view.left
+            || self.world_view.top <= self.world_view.bottom
+        {
+            return Err(invalid("world view must have positive width and height"));
+        }
+        if !is_positive_finite_vector(self.viewport_size) {
+            return Err(invalid("viewport size must be finite and positive"));
+        }
+        if !is_positive_finite_vector(self.sprite_size) {
+            return Err(invalid("sandbox sprite size must be finite and positive"));
+        }
+        if !is_finite_color(self.sprite_tint) {
+            return Err(invalid("sandbox sprite tint must be finite"));
+        }
+        if !self.sprite_depth.is_finite() {
+            return Err(invalid("sandbox sprite depth must be finite"));
+        }
+        if self.camera == 0 {
+            return Err(invalid("camera id must be non-zero"));
+        }
+        if self.sandbox_texture == 0 {
+            return Err(invalid("sandbox texture id must be non-zero"));
+        }
+        for (index, sprite) in self.sprites.iter().enumerate() {
+            sprite.validate_visuals(&self.name, index)?;
+        }
+        Ok(())
+    }
+
     pub fn input_function_for_action(
         &self,
         action: &str,
     ) -> Result<BoundKeyFunction, ProjectConfigError> {
-        let mut matched = None;
+        self.validate_input_bindings()?;
         for binding in &self.input_bindings {
-            if binding.action.is_empty() {
+            if binding.action == action {
+                return Ok(BoundKeyFunction::new(binding.function.clone()));
+            }
+        }
+        Err(ProjectConfigError::MissingSceneInputAction {
+            scene: self.name.clone(),
+            action: action.to_string(),
+        })
+    }
+
+    pub fn validate_input_bindings(&self) -> Result<(), ProjectConfigError> {
+        let mut actions = BTreeSet::new();
+        for binding in &self.input_bindings {
+            if is_blank(&binding.action) {
                 return Err(ProjectConfigError::EmptySceneInputAction {
                     scene: self.name.clone(),
                 });
             }
-            if binding.function.is_empty() {
+            if is_blank(&binding.function) {
                 return Err(ProjectConfigError::EmptySceneInputFunction {
                     scene: self.name.clone(),
                     action: binding.action.clone(),
                 });
             }
-            if binding.action == action {
-                if matched.is_some() {
-                    return Err(ProjectConfigError::DuplicateSceneInputAction {
-                        scene: self.name.clone(),
-                        action: action.to_string(),
-                    });
-                }
-                matched = Some(BoundKeyFunction::new(binding.function.clone()));
+            if !actions.insert(binding.action.clone()) {
+                return Err(ProjectConfigError::DuplicateSceneInputAction {
+                    scene: self.name.clone(),
+                    action: binding.action.clone(),
+                });
             }
         }
-        matched.ok_or_else(|| ProjectConfigError::MissingSceneInputAction {
-            scene: self.name.clone(),
-            action: action.to_string(),
-        })
+        Ok(())
+    }
+
+    pub fn validate_dynamic_entities(&self) -> Result<(), ProjectConfigError> {
+        let mut entity_ids = BTreeSet::new();
+        for entity_config in &self.dynamic_entities {
+            if is_blank(&entity_config.id) {
+                return Err(ProjectConfigError::EmptySceneEntityId {
+                    scene: self.name.clone(),
+                });
+            }
+            if !entity_ids.insert(entity_config.id.clone()) {
+                return Err(ProjectConfigError::DuplicateSceneEntityId {
+                    scene: self.name.clone(),
+                    id: entity_config.id.clone(),
+                });
+            }
+            entity_config.validate_metadata(&self.name)?;
+            entity_config.validate_visuals(&self.name)?;
+            if let Some(physics) = &entity_config.physics {
+                physics.validate(&self.name, &entity_config.id)?;
+            }
+        }
+        if let Some(controlled_entity) = &self.controlled_entity {
+            if is_blank(controlled_entity) {
+                return Err(ProjectConfigError::EmptyControlledSceneEntityId {
+                    scene: self.name.clone(),
+                });
+            }
+            if !entity_ids.contains(controlled_entity) {
+                return Err(ProjectConfigError::MissingSceneEntityId {
+                    scene: self.name.clone(),
+                    id: controlled_entity.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -348,6 +431,52 @@ impl ProjectSceneEntityConfig {
     const fn default_size() -> Vector2 {
         Vector2::ONE
     }
+
+    fn validate_metadata(&self, scene: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneEntityMetadata {
+            scene: scene.to_string(),
+            entity: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        if is_blank(&self.appearance_name) {
+            return Err(invalid("appearance name must not be empty"));
+        }
+        if self
+            .prototype
+            .as_ref()
+            .is_some_and(|prototype| is_blank(prototype))
+        {
+            return Err(invalid("prototype must not be empty when present"));
+        }
+        Ok(())
+    }
+
+    fn validate_visuals(&self, scene: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneEntityVisual {
+            scene: scene.to_string(),
+            entity: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        if !is_finite_vector(self.position) {
+            return Err(invalid("position must be finite"));
+        }
+        if !self.rotation.is_finite() {
+            return Err(invalid("rotation must be finite"));
+        }
+        if !is_positive_finite_vector(self.size) {
+            return Err(invalid("size must be finite and positive"));
+        }
+        if !is_finite_color(self.tint) {
+            return Err(invalid("tint must be finite"));
+        }
+        if !self.depth.is_finite() {
+            return Err(invalid("depth must be finite"));
+        }
+        if self.texture == 0 {
+            return Err(invalid("texture id must be non-zero"));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -375,6 +504,42 @@ impl ProjectScenePhysicsConfig {
 
     const fn default_predict() -> bool {
         true
+    }
+
+    pub fn validate(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        if !is_finite_vector(self.linear_velocity) {
+            return Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: scene.to_string(),
+                entity: entity.to_string(),
+                reason: "linear velocity must be finite".to_string(),
+            });
+        }
+        if !self.angular_velocity.is_finite() {
+            return Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: scene.to_string(),
+                entity: entity.to_string(),
+                reason: "angular velocity must be finite".to_string(),
+            });
+        }
+        let mut fixture_ids = BTreeSet::new();
+        for fixture in &self.fixtures {
+            if is_blank(&fixture.id) {
+                return Err(ProjectConfigError::EmptySceneFixtureId {
+                    scene: scene.to_string(),
+                    entity: entity.to_string(),
+                });
+            }
+            if !fixture_ids.insert(fixture.id.clone()) {
+                return Err(ProjectConfigError::DuplicateSceneFixtureId {
+                    scene: scene.to_string(),
+                    entity: entity.to_string(),
+                    id: fixture.id.clone(),
+                });
+            }
+            fixture.validate_shape(scene, entity)?;
+            fixture.validate_material(scene, entity)?;
+        }
+        Ok(())
     }
 }
 
@@ -431,6 +596,61 @@ impl ProjectSceneFixtureConfig {
         fixture.collision_mask = self.collision_mask;
         fixture.body_type = self.body_type.into();
         fixture
+    }
+
+    fn validate_shape(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneFixtureShape {
+            scene: scene.to_string(),
+            entity: entity.to_string(),
+            fixture: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        match self.shape {
+            ProjectSceneFixtureShapeConfig::Aabb {
+                local_bounds,
+                radius,
+            } => {
+                if !is_finite_box(local_bounds) {
+                    return Err(invalid("aabb bounds must be finite"));
+                }
+                if local_bounds.right <= local_bounds.left
+                    || local_bounds.top <= local_bounds.bottom
+                {
+                    return Err(invalid("aabb bounds must have positive width and height"));
+                }
+                if !radius.is_finite() || radius < 0.0 {
+                    return Err(invalid("aabb radius must be finite and non-negative"));
+                }
+            }
+            ProjectSceneFixtureShapeConfig::Circle { position, radius } => {
+                if !is_finite_vector(position) {
+                    return Err(invalid("circle position must be finite"));
+                }
+                if !radius.is_finite() || radius <= 0.0 {
+                    return Err(invalid("circle radius must be finite and positive"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_material(&self, scene: &str, entity: &str) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneFixtureMaterial {
+            scene: scene.to_string(),
+            entity: entity.to_string(),
+            fixture: self.id.clone(),
+            reason: reason.to_string(),
+        };
+        if !self.friction.is_finite() || self.friction < 0.0 {
+            return Err(invalid("friction must be finite and non-negative"));
+        }
+        if !self.restitution.is_finite() || self.restitution < 0.0 {
+            return Err(invalid("restitution must be finite and non-negative"));
+        }
+        if !self.mass.is_finite() || self.mass < 0.0 {
+            return Err(invalid("mass must be finite and non-negative"));
+        }
+        Ok(())
     }
 }
 
@@ -512,6 +732,33 @@ impl ProjectSpriteConfig {
         Vector2::ONE
     }
 
+    fn validate_visuals(&self, scene: &str, index: usize) -> Result<(), ProjectConfigError> {
+        let invalid = |reason: &str| ProjectConfigError::InvalidSceneSpriteVisual {
+            scene: scene.to_string(),
+            index,
+            reason: reason.to_string(),
+        };
+        if !is_finite_vector(self.position) {
+            return Err(invalid("position must be finite"));
+        }
+        if !is_positive_finite_vector(self.size) {
+            return Err(invalid("size must be finite and positive"));
+        }
+        if !self.rotation.is_finite() {
+            return Err(invalid("rotation must be finite"));
+        }
+        if !is_finite_color(self.tint) {
+            return Err(invalid("tint must be finite"));
+        }
+        if !self.depth.is_finite() {
+            return Err(invalid("depth must be finite"));
+        }
+        if self.texture == 0 {
+            return Err(invalid("texture id must be non-zero"));
+        }
+        Ok(())
+    }
+
     pub fn to_sprite_extract(&self, camera: ExtractCameraId) -> SpriteExtract {
         SpriteExtract::new(
             camera,
@@ -550,6 +797,29 @@ impl From<ProjectColorConfig> for Color {
     }
 }
 
+fn is_finite_vector(value: Vector2) -> bool {
+    value.x.is_finite() && value.y.is_finite()
+}
+
+fn is_positive_finite_vector(value: Vector2) -> bool {
+    is_finite_vector(value) && value.x > 0.0 && value.y > 0.0
+}
+
+fn is_finite_box(value: Box2) -> bool {
+    value.left.is_finite()
+        && value.bottom.is_finite()
+        && value.right.is_finite()
+        && value.top.is_finite()
+}
+
+fn is_finite_color(value: ProjectColorConfig) -> bool {
+    value.r.is_finite() && value.g.is_finite() && value.b.is_finite() && value.a.is_finite()
+}
+
+fn is_blank(value: &str) -> bool {
+    value.trim().is_empty()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectTextureConfig {
     pub id: u64,
@@ -569,8 +839,48 @@ impl ProjectTextureConfig {
     }
 
     pub fn to_cpu_config(&self) -> Result<CpuTextureResourceConfig, ProjectConfigError> {
+        if self.id == 0 {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "texture id must be non-zero".to_string(),
+            });
+        }
+        if is_blank(&self.label) {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "texture label must not be empty".to_string(),
+            });
+        }
+        if self.width == 0 || self.height == 0 || self.depth_or_layers == 0 {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "texture size must be non-zero".to_string(),
+            });
+        }
         if self.usages.is_empty() {
             return Err(ProjectConfigError::MissingTextureUsage(self.id));
+        }
+        let mut usages = BTreeSet::new();
+        for usage in &self.usages {
+            if !usages.insert(*usage) {
+                return Err(ProjectConfigError::InvalidTextureResource {
+                    texture: self.id,
+                    reason: "texture usages must be unique".to_string(),
+                });
+            }
+        }
+        let format = TextureFormat::from(self.format);
+        if format.is_color() && usages.contains(&ProjectTextureUsage::DepthStencil) {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "color textures must not use depth stencil usage".to_string(),
+            });
+        }
+        if format.is_depth() && usages.contains(&ProjectTextureUsage::RenderTarget) {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "depth textures must not use render target usage".to_string(),
+            });
         }
         Ok(CpuTextureResourceConfig::new(
             GpuTextureId::new(self.id),
@@ -603,7 +913,7 @@ impl From<ProjectTextureFormat> for TextureFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ProjectTextureUsage {
     Sampled,
     RenderTarget,
@@ -642,7 +952,68 @@ pub struct ProjectRenderPipelineConfig {
 }
 
 impl ProjectRenderPipelineConfig {
-    pub fn to_cpu_config(&self) -> CpuRenderPipelineResourceConfig {
+    pub fn to_cpu_config(&self) -> Result<CpuRenderPipelineResourceConfig, ProjectConfigError> {
+        if self.id == 0 {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "render pipeline id must be non-zero".to_string(),
+            });
+        }
+        if is_blank(&self.label) {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "render pipeline label must not be empty".to_string(),
+            });
+        }
+        if self.color_targets.is_empty() && self.depth_target.is_none() {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "render pipeline must declare at least one target".to_string(),
+            });
+        }
+        if self
+            .color_targets
+            .iter()
+            .any(|format| TextureFormat::from(*format).is_depth())
+        {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "color targets must use color formats".to_string(),
+            });
+        }
+        if self
+            .depth_target
+            .is_some_and(|format| TextureFormat::from(format).is_color())
+        {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "depth target must use a depth format".to_string(),
+            });
+        }
+        let mut vertex_buffer_slots = BTreeSet::new();
+        for layout in &self.vertex_buffers {
+            if !vertex_buffer_slots.insert(layout.slot) {
+                return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                    pipeline: self.id,
+                    reason: "vertex buffer slots must be unique".to_string(),
+                });
+            }
+            if layout.stride_bytes == 0 {
+                return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                    pipeline: self.id,
+                    reason: "vertex buffer stride must be non-zero".to_string(),
+                });
+            }
+        }
+        let mut bind_group_layouts = BTreeSet::new();
+        for layout in &self.bind_group_layouts {
+            if !bind_group_layouts.insert(*layout) {
+                return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                    pipeline: self.id,
+                    reason: "bind group layouts must be unique".to_string(),
+                });
+            }
+        }
         let descriptor = RenderPipelineDescriptor::new(
             self.label.clone(),
             PipelineShader::new(ShaderModuleId::new(self.vertex_shader), ShaderStage::Vertex),
@@ -659,7 +1030,10 @@ impl ProjectRenderPipelineConfig {
                 .copied()
                 .map(BindGroupLayoutId::new),
         );
-        CpuRenderPipelineResourceConfig::new(RenderPipelineId::new(self.id), descriptor)
+        Ok(CpuRenderPipelineResourceConfig::new(
+            RenderPipelineId::new(self.id),
+            descriptor,
+        ))
     }
 }
 
@@ -696,12 +1070,93 @@ pub enum ProjectConfigError {
     DuplicateTextureId(u64),
     DuplicateRenderPipelineId(u64),
     DuplicateSceneName(String),
-    DuplicateSceneEntityId { scene: String, id: String },
-    DuplicateSceneInputAction { scene: String, action: String },
-    EmptySceneInputAction { scene: String },
-    EmptySceneInputFunction { scene: String, action: String },
-    MissingSceneEntityId { scene: String, id: String },
-    MissingSceneInputAction { scene: String, action: String },
+    EmptySceneName,
+    DuplicateSceneEntityId {
+        scene: String,
+        id: String,
+    },
+    DuplicateSceneFixtureId {
+        scene: String,
+        entity: String,
+        id: String,
+    },
+    DuplicateSceneInputAction {
+        scene: String,
+        action: String,
+    },
+    EmptyControlledSceneEntityId {
+        scene: String,
+    },
+    EmptySceneEntityId {
+        scene: String,
+    },
+    EmptySceneFixtureId {
+        scene: String,
+        entity: String,
+    },
+    EmptySceneInputAction {
+        scene: String,
+    },
+    EmptySceneInputFunction {
+        scene: String,
+        action: String,
+    },
+    InvalidSceneFixtureShape {
+        scene: String,
+        entity: String,
+        fixture: String,
+        reason: String,
+    },
+    InvalidSceneFixtureMaterial {
+        scene: String,
+        entity: String,
+        fixture: String,
+        reason: String,
+    },
+    InvalidSceneEntityMetadata {
+        scene: String,
+        entity: String,
+        reason: String,
+    },
+    InvalidSceneEntityVisual {
+        scene: String,
+        entity: String,
+        reason: String,
+    },
+    InvalidScenePhysicsValue {
+        scene: String,
+        entity: String,
+        reason: String,
+    },
+    InvalidSceneRenderData {
+        scene: String,
+        reason: String,
+    },
+    InvalidSceneSpriteVisual {
+        scene: String,
+        index: usize,
+        reason: String,
+    },
+    InvalidTextureResource {
+        texture: u64,
+        reason: String,
+    },
+    InvalidRenderPipelineResource {
+        pipeline: u64,
+        reason: String,
+    },
+    MissingSceneEntityId {
+        scene: String,
+        id: String,
+    },
+    MissingSceneInputAction {
+        scene: String,
+        action: String,
+    },
+    MissingSceneTextureResource {
+        scene: String,
+        texture: u64,
+    },
     MissingScene(String),
     MissingTextureUsage(u64),
 }
@@ -858,6 +1313,7 @@ impl CpuFrame {
 pub enum CpuFrameError {
     InvalidExtract(Vec<RenderExtractError>),
     Prepare(Vec<hikari::PrepareFrameError>),
+    EmptyQueuedFrame,
     Graphics(GraphicsResourceError),
 }
 
@@ -964,13 +1420,21 @@ impl CpuFrameResources {
 
     pub fn from_config(config: CpuFrameResourceConfig) -> Result<Self, GraphicsResourceError> {
         let mut resources = Self::from_options(config.frame)?;
+        resources.extend_from_config(config)?;
+        Ok(resources)
+    }
+
+    pub fn extend_from_config(
+        &mut self,
+        config: CpuFrameResourceConfig,
+    ) -> Result<(), GraphicsResourceError> {
         for texture in config.textures {
-            resources.register_texture(texture.build()?);
+            self.register_texture(texture.build()?);
         }
         for pipeline in config.render_pipelines {
-            resources.register_render_pipeline(pipeline.build()?);
+            self.register_render_pipeline(pipeline.build()?);
         }
-        Ok(resources)
+        Ok(())
     }
 
     pub const fn device(&self) -> &GraphicsDevice {
@@ -1139,7 +1603,9 @@ impl HeadlessApp {
         &mut self,
         config: CpuFrameResourceConfig,
     ) -> Result<&CpuFrameResources, CpuFrameError> {
-        if self.cpu_frame_resources.is_none() {
+        if let Some(resources) = &mut self.cpu_frame_resources {
+            resources.extend_from_config(config)?;
+        } else {
             self.cpu_frame_resources = Some(CpuFrameResources::from_config(config)?);
         }
         Ok(self
@@ -1270,23 +1736,8 @@ impl HeadlessApp {
         scene_name: &str,
     ) -> Result<Vec<ProjectSceneEntity>, ProjectConfigError> {
         let scene = project.scene(scene_name)?;
-        let mut entity_ids = BTreeSet::new();
-        for entity_config in &scene.dynamic_entities {
-            if !entity_ids.insert(entity_config.id.clone()) {
-                return Err(ProjectConfigError::DuplicateSceneEntityId {
-                    scene: scene.name.clone(),
-                    id: entity_config.id.clone(),
-                });
-            }
-        }
-        if let Some(controlled_entity) = &scene.controlled_entity
-            && !entity_ids.contains(controlled_entity)
-        {
-            return Err(ProjectConfigError::MissingSceneEntityId {
-                scene: scene.name.clone(),
-                id: controlled_entity.clone(),
-            });
-        }
+        scene.validate_input_bindings()?;
+        scene.validate_dynamic_entities()?;
 
         let mut spawned = Vec::with_capacity(scene.dynamic_entities.len());
         for entity_config in &scene.dynamic_entities {
@@ -1379,6 +1830,7 @@ impl HeadlessApp {
         scene_name: &str,
     ) -> Result<RenderExtract, ProjectSceneRenderError> {
         let scene = project.scene(scene_name)?;
+        scene.validate_render_data()?;
         let mut extract = self
             .build_render_extract(scene.to_render_options())
             .map_err(ProjectSceneRenderError::InvalidExtract)?;
@@ -1443,6 +1895,9 @@ impl HeadlessApp {
     ) -> Result<CpuFrame, CpuFrameError> {
         let prepared = PreparedFrame::from_extract(&extract).map_err(CpuFrameError::Prepare)?;
         let queued = prepared.queue();
+        if queued.draws().is_empty() {
+            return Err(CpuFrameError::EmptyQueuedFrame);
+        }
         let draw_instances = queued
             .draws()
             .iter()
@@ -1476,6 +1931,40 @@ impl HeadlessApp {
             queued,
             submission,
         })
+    }
+
+    fn validate_project_scene_texture_resources(
+        &self,
+        scene: &ProjectSceneConfig,
+        extract: &RenderExtract,
+        resources: &CpuFrameResources,
+    ) -> Result<(), ProjectConfigError> {
+        let mut textures = BTreeSet::new();
+        textures.insert(ExtractTextureId::new(scene.sandbox_texture));
+        for sprite in &scene.sprites {
+            textures.insert(ExtractTextureId::new(sprite.texture));
+        }
+        for entity in &scene.dynamic_entities {
+            textures.insert(ExtractTextureId::new(entity.texture));
+        }
+        for sprite in extract.sprites() {
+            textures.insert(sprite.texture());
+        }
+        for batch in extract.tile_batches() {
+            textures.insert(batch.texture());
+        }
+        for texture in textures {
+            if resources
+                .texture(GpuTextureId::new(texture.raw()))
+                .is_none()
+            {
+                return Err(ProjectConfigError::MissingSceneTextureResource {
+                    scene: scene.name.clone(),
+                    texture: texture.raw(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn build_allocated_cpu_frame(
@@ -1530,6 +2019,10 @@ impl HeadlessApp {
         let extract = self
             .build_project_scene_render_extract(project, scene_name)
             .map_err(ProjectSceneCpuFrameError::Scene)?;
+        let scene = project
+            .scene(scene_name)
+            .map_err(ProjectSceneRenderError::Project)
+            .map_err(ProjectSceneCpuFrameError::Scene)?;
         let frame_options = self
             .frame_handles
             .allocate_transient_cpu_options(frame_options);
@@ -1538,6 +2031,9 @@ impl HeadlessApp {
             .as_ref()
             .expect("resources ensured")
             .clone();
+        self.validate_project_scene_texture_resources(scene, &extract, &resources)
+            .map_err(ProjectSceneRenderError::Project)
+            .map_err(ProjectSceneCpuFrameError::Scene)?;
         self.build_cpu_frame_from_extract_with_resources(extract, frame_options, &resources)
             .map_err(ProjectSceneCpuFrameError::Frame)
     }
@@ -1600,7 +2096,7 @@ impl Default for HeadlessApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        CpuFrameOptions, CpuFrameResourceConfig, CpuFrameResources,
+        CpuFrameError, CpuFrameOptions, CpuFrameResourceConfig, CpuFrameResources,
         CpuRenderPipelineResourceConfig, CpuTextureResourceConfig, FrameHandleAllocator,
         HeadlessApp, HeadlessAppOptions, OmoikaneProjectConfig, ProjectColorConfig,
         ProjectConfigError, ProjectRenderPipelineConfig, ProjectResourceConfig, ProjectSceneConfig,
@@ -1725,6 +2221,16 @@ mod tests {
     }
 
     #[test]
+    fn headless_app_reports_empty_queued_cpu_frames() {
+        let app = HeadlessApp::default();
+
+        assert_eq!(
+            app.build_cpu_frame(RenderFrameOptions::default(), CpuFrameOptions::default()),
+            Err(CpuFrameError::EmptyQueuedFrame)
+        );
+    }
+
+    #[test]
     fn frame_handle_allocator_assigns_distinct_render_and_cpu_frame_handles() {
         let mut allocator = FrameHandleAllocator::new();
 
@@ -1818,6 +2324,74 @@ mod tests {
             second.submission().command_lists()[0].id()
         );
         assert_eq!(app.frame_handle_allocator().next_raw(), 9);
+    }
+
+    #[test]
+    fn headless_app_extends_registered_cpu_resources_from_later_config() {
+        let mut app = HeadlessApp::default();
+        app.ensure_cpu_frame_resources(CpuFrameOptions::default())
+            .expect("initial registered resources");
+
+        let project = OmoikaneProjectConfig {
+            name: "late-resource-project".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![
+                    ProjectTextureConfig {
+                        id: 120,
+                        label: "late_scene_sandbox_texture".to_string(),
+                        width: 1,
+                        height: 1,
+                        depth_or_layers: 1,
+                        format: ProjectTextureFormat::Rgba8Unorm,
+                        usages: vec![ProjectTextureUsage::Sampled],
+                    },
+                    ProjectTextureConfig {
+                        id: 150,
+                        label: "late_scene_texture".to_string(),
+                        width: 64,
+                        height: 64,
+                        depth_or_layers: 1,
+                        format: ProjectTextureFormat::Rgba8Unorm,
+                        usages: vec![ProjectTextureUsage::Sampled],
+                    },
+                ],
+                render_pipelines: Vec::new(),
+            },
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: vec![ProjectSpriteConfig {
+                    texture: 150,
+                    position: Vector2::ZERO,
+                    size: Vector2::ONE,
+                    rotation: 0.0,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+                dynamic_entities: Vec::new(),
+            }],
+        };
+        let resource_config = project
+            .to_cpu_frame_resource_config(CpuFrameOptions::default())
+            .expect("late project resources");
+
+        app.build_project_scene_registered_cpu_frame(&project, "main", resource_config)
+            .expect("project scene frame with late resources");
+
+        assert!(
+            app.cpu_frame_resources()
+                .expect("resources")
+                .catalog()
+                .contains_texture(GpuTextureId::new(150))
+        );
     }
 
     #[test]
@@ -2093,6 +2667,184 @@ mod tests {
     }
 
     #[test]
+    fn project_config_rejects_zero_texture_ids() {
+        let project = OmoikaneProjectConfig {
+            name: "zero-texture-id".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![ProjectTextureConfig {
+                    id: 0,
+                    label: "zero_texture".to_string(),
+                    width: 1,
+                    height: 1,
+                    depth_or_layers: 1,
+                    format: ProjectTextureFormat::Rgba8Unorm,
+                    usages: vec![ProjectTextureUsage::Sampled],
+                }],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 0,
+                reason: "texture id must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_texture_resources() {
+        let mut texture = ProjectTextureConfig {
+            id: 62,
+            label: "empty_texture".to_string(),
+            width: 0,
+            height: 1,
+            depth_or_layers: 1,
+            format: ProjectTextureFormat::Rgba8Unorm,
+            usages: vec![ProjectTextureUsage::Sampled],
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-texture-resource".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![texture.clone()],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 62,
+                reason: "texture size must be non-zero".to_string(),
+            })
+        );
+
+        texture.width = 1;
+        texture.depth_or_layers = 0;
+        project.resources.textures = vec![texture];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 62,
+                reason: "texture size must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_texture_labels() {
+        let mut texture = ProjectTextureConfig {
+            id: 63,
+            label: String::new(),
+            width: 1,
+            height: 1,
+            depth_or_layers: 1,
+            format: ProjectTextureFormat::Rgba8Unorm,
+            usages: vec![ProjectTextureUsage::Sampled],
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-texture-label".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![texture.clone()],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 63,
+                reason: "texture label must not be empty".to_string(),
+            })
+        );
+
+        texture.label = " \t ".to_string();
+        project.resources.textures = vec![texture];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 63,
+                reason: "texture label must not be empty".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_texture_usages() {
+        let project = OmoikaneProjectConfig {
+            name: "duplicate-texture-usages".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![ProjectTextureConfig {
+                    id: 63,
+                    label: "duplicate_usage_texture".to_string(),
+                    width: 1,
+                    height: 1,
+                    depth_or_layers: 1,
+                    format: ProjectTextureFormat::Rgba8Unorm,
+                    usages: vec![ProjectTextureUsage::Sampled, ProjectTextureUsage::Sampled],
+                }],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 63,
+                reason: "texture usages must be unique".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_texture_usage_format_mismatches() {
+        let mut texture = ProjectTextureConfig {
+            id: 65,
+            label: "mismatched_texture_usage".to_string(),
+            width: 1,
+            height: 1,
+            depth_or_layers: 1,
+            format: ProjectTextureFormat::Rgba8Unorm,
+            usages: vec![ProjectTextureUsage::DepthStencil],
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "mismatched-texture-usage".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![texture.clone()],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 65,
+                reason: "color textures must not use depth stencil usage".to_string(),
+            })
+        );
+
+        texture.format = ProjectTextureFormat::Depth32Float;
+        texture.usages = vec![ProjectTextureUsage::RenderTarget];
+        project.resources.textures = vec![texture];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 65,
+                reason: "depth textures must not use render target usage".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn project_config_rejects_duplicate_render_pipeline_ids() {
         let frame = CpuFrameOptions::default();
         let pipeline = ProjectRenderPipelineConfig {
@@ -2121,6 +2873,276 @@ mod tests {
         assert_eq!(
             project.to_cpu_frame_resource_config(frame),
             Err(ProjectConfigError::DuplicateRenderPipelineId(64))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_zero_render_pipeline_ids() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "zero-pipeline-id".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 0,
+                    label: "zero_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 16,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 0,
+                reason: "render pipeline id must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_render_pipeline_labels() {
+        let frame = CpuFrameOptions::default();
+        let mut pipeline = ProjectRenderPipelineConfig {
+            id: 65,
+            label: String::new(),
+            vertex_shader: frame.vertex_shader.raw(),
+            fragment_shader: Some(frame.fragment_shader.raw()),
+            vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                slot: 0,
+                stride_bytes: 16,
+                step_mode: ProjectVertexStepMode::Vertex,
+            }],
+            color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+            depth_target: None,
+            bind_group_layouts: Vec::new(),
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-pipeline-label".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![pipeline.clone()],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 65,
+                reason: "render pipeline label must not be empty".to_string(),
+            })
+        );
+
+        pipeline.label = " \n ".to_string();
+        project.resources.render_pipelines = vec![pipeline];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 65,
+                reason: "render pipeline label must not be empty".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_render_pipeline_vertex_buffer_stride() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "empty-pipeline-vertex-buffer-stride".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 66,
+                    label: "empty_stride_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 0,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 66,
+                reason: "vertex buffer stride must be non-zero".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_render_pipeline_without_targets() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "targetless-pipeline".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 67,
+                    label: "targetless_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 16,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: Vec::new(),
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 67,
+                reason: "render pipeline must declare at least one target".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_render_pipeline_target_format_mismatches() {
+        let frame = CpuFrameOptions::default();
+        let mut pipeline = ProjectRenderPipelineConfig {
+            id: 68,
+            label: "mismatched_target_pipeline".to_string(),
+            vertex_shader: frame.vertex_shader.raw(),
+            fragment_shader: Some(frame.fragment_shader.raw()),
+            vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                slot: 0,
+                stride_bytes: 16,
+                step_mode: ProjectVertexStepMode::Vertex,
+            }],
+            color_targets: vec![ProjectTextureFormat::Depth32Float],
+            depth_target: None,
+            bind_group_layouts: Vec::new(),
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "mismatched-pipeline-targets".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![pipeline.clone()],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 68,
+                reason: "color targets must use color formats".to_string(),
+            })
+        );
+
+        pipeline.color_targets = Vec::new();
+        pipeline.depth_target = Some(ProjectTextureFormat::Rgba8Unorm);
+        project.resources.render_pipelines = vec![pipeline];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 68,
+                reason: "depth target must use a depth format".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_render_pipeline_bind_group_layouts() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "duplicate-pipeline-bind-group-layouts".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 69,
+                    label: "duplicate_bind_group_layout_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                        slot: 0,
+                        stride_bytes: 16,
+                        step_mode: ProjectVertexStepMode::Vertex,
+                    }],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: vec![4, 4],
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 69,
+                reason: "bind group layouts must be unique".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_render_pipeline_vertex_buffer_slots() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "duplicate-pipeline-vertex-buffer-slots".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 70,
+                    label: "duplicate_vertex_buffer_slot_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![
+                        ProjectVertexBufferLayoutConfig {
+                            slot: 0,
+                            stride_bytes: 16,
+                            step_mode: ProjectVertexStepMode::Vertex,
+                        },
+                        ProjectVertexBufferLayoutConfig {
+                            slot: 0,
+                            stride_bytes: 32,
+                            step_mode: ProjectVertexStepMode::Instance,
+                        },
+                    ],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 70,
+                reason: "vertex buffer slots must be unique".to_string(),
+            })
         );
     }
 
@@ -2158,7 +3180,7 @@ mod tests {
 
     #[test]
     fn project_config_rejects_missing_and_duplicate_scenes() {
-        let scene = ProjectSceneConfig {
+        let mut scene = ProjectSceneConfig {
             name: "main".to_string(),
             camera: 90,
             sandbox_texture: 91,
@@ -2175,7 +3197,7 @@ mod tests {
         let project = OmoikaneProjectConfig {
             name: "duplicate-scenes".to_string(),
             resources: ProjectResourceConfig::default(),
-            scenes: vec![scene.clone(), scene],
+            scenes: vec![scene.clone(), scene.clone()],
         };
 
         assert_eq!(
@@ -2185,6 +3207,26 @@ mod tests {
         assert_eq!(
             project.render_frame_options_for_scene("missing"),
             Err(ProjectConfigError::MissingScene("missing".to_string()))
+        );
+
+        scene.name = String::new();
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-scene-name".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![scene.clone()],
+        };
+
+        assert_eq!(
+            project.render_frame_options_for_scene("main"),
+            Err(ProjectConfigError::EmptySceneName)
+        );
+
+        scene.name = " \t ".to_string();
+        project.scenes = vec![scene];
+
+        assert_eq!(
+            project.render_frame_options_for_scene("main"),
+            Err(ProjectConfigError::EmptySceneName)
         );
     }
 
@@ -2343,6 +3385,160 @@ mod tests {
     }
 
     #[test]
+    fn headless_app_rejects_invalid_project_scene_render_data_before_extract() {
+        let app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-render-data".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 101,
+                sandbox_texture: 102,
+                world_view: Box2::new(1.0, -1.0, 1.0, 1.0),
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "world view must have positive width and height".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.world_view = RenderFrameOptions::default().world_view;
+        scene.sprite_size = Vector2::new(1.0, 0.0);
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "sandbox sprite size must be finite and positive".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.sprite_size = Vector2::ONE;
+        scene.sprite_tint.r = f32::NAN;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "sandbox sprite tint must be finite".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.sprite_tint = ProjectColorConfig::default();
+        scene.camera = 0;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "camera id must be non-zero".to_string(),
+                }
+            ))
+        );
+
+        let scene = &mut project.scenes[0];
+        scene.camera = 101;
+        scene.sandbox_texture = 0;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneRenderData {
+                    scene: "main".to_string(),
+                    reason: "sandbox texture id must be non-zero".to_string(),
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_static_sprites_before_extract() {
+        let app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-static-sprites".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 101,
+                sandbox_texture: 102,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: vec![ProjectSpriteConfig {
+                    texture: 103,
+                    position: Vector2::ZERO,
+                    size: Vector2::new(f32::INFINITY, 1.0),
+                    rotation: 0.0,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneSpriteVisual {
+                    scene: "main".to_string(),
+                    index: 0,
+                    reason: "size must be finite and positive".to_string(),
+                }
+            ))
+        );
+
+        let sprite = &mut project.scenes[0].sprites[0];
+        sprite.size = Vector2::ONE;
+        sprite.depth = f32::NEG_INFINITY;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneSpriteVisual {
+                    scene: "main".to_string(),
+                    index: 0,
+                    reason: "depth must be finite".to_string(),
+                }
+            ))
+        );
+
+        let sprite = &mut project.scenes[0].sprites[0];
+        sprite.depth = 1.0;
+        sprite.texture = 0;
+        assert_eq!(
+            app.build_project_scene_render_extract(&project, "main"),
+            Err(ProjectSceneRenderError::Project(
+                ProjectConfigError::InvalidSceneSpriteVisual {
+                    scene: "main".to_string(),
+                    index: 0,
+                    reason: "texture id must be non-zero".to_string(),
+                }
+            ))
+        );
+    }
+
+    #[test]
     fn headless_app_spawns_project_scene_dynamic_entities_for_extract() {
         let mut app = HeadlessApp::default();
         let project = OmoikaneProjectConfig {
@@ -2467,6 +3663,57 @@ mod tests {
     }
 
     #[test]
+    fn headless_app_rejects_empty_project_scene_entity_ids() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-entity-id".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: String::new(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+
+        project.scenes[0].dynamic_entities[0].id = " \t ".to_string();
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
     fn headless_app_rejects_missing_controlled_project_scene_entity() {
         let mut app = HeadlessApp::default();
         let project = OmoikaneProjectConfig {
@@ -2511,9 +3758,242 @@ mod tests {
     }
 
     #[test]
+    fn headless_app_rejects_empty_controlled_project_scene_entity() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-controlled-entity".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: Some(String::new()),
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptyControlledSceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+
+        project.scenes[0].controlled_entity = Some(" \n ".to_string());
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptyControlledSceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_entity_metadata_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-entity-metadata".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: String::new(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityMetadata {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "appearance name must not be empty".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.appearance_name = "actor".to_string();
+        entity.prototype = Some(String::new());
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityMetadata {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "prototype must not be empty when present".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.prototype = Some(" \t ".to_string());
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityMetadata {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "prototype must not be empty when present".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_entity_visuals_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-entity-visuals".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::new(f32::NAN, 0.0),
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "position must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.position = Vector2::ZERO;
+        entity.rotation = f32::INFINITY;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "rotation must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.rotation = 0.0;
+        entity.size = Vector2::new(0.0, 1.0);
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "size must be finite and positive".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.size = Vector2::ONE;
+        entity.tint.a = f32::NAN;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "tint must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.tint = ProjectColorConfig::default();
+        entity.depth = f32::NEG_INFINITY;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "depth must be finite".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.depth = 1.0;
+        entity.texture = 0;
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityVisual {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "texture id must be non-zero".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
     fn headless_app_reports_project_scene_input_binding_errors() {
         let mut app = HeadlessApp::default();
-        let project = OmoikaneProjectConfig {
+        let missing_project = OmoikaneProjectConfig {
+            name: "missing-input-binding".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 110,
+                sandbox_texture: 111,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: vec![ProjectSceneInputBindingConfig {
+                    action: "move_right".to_string(),
+                    function: "MoveRight".to_string(),
+                }],
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+        let duplicate_project = OmoikaneProjectConfig {
             name: "input-bindings".to_string(),
             resources: ProjectResourceConfig::default(),
             scenes: vec![ProjectSceneConfig {
@@ -2542,19 +4022,115 @@ mod tests {
         };
 
         assert_eq!(
-            app.handle_project_scene_input(&project, "main", "jump", BoundKeyState::Down),
+            app.handle_project_scene_input(&missing_project, "main", "jump", BoundKeyState::Down),
             Err(ProjectConfigError::MissingSceneInputAction {
                 scene: "main".to_string(),
                 action: "jump".to_string(),
             })
         );
         assert_eq!(
-            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            app.handle_project_scene_input(
+                &duplicate_project,
+                "main",
+                "move_right",
+                BoundKeyState::Down
+            ),
             Err(ProjectConfigError::DuplicateSceneInputAction {
                 scene: "main".to_string(),
                 action: "move_right".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn headless_app_rejects_duplicate_project_scene_input_bindings_before_lookup() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "hidden-duplicate-input-bindings".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 110,
+                sandbox_texture: 111,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: vec![
+                    ProjectSceneInputBindingConfig {
+                        action: "move_right".to_string(),
+                        function: "MoveRight".to_string(),
+                    },
+                    ProjectSceneInputBindingConfig {
+                        action: "jump".to_string(),
+                        function: "Jump".to_string(),
+                    },
+                    ProjectSceneInputBindingConfig {
+                        action: "jump".to_string(),
+                        function: "AltJump".to_string(),
+                    },
+                ],
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            Err(ProjectConfigError::DuplicateSceneInputAction {
+                scene: "main".to_string(),
+                action: "jump".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_input_bindings_before_scene_spawn() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "invalid-input-binding-spawn".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 110,
+                sandbox_texture: 111,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: vec![ProjectSceneInputBindingConfig {
+                    action: "move_right".to_string(),
+                    function: String::new(),
+                }],
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 112,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 0.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneInputFunction {
+                scene: "main".to_string(),
+                action: "move_right".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
     }
 
     #[test]
@@ -2590,8 +4166,33 @@ mod tests {
         );
 
         project.scenes[0].input_bindings[0] = ProjectSceneInputBindingConfig {
+            action: " \t ".to_string(),
+            function: "MoveRight".to_string(),
+        };
+
+        assert_eq!(
+            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            Err(ProjectConfigError::EmptySceneInputAction {
+                scene: "main".to_string(),
+            })
+        );
+
+        project.scenes[0].input_bindings[0] = ProjectSceneInputBindingConfig {
             action: "move_right".to_string(),
             function: String::new(),
+        };
+
+        assert_eq!(
+            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            Err(ProjectConfigError::EmptySceneInputFunction {
+                scene: "main".to_string(),
+                action: "move_right".to_string(),
+            })
+        );
+
+        project.scenes[0].input_bindings[0] = ProjectSceneInputBindingConfig {
+            action: "move_right".to_string(),
+            function: " \n ".to_string(),
         };
 
         assert_eq!(
@@ -2745,6 +4346,318 @@ mod tests {
     }
 
     #[test]
+    fn headless_app_rejects_invalid_project_scene_fixture_ids_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-fixture-ids".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: String::new(),
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneFixtureId {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+
+        {
+            let physics = project.scenes[0].dynamic_entities[0]
+                .physics
+                .as_mut()
+                .expect("physics");
+            physics.fixtures = vec![ProjectSceneFixtureConfig {
+                id: " \t ".to_string(),
+                ..ProjectSceneFixtureConfig::default()
+            }];
+        }
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneFixtureId {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+
+        {
+            let physics = project.scenes[0].dynamic_entities[0]
+                .physics
+                .as_mut()
+                .expect("physics");
+            physics.fixtures = vec![
+                ProjectSceneFixtureConfig {
+                    id: "body".to_string(),
+                    ..ProjectSceneFixtureConfig::default()
+                },
+                ProjectSceneFixtureConfig {
+                    id: "body".to_string(),
+                    ..ProjectSceneFixtureConfig::default()
+                },
+            ];
+        }
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::DuplicateSceneFixtureId {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                id: "body".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_fixture_shapes_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-fixture-shapes".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: "body".to_string(),
+                            shape: ProjectSceneFixtureShapeConfig::Aabb {
+                                local_bounds: Box2::new(1.0, -1.0, 1.0, 1.0),
+                                radius: 0.0,
+                            },
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureShape {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "aabb bounds must have positive width and height".to_string(),
+            })
+        );
+
+        project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics")
+            .fixtures[0]
+            .shape = ProjectSceneFixtureShapeConfig::Circle {
+            position: Vector2::ZERO,
+            radius: 0.0,
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureShape {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "circle radius must be finite and positive".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_physics_values_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-physics-values".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        linear_velocity: Vector2::new(f32::NAN, 0.0),
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: "body".to_string(),
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "linear velocity must be finite".to_string(),
+            })
+        );
+
+        let physics = project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics");
+        physics.linear_velocity = Vector2::ZERO;
+        physics.angular_velocity = f32::INFINITY;
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidScenePhysicsValue {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "angular velocity must be finite".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
+    fn headless_app_rejects_invalid_project_scene_fixture_material_before_spawn() {
+        let mut app = HeadlessApp::default();
+        let mut project = OmoikaneProjectConfig {
+            name: "invalid-fixture-material".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 117,
+                sandbox_texture: 118,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "actor".to_string(),
+                    appearance_name: "actor".to_string(),
+                    texture: 119,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: Some(ProjectScenePhysicsConfig {
+                        fixtures: vec![ProjectSceneFixtureConfig {
+                            id: "body".to_string(),
+                            friction: -0.1,
+                            ..ProjectSceneFixtureConfig::default()
+                        }],
+                        ..ProjectScenePhysicsConfig::default()
+                    }),
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureMaterial {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "friction must be finite and non-negative".to_string(),
+            })
+        );
+
+        let fixture = &mut project.scenes[0].dynamic_entities[0]
+            .physics
+            .as_mut()
+            .expect("physics")
+            .fixtures[0];
+        fixture.friction = 0.0;
+        fixture.mass = f32::NAN;
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneFixtureMaterial {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                fixture: "body".to_string(),
+                reason: "mass must be finite and non-negative".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+    }
+
+    #[test]
     fn headless_app_builds_registered_cpu_frame_from_project_scene() {
         let mut app = HeadlessApp::default();
         let frame_options = CpuFrameOptions::default();
@@ -2839,6 +4752,210 @@ mod tests {
                 .expect("resources")
                 .catalog()
                 .contains_render_pipeline(RenderPipelineId::new(121))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_missing_project_scene_texture_resource_for_cpu_frame() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "missing-scene-texture".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: vec![ProjectSpriteConfig {
+                    texture: 999,
+                    position: Vector2::ZERO,
+                    size: Vector2::ONE,
+                    rotation: 0.0,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
+            ),
+            Err(ProjectSceneCpuFrameError::Scene(
+                ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
+                    scene: "main".to_string(),
+                    texture: 999,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_missing_project_scene_sandbox_texture_resource() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "missing-scene-sandbox-texture".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 777,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
+            ),
+            Err(ProjectSceneCpuFrameError::Scene(
+                ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
+                    scene: "main".to_string(),
+                    texture: 777,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_missing_dynamic_scene_texture_resource_before_extract() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "missing-dynamic-scene-texture".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: vec![ProjectSceneEntityConfig {
+                    id: "unspawned_actor".to_string(),
+                    appearance_name: "unspawned_actor".to_string(),
+                    texture: 999,
+                    position: Vector2::ZERO,
+                    rotation: 0.0,
+                    prototype: None,
+                    attach_local_player: false,
+                    physics: None,
+                    size: Vector2::ONE,
+                    tint: ProjectColorConfig::default(),
+                    depth: 1.0,
+                }],
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
+            ),
+            Err(ProjectSceneCpuFrameError::Scene(
+                ProjectSceneRenderError::Project(ProjectConfigError::MissingSceneTextureResource {
+                    scene: "main".to_string(),
+                    texture: 999,
+                })
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_app_reports_empty_project_scene_cpu_frames() {
+        let mut app = HeadlessApp::default();
+        let project = OmoikaneProjectConfig {
+            name: "empty-scene-frame".to_string(),
+            resources: ProjectResourceConfig::default(),
+            scenes: vec![ProjectSceneConfig {
+                name: "main".to_string(),
+                camera: 122,
+                sandbox_texture: 120,
+                world_view: RenderFrameOptions::default().world_view,
+                viewport_size: RenderFrameOptions::default().viewport_size,
+                controlled_entity: None,
+                input_bindings: Vec::new(),
+                sprite_size: RenderFrameOptions::default().sprite_size,
+                sprite_tint: ProjectColorConfig::default(),
+                sprite_depth: 0.0,
+                sprites: Vec::new(),
+                dynamic_entities: Vec::new(),
+            }],
+        };
+
+        assert_eq!(
+            app.build_project_scene_registered_cpu_frame(
+                &project,
+                "main",
+                CpuFrameResourceConfig::new(CpuFrameOptions::default()).with_texture(
+                    CpuTextureResourceConfig::new(
+                        GpuTextureId::new(120),
+                        GpuTextureDescriptor::new(
+                            "empty_scene_sandbox_texture",
+                            TextureSize::new(1, 1, 1),
+                            TextureFormat::Rgba8Unorm,
+                            [TextureUsage::Sampled],
+                        ),
+                    ),
+                ),
+            ),
+            Err(ProjectSceneCpuFrameError::Frame(
+                CpuFrameError::EmptyQueuedFrame
+            ))
         );
     }
 

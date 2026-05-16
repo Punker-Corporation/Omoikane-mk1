@@ -161,24 +161,57 @@ Ainda em 2026-05-06, o app host ganhou `CpuFrameResourceConfig` e configs
 menores para texturas e render pipelines. Essa camada ainda nao e um formato de
 arquivo nem asset pipeline, mas ja separa "descriptor vindo do projeto" de
 "recurso registrado em CPU", que e a fronteira esperada para loaders futuros.
+Em 2026-05-15, o registro persistente tambem passou a aceitar configuracoes
+posteriores: texturas e pipelines novos sao incorporados ao catalogo CPU mesmo
+depois do primeiro frame registrado.
 
 O primeiro formato serializavel acima dessa camada tambem foi introduzido em
 2026-05-06 no app host. `OmoikaneProjectConfig` cobre nome de projeto e
 texturas CPU em JSON, converte para `CpuFrameResourceConfig` e valida
 duplicidade de ids antes de construir os descriptors de `hikari`. Pipelines e
 cenas serializadas permanecem fora desse primeiro corte.
+Em 2026-05-15, `ProjectTextureConfig` tambem passou a validar dimensoes
+nao-zero antes de criar descriptors CPU, reportando o erro como dado de projeto
+em vez de deixar a falha chegar apenas no catalogo grafico.
+Ids zero tambem sao rejeitados para texturas declaradas em projeto, preservando
+o mesmo espaco de handles nao-zero usado pelo alocador do app host.
+Labels vazios ou compostos apenas por whitespace tambem sao rejeitados nesse
+preflight, mantendo descriptors e debug dumps com identidade legivel.
+O preflight de textura tambem rejeita usos duplicados no JSON autoral, antes
+que o `BTreeSet` do descriptor grafico normalize esses dados silenciosamente.
+Ele ainda confere pares obvios de formato/uso: texturas de cor nao podem
+declarar `DepthStencil`, e texturas de depth nao podem declarar `RenderTarget`.
 
 No mesmo dia, o formato foi expandido para render pipelines. O projeto pode
 declarar `ProjectRenderPipelineConfig` com ids de shader, layouts de vertex
 buffer, targets e bind group layouts; o app host converte isso para
 `CpuRenderPipelineResourceConfig` e deixa a validacao detalhada do descriptor a
 cargo de `hikari`.
+Em 2026-05-15, esse formato passou a rejeitar vertex buffers com stride zero
+como erro de projeto antes de construir o descriptor CPU-only.
+Render pipelines declarados em projeto tambem rejeitam id zero no mesmo
+preflight, antes de virar `RenderPipelineId` estrutural.
+O mesmo preflight rejeita labels vazios ou compostos apenas por whitespace para
+que pipelines declarados em projeto tenham nomes uteis em diagnosticos.
+O mesmo preflight tambem rejeita pipelines sem target de cor nem depth,
+mantendo a falha no dominio do projeto em vez de delegar tudo ao descriptor
+grafico.
+Ele tambem confere a compatibilidade dos formatos de target: targets de cor
+precisam usar formatos de cor, e o target de depth precisa usar formato de
+depth.
+Bind group layouts declarados em pipelines de projeto tambem passam por
+preflight de duplicidade antes de virar descriptor `hikari`.
+Slots de vertex buffer duplicados seguem a mesma regra, evitando contratos
+ambiguos entre layout de pipeline e buffers submetidos.
 
 O corte seguinte adicionou cenas headless serializaveis. `ProjectSceneConfig`
 descreve camera, textura de sandbox, viewport, world view e parametros do
 sprite principal, e converte diretamente para `RenderFrameOptions`. Isso ainda
 nao substitui um formato completo de cena ou mapa; por enquanto e a ponte
 minima entre projeto JSON e o frame CPU-only do sandbox.
+Em 2026-05-15, o lookup de cenas passou a rejeitar `ProjectSceneConfig::name`
+vazio ou composto apenas por whitespace, mantendo nomes de cena explicitos
+antes de render, input ou spawn de entidades.
 
 Em seguida, cenas passaram a poder declarar sprites estaticos por
 `ProjectSpriteConfig`. O app host combina esses sprites com o sprite de sandbox
@@ -217,6 +250,16 @@ O mesmo bloco de physics agora aceita fixtures declarativas por
 material e bits de colisao; o app host converte esses descriptors em
 `butsuri::Fixture` no servidor durante o spawn. O renderer continua vendo apenas
 a posicao replicada e os dados visuais extraidos.
+Em 2026-05-15, o app host tambem passou a validar ids de fixtures declarativas
+antes do spawn, rejeitando ids vazios ou duplicados dentro da mesma entidade
+para evitar substituicao silenciosa no componente de fixtures do servidor.
+O mesmo caminho valida a geometria das fixtures: AABBs precisam de bounds
+finitos e dimensoes positivas, raios de AABB nao podem ser negativos e circulos
+precisam de centro finito e raio positivo.
+Os valores fisicos declarativos tambem passam por uma barreira antes do spawn:
+velocidades linear/angular precisam ser finitas, e propriedades de fixture como
+friction, restitution e mass precisam ser finitas e nao negativas antes de
+chegar ao servidor autoritativo.
 
 As entidades dinamicas de cena tambem preservam rotacao inicial pelo mesmo
 caminho autoritativo. A configuracao serializada alimenta o transform do
@@ -229,6 +272,39 @@ substitui o `EntityUid` runtime; ele serve para a camada de projeto consultar a
 entidade criada pelo servidor depois do spawn. O app host rejeita ids duplicados
 dentro da mesma cena antes de criar entidades, evitando que sistemas futuros de
 gameplay apontem para uma entidade ambigua.
+Em 2026-05-15, essa barreira passou a rejeitar tambem ids autorais vazios e
+referencias `controlled_entity` vazias antes do spawn, mantendo a identidade de
+projeto explicita antes de criar entidades runtime.
+O mesmo pre-spawn tambem valida a metadata autoral da entidade dinamica:
+`appearance_name` vazio e `prototype` vazio quando presente sao rejeitados antes
+de escrever metadata ECS no servidor.
+Essas validacoes tratam strings compostas apenas por whitespace como vazias,
+incluindo ids de entidade, `controlled_entity`, metadata visual, fixtures e
+bindings de input.
+O mesmo caminho valida os dados visuais das entidades dinamicas: posicao,
+rotacao, tamanho, tint e depth precisam ser finitos, e o tamanho precisa ser
+positivo antes de alimentar o servidor autoritativo ou o `RenderExtract`.
+O extract de cena tambem ganhou uma barreira propria para dados renderizaveis:
+world view, viewport, sprite base da cena e sprites estaticos sao validados
+como configuracao de projeto antes que o app host construa o `RenderExtract`.
+Referencias de textura zero tambem sao rejeitadas nesse preflight para textura
+base da cena, sprites estaticos e entidades dinamicas, mantendo ids autorais no
+mesmo espaco nao-zero dos recursos declarados.
+Ids de camera zero seguem a mesma regra, entao cenas serializadas precisam
+declarar uma camera autoral nao-zero antes de produzir qualquer
+`Camera2dExtract`.
+Quando a cena e transformada em frame CPU registrado, as texturas referenciadas
+pelo extract precisam existir em `CpuFrameResources`, antecipando erros de
+recurso ausente antes de qualquer backend grafico real.
+Essa barreira tambem cobre texturas declaradas por sprites estaticos e
+entidades dinamicas da cena, mesmo quando uma entidade dinamica ainda nao foi
+replicada para o cliente e, portanto, ainda nao apareceu no `RenderExtract`.
+Em 2026-05-15, a mesma checagem passou a cobrir tambem a textura base
+`ProjectSceneConfig::sandbox_texture`, mantendo todas as referencias de textura
+declaradas pela cena no mesmo preflight de recursos.
+Frames CPU sem draws tambem sao reportados pelo app host como
+`CpuFrameError::EmptyQueuedFrame`, antes de gerar uma command list com draw de
+zero instancias.
 
 A cena tambem pode declarar qual entidade autoral deve ser controlada pelo
 jogador local. `ProjectSceneConfig::controlled_entity` referencia um id de
@@ -248,6 +324,23 @@ Esses bindings tambem sao validados como dados de projeto: acoes vazias,
 funcoes runtime vazias, acoes ausentes e acoes duplicadas sao reportadas como
 `ProjectConfigError` no app host. O cliente e o servidor continuam recebendo
 apenas comandos resolvidos para uma funcao runtime explicita.
+Em 2026-05-15, essa validacao passou a cobrir todos os bindings da cena antes
+do lookup da acao pedida, impedindo que uma duplicata nao usada no momento
+fique escondida em uma cena aparentemente valida.
+O spawn de entidades de cena tambem executa essa validacao antes de criar
+entidades no servidor, mantendo cenas com input invalido fora do runtime
+autoritativo.
+
+Em 2026-05-15, o exemplo `omoikane_app/examples/headless_sandbox.rs` passou a
+usar esse caminho de projeto de ponta a ponta. Ele declara uma cena com
+entidade dinamica controlada, resolve input por acao autoral, bombeia o loop
+cliente/servidor local e constroi o frame CPU registrado a partir do extract da
+cena.
+
+O mesmo exemplo tambem passa pelo formato serializado antes de tocar o runtime:
+o `OmoikaneProjectConfig` e emitido como JSON, recarregado e so entao usado para
+spawn, input e frame. Isso aproxima o corte headless do fluxo esperado para
+projetos authored sem introduzir asset pipeline ou backend grafico real.
 
 ## Render Graph
 

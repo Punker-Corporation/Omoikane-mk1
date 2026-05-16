@@ -347,6 +347,104 @@ Fatias:
     acoes autorais vazias e funcoes runtime vazias agora geram
     `ProjectConfigError` no app host antes que comandos invalidos possam ser
     enviados ao cliente local.
+27. Atualizar o exemplo headless para usar cena declarativa de projeto.
+    Concluido em 2026-05-15; `examples/headless_sandbox.rs` agora monta um
+    `OmoikaneProjectConfig`, cria a entidade dinamica controlada no servidor,
+    envia input por `ProjectSceneInputBindingConfig` e valida um frame CPU da
+    cena registrada em vez de depender apenas do sandbox manual.
+28. Fazer o exemplo headless passar pelo formato JSON de projeto. Concluido em
+    2026-05-15; `examples/headless_sandbox.rs` serializa o
+    `OmoikaneProjectConfig`, recarrega por `OmoikaneProjectConfig::from_json_str`
+    e usa a configuracao reidratada para spawn, input autoritativo e frame CPU.
+29. Validar todos os bindings de input de cena antes do lookup. Concluido em
+    2026-05-15; `ProjectSceneConfig::validate_input_bindings` rejeita acoes
+    vazias, funcoes vazias e acoes duplicadas em qualquer binding da cena antes
+    de resolver a acao pedida pelo runtime headless.
+30. Validar bindings de input antes de spawnar entidades de cena. Concluido em
+    2026-05-15; `HeadlessApp::spawn_project_scene_entities` chama
+    `ProjectSceneConfig::validate_input_bindings` antes de criar entidades no
+    servidor, evitando spawns parciais para cenas com input invalido.
+31. Validar ids de fixtures declarativas antes do spawn. Concluido em
+    2026-05-15; `ProjectScenePhysicsConfig::validate_fixtures` rejeita ids
+    vazios ou duplicados dentro da mesma entidade de cena antes que fixtures
+    possam substituir umas as outras no servidor.
+32. Validar geometria de fixtures declarativas antes do spawn. Concluido em
+    2026-05-15; AABBs precisam de bounds finitos e dimensoes positivas, raios
+    de AABB precisam ser finitos e nao negativos, e circulos precisam de centro
+    finito e raio positivo.
+33. Validar valores fisicos declarativos antes do spawn. Concluido em
+    2026-05-15; velocidades linear/angular precisam ser finitas, e propriedades
+    de fixture como friction, restitution e mass precisam ser finitas e nao
+    negativas antes de tocar o servidor autoritativo.
+34. Validar ids autorais vazios de entidades de cena. Concluido em 2026-05-15;
+    `ProjectSceneConfig::validate_dynamic_entities` rejeita entidade dinamica
+    sem id e `controlled_entity` vazio antes de qualquer spawn no servidor.
+35. Validar dados visuais de entidades dinamicas antes do spawn. Concluido em
+    2026-05-15; posicao, rotacao, tamanho, tint e depth passam por validacao
+    finita/positiva antes de alimentar servidor autoritativo ou render extract.
+36. Validar dados de renderizacao de cena antes do extract. Concluido em
+    2026-05-15; world view, viewport, sprite base e sprites estaticos de
+    `ProjectSceneConfig` sao validados antes de montar o `RenderExtract`.
+37. Validar metadata autoral de entidades dinamicas antes do spawn. Concluido
+    em 2026-05-15; `appearance_name` vazio e `prototype` vazio quando presente
+    sao rejeitados antes de criar metadata ECS no servidor.
+38. Validar recursos de textura usados pela cena antes do frame CPU registrado.
+    Concluido em 2026-05-15; texturas referenciadas pelo `RenderExtract` da
+    cena precisam existir em `CpuFrameResources` antes da submissao CPU.
+39. Reportar frames CPU sem draws como erro de app. Concluido em 2026-05-15;
+    `CpuFrameError::EmptyQueuedFrame` evita transformar uma cena vazia em
+    `DrawCall` com zero instancias.
+40. Validar texturas declaradas por entidades dinamicas antes do frame CPU.
+    Concluido em 2026-05-15; texturas de entidades autorais sao conferidas em
+    `CpuFrameResources` mesmo antes de a entidade aparecer no `RenderExtract`.
+41. Estender recursos CPU registrados a partir de configuracoes posteriores.
+    Concluido em 2026-05-15; `HeadlessApp` agora incorpora texturas e pipelines
+    novos em um registro persistente ja existente antes de validar cenas.
+42. Validar a textura base declarada pela cena antes do frame CPU. Concluido
+    em 2026-05-15; `ProjectSceneConfig::sandbox_texture` tambem precisa existir
+    em `CpuFrameResources`, mesmo quando nao ha sprite sandbox extraido.
+43. Validar dimensoes de texturas declaradas no projeto. Concluido em
+    2026-05-15; `ProjectTextureConfig` rejeita width, height ou depth/layers
+    zerados como `ProjectConfigError` antes de construir recursos `hikari`.
+44. Validar stride de vertex buffers em pipelines declarados no projeto.
+    Concluido em 2026-05-15; `ProjectRenderPipelineConfig` rejeita layouts com
+    stride zero como `ProjectConfigError` antes do descriptor de `hikari`.
+45. Validar targets de pipelines declarados no projeto. Concluido em
+    2026-05-15; pipelines sem target de cor nem depth sao rejeitados como
+    `ProjectConfigError` antes de construir o descriptor de `hikari`.
+46. Validar formatos de targets em pipelines declarados no projeto. Concluido
+    em 2026-05-15; color targets precisam usar formatos de cor e depth target
+    precisa usar formato de depth antes do descriptor de `hikari`.
+47. Validar bind group layouts duplicados em pipelines declarados no projeto.
+    Concluido em 2026-05-15; layouts repetidos sao rejeitados como
+    `ProjectConfigError` antes de construir o descriptor de `hikari`.
+48. Validar slots duplicados de vertex buffers em pipelines declarados no
+    projeto. Concluido em 2026-05-15; slots repetidos sao rejeitados como
+    `ProjectConfigError` antes de construir o descriptor de `hikari`.
+49. Validar usos duplicados de texturas declaradas no projeto. Concluido em
+    2026-05-15; `ProjectTextureConfig` rejeita flags repetidas em `usages`
+    como `ProjectConfigError` antes de construir o descriptor de `hikari`.
+50. Validar compatibilidade entre formato e uso de texturas declaradas no
+    projeto. Concluido em 2026-05-15; texturas de cor nao aceitam
+    `DepthStencil`, e texturas de depth nao aceitam `RenderTarget`.
+51. Rejeitar identificadores autorais compostos apenas por whitespace em cenas.
+    Concluido em 2026-05-15; ids de entidade, entidade controlada, bindings,
+    metadata visual e fixtures agora tratam strings em branco como vazias.
+52. Rejeitar labels vazios em recursos declarados no projeto. Concluido em
+    2026-05-15; texturas e render pipelines agora exigem labels nao vazios
+    antes de construir descriptors de `hikari`.
+53. Rejeitar nomes de cena vazios em projetos serializados. Concluido em
+    2026-05-15; `ProjectSceneConfig::name` em branco agora falha como
+    `ProjectConfigError` antes de lookup/render/spawn.
+54. Rejeitar ids zero em recursos declarados no projeto. Concluido em
+    2026-05-15; texturas e render pipelines autorais agora precisam usar ids
+    nao-zero antes de entrar nos handles estruturais de `hikari`.
+55. Rejeitar referencias de textura zero em cenas serializadas. Concluido em
+    2026-05-15; textura base, sprites estaticos e entidades dinamicas agora
+    falham como dados de projeto invalidos antes de montar extracts.
+56. Rejeitar ids de camera zero em cenas serializadas. Concluido em
+    2026-05-15; cameras declaradas por projeto agora usam o mesmo espaco
+    nao-zero dos demais handles autorais antes de montar o `RenderExtract`.
 
 Criterios de pronto:
 
