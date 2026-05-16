@@ -189,6 +189,8 @@ precisam usar formatos de cor, e o target de depth precisa usar formato de
 depth.
 Bind group layouts declarados em pipelines de projeto tambem passam por
 preflight de duplicidade antes de virar descriptor `hikari`.
+Slots de vertex buffer duplicados seguem a mesma regra, evitando contratos
+ambiguos entre layout de pipeline e buffers submetidos.
 
 O corte seguinte adicionou cenas headless serializaveis. `ProjectSceneConfig`
 descreve camera, textura de sandbox, viewport, world view e parametros do

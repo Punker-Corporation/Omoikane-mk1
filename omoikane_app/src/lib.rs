@@ -925,7 +925,14 @@ impl ProjectRenderPipelineConfig {
                 reason: "depth target must use a depth format".to_string(),
             });
         }
+        let mut vertex_buffer_slots = BTreeSet::new();
         for layout in &self.vertex_buffers {
+            if !vertex_buffer_slots.insert(layout.slot) {
+                return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                    pipeline: self.id,
+                    reason: "vertex buffer slots must be unique".to_string(),
+                });
+            }
             if layout.stride_bytes == 0 {
                 return Err(ProjectConfigError::InvalidRenderPipelineResource {
                     pipeline: self.id,
@@ -2811,6 +2818,47 @@ mod tests {
             Err(ProjectConfigError::InvalidRenderPipelineResource {
                 pipeline: 69,
                 reason: "bind group layouts must be unique".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_duplicate_render_pipeline_vertex_buffer_slots() {
+        let frame = CpuFrameOptions::default();
+        let project = OmoikaneProjectConfig {
+            name: "duplicate-pipeline-vertex-buffer-slots".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![ProjectRenderPipelineConfig {
+                    id: 70,
+                    label: "duplicate_vertex_buffer_slot_pipeline".to_string(),
+                    vertex_shader: frame.vertex_shader.raw(),
+                    fragment_shader: Some(frame.fragment_shader.raw()),
+                    vertex_buffers: vec![
+                        ProjectVertexBufferLayoutConfig {
+                            slot: 0,
+                            stride_bytes: 16,
+                            step_mode: ProjectVertexStepMode::Vertex,
+                        },
+                        ProjectVertexBufferLayoutConfig {
+                            slot: 0,
+                            stride_bytes: 32,
+                            step_mode: ProjectVertexStepMode::Instance,
+                        },
+                    ],
+                    color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+                    depth_target: None,
+                    bind_group_layouts: Vec::new(),
+                }],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 70,
+                reason: "vertex buffer slots must be unique".to_string(),
             })
         );
     }

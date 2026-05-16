@@ -408,6 +408,9 @@ Fatias:
 47. Validar bind group layouts duplicados em pipelines declarados no projeto.
     Concluido em 2026-05-15; layouts repetidos sao rejeitados como
     `ProjectConfigError` antes de construir o descriptor de `hikari`.
+48. Validar slots duplicados de vertex buffers em pipelines declarados no
+    projeto. Concluido em 2026-05-15; slots repetidos sao rejeitados como
+    `ProjectConfigError` antes de construir o descriptor de `hikari`.
 
 Criterios de pronto:
 
