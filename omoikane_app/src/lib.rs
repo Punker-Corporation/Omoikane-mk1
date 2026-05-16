@@ -332,12 +332,12 @@ impl ProjectSceneConfig {
     pub fn validate_input_bindings(&self) -> Result<(), ProjectConfigError> {
         let mut actions = BTreeSet::new();
         for binding in &self.input_bindings {
-            if binding.action.is_empty() {
+            if is_blank(&binding.action) {
                 return Err(ProjectConfigError::EmptySceneInputAction {
                     scene: self.name.clone(),
                 });
             }
-            if binding.function.is_empty() {
+            if is_blank(&binding.function) {
                 return Err(ProjectConfigError::EmptySceneInputFunction {
                     scene: self.name.clone(),
                     action: binding.action.clone(),
@@ -356,7 +356,7 @@ impl ProjectSceneConfig {
     pub fn validate_dynamic_entities(&self) -> Result<(), ProjectConfigError> {
         let mut entity_ids = BTreeSet::new();
         for entity_config in &self.dynamic_entities {
-            if entity_config.id.is_empty() {
+            if is_blank(&entity_config.id) {
                 return Err(ProjectConfigError::EmptySceneEntityId {
                     scene: self.name.clone(),
                 });
@@ -374,7 +374,7 @@ impl ProjectSceneConfig {
             }
         }
         if let Some(controlled_entity) = &self.controlled_entity {
-            if controlled_entity.is_empty() {
+            if is_blank(controlled_entity) {
                 return Err(ProjectConfigError::EmptyControlledSceneEntityId {
                     scene: self.name.clone(),
                 });
@@ -429,13 +429,13 @@ impl ProjectSceneEntityConfig {
             entity: self.id.clone(),
             reason: reason.to_string(),
         };
-        if self.appearance_name.is_empty() {
+        if is_blank(&self.appearance_name) {
             return Err(invalid("appearance name must not be empty"));
         }
         if self
             .prototype
             .as_ref()
-            .is_some_and(|prototype| prototype.is_empty())
+            .is_some_and(|prototype| is_blank(prototype))
         {
             return Err(invalid("prototype must not be empty when present"));
         }
@@ -511,7 +511,7 @@ impl ProjectScenePhysicsConfig {
         }
         let mut fixture_ids = BTreeSet::new();
         for fixture in &self.fixtures {
-            if fixture.id.is_empty() {
+            if is_blank(&fixture.id) {
                 return Err(ProjectConfigError::EmptySceneFixtureId {
                     scene: scene.to_string(),
                     entity: entity.to_string(),
@@ -799,6 +799,10 @@ fn is_finite_box(value: Box2) -> bool {
 
 fn is_finite_color(value: ProjectColorConfig) -> bool {
     value.r.is_finite() && value.g.is_finite() && value.b.is_finite() && value.a.is_finite()
+}
+
+fn is_blank(value: &str) -> bool {
+    value.trim().is_empty()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3413,7 +3417,7 @@ mod tests {
     #[test]
     fn headless_app_rejects_empty_project_scene_entity_ids() {
         let mut app = HeadlessApp::default();
-        let project = OmoikaneProjectConfig {
+        let mut project = OmoikaneProjectConfig {
             name: "empty-entity-id".to_string(),
             resources: ProjectResourceConfig::default(),
             scenes: vec![ProjectSceneConfig {
@@ -3444,6 +3448,14 @@ mod tests {
             }],
         };
 
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+
+        project.scenes[0].dynamic_entities[0].id = " \t ".to_string();
         assert_eq!(
             app.spawn_project_scene_entities(&project, "main"),
             Err(ProjectConfigError::EmptySceneEntityId {
@@ -3500,7 +3512,7 @@ mod tests {
     #[test]
     fn headless_app_rejects_empty_controlled_project_scene_entity() {
         let mut app = HeadlessApp::default();
-        let project = OmoikaneProjectConfig {
+        let mut project = OmoikaneProjectConfig {
             name: "empty-controlled-entity".to_string(),
             resources: ProjectResourceConfig::default(),
             scenes: vec![ProjectSceneConfig {
@@ -3519,6 +3531,14 @@ mod tests {
             }],
         };
 
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptyControlledSceneEntityId {
+                scene: "main".to_string(),
+            })
+        );
+
+        project.scenes[0].controlled_entity = Some(" \n ".to_string());
         assert_eq!(
             app.spawn_project_scene_entities(&project, "main"),
             Err(ProjectConfigError::EmptyControlledSceneEntityId {
@@ -3574,6 +3594,17 @@ mod tests {
         let entity = &mut project.scenes[0].dynamic_entities[0];
         entity.appearance_name = "actor".to_string();
         entity.prototype = Some(String::new());
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::InvalidSceneEntityMetadata {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+                reason: "prototype must not be empty when present".to_string(),
+            })
+        );
+
+        let entity = &mut project.scenes[0].dynamic_entities[0];
+        entity.prototype = Some(" \t ".to_string());
         assert_eq!(
             app.spawn_project_scene_entities(&project, "main"),
             Err(ProjectConfigError::InvalidSceneEntityMetadata {
@@ -3875,8 +3906,33 @@ mod tests {
         );
 
         project.scenes[0].input_bindings[0] = ProjectSceneInputBindingConfig {
+            action: " \t ".to_string(),
+            function: "MoveRight".to_string(),
+        };
+
+        assert_eq!(
+            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            Err(ProjectConfigError::EmptySceneInputAction {
+                scene: "main".to_string(),
+            })
+        );
+
+        project.scenes[0].input_bindings[0] = ProjectSceneInputBindingConfig {
             action: "move_right".to_string(),
             function: String::new(),
+        };
+
+        assert_eq!(
+            app.handle_project_scene_input(&project, "main", "move_right", BoundKeyState::Down),
+            Err(ProjectConfigError::EmptySceneInputFunction {
+                scene: "main".to_string(),
+                action: "move_right".to_string(),
+            })
+        );
+
+        project.scenes[0].input_bindings[0] = ProjectSceneInputBindingConfig {
+            action: "move_right".to_string(),
+            function: " \n ".to_string(),
         };
 
         assert_eq!(
@@ -4078,21 +4134,42 @@ mod tests {
         );
         assert!(app.project_scene_entities().is_empty());
 
-        let fixtures = &mut project.scenes[0].dynamic_entities[0]
-            .physics
-            .as_mut()
-            .expect("physics")
-            .fixtures;
-        *fixtures = vec![
-            ProjectSceneFixtureConfig {
-                id: "body".to_string(),
+        {
+            let physics = project.scenes[0].dynamic_entities[0]
+                .physics
+                .as_mut()
+                .expect("physics");
+            physics.fixtures = vec![ProjectSceneFixtureConfig {
+                id: " \t ".to_string(),
                 ..ProjectSceneFixtureConfig::default()
-            },
-            ProjectSceneFixtureConfig {
-                id: "body".to_string(),
-                ..ProjectSceneFixtureConfig::default()
-            },
-        ];
+            }];
+        }
+
+        assert_eq!(
+            app.spawn_project_scene_entities(&project, "main"),
+            Err(ProjectConfigError::EmptySceneFixtureId {
+                scene: "main".to_string(),
+                entity: "actor".to_string(),
+            })
+        );
+        assert!(app.project_scene_entities().is_empty());
+
+        {
+            let physics = project.scenes[0].dynamic_entities[0]
+                .physics
+                .as_mut()
+                .expect("physics");
+            physics.fixtures = vec![
+                ProjectSceneFixtureConfig {
+                    id: "body".to_string(),
+                    ..ProjectSceneFixtureConfig::default()
+                },
+                ProjectSceneFixtureConfig {
+                    id: "body".to_string(),
+                    ..ProjectSceneFixtureConfig::default()
+                },
+            ];
+        }
 
         assert_eq!(
             app.spawn_project_scene_entities(&project, "main"),

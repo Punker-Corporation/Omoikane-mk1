@@ -267,6 +267,9 @@ projeto explicita antes de criar entidades runtime.
 O mesmo pre-spawn tambem valida a metadata autoral da entidade dinamica:
 `appearance_name` vazio e `prototype` vazio quando presente sao rejeitados antes
 de escrever metadata ECS no servidor.
+Essas validacoes tratam strings compostas apenas por whitespace como vazias,
+incluindo ids de entidade, `controlled_entity`, metadata visual, fixtures e
+bindings de input.
 O mesmo caminho valida os dados visuais das entidades dinamicas: posicao,
 rotacao, tamanho, tint e depth precisam ser finitos, e o tamanho precisa ser
 positivo antes de alimentar o servidor autoritativo ou o `RenderExtract`.

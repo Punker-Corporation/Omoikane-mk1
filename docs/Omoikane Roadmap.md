@@ -417,6 +417,9 @@ Fatias:
 50. Validar compatibilidade entre formato e uso de texturas declaradas no
     projeto. Concluido em 2026-05-15; texturas de cor nao aceitam
     `DepthStencil`, e texturas de depth nao aceitam `RenderTarget`.
+51. Rejeitar identificadores autorais compostos apenas por whitespace em cenas.
+    Concluido em 2026-05-15; ids de entidade, entidade controlada, bindings,
+    metadata visual e fixtures agora tratam strings em branco como vazias.
 
 Criterios de pronto:
 
