@@ -420,6 +420,9 @@ Fatias:
 51. Rejeitar identificadores autorais compostos apenas por whitespace em cenas.
     Concluido em 2026-05-15; ids de entidade, entidade controlada, bindings,
     metadata visual e fixtures agora tratam strings em branco como vazias.
+52. Rejeitar labels vazios em recursos declarados no projeto. Concluido em
+    2026-05-15; texturas e render pipelines agora exigem labels nao vazios
+    antes de construir descriptors de `hikari`.
 
 Criterios de pronto:
 

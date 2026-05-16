@@ -824,6 +824,12 @@ impl ProjectTextureConfig {
     }
 
     pub fn to_cpu_config(&self) -> Result<CpuTextureResourceConfig, ProjectConfigError> {
+        if is_blank(&self.label) {
+            return Err(ProjectConfigError::InvalidTextureResource {
+                texture: self.id,
+                reason: "texture label must not be empty".to_string(),
+            });
+        }
         if self.width == 0 || self.height == 0 || self.depth_or_layers == 0 {
             return Err(ProjectConfigError::InvalidTextureResource {
                 texture: self.id,
@@ -926,6 +932,12 @@ pub struct ProjectRenderPipelineConfig {
 
 impl ProjectRenderPipelineConfig {
     pub fn to_cpu_config(&self) -> Result<CpuRenderPipelineResourceConfig, ProjectConfigError> {
+        if is_blank(&self.label) {
+            return Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: self.id,
+                reason: "render pipeline label must not be empty".to_string(),
+            });
+        }
         if self.color_targets.is_empty() && self.depth_target.is_none() {
             return Err(ProjectConfigError::InvalidRenderPipelineResource {
                 pipeline: self.id,
@@ -2668,6 +2680,46 @@ mod tests {
     }
 
     #[test]
+    fn project_config_rejects_empty_texture_labels() {
+        let mut texture = ProjectTextureConfig {
+            id: 63,
+            label: String::new(),
+            width: 1,
+            height: 1,
+            depth_or_layers: 1,
+            format: ProjectTextureFormat::Rgba8Unorm,
+            usages: vec![ProjectTextureUsage::Sampled],
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-texture-label".to_string(),
+            resources: ProjectResourceConfig {
+                textures: vec![texture.clone()],
+                render_pipelines: Vec::new(),
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 63,
+                reason: "texture label must not be empty".to_string(),
+            })
+        );
+
+        texture.label = " \t ".to_string();
+        project.resources.textures = vec![texture];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(CpuFrameOptions::default()),
+            Err(ProjectConfigError::InvalidTextureResource {
+                texture: 63,
+                reason: "texture label must not be empty".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn project_config_rejects_duplicate_texture_usages() {
         let project = OmoikaneProjectConfig {
             name: "duplicate-texture-usages".to_string(),
@@ -2765,6 +2817,52 @@ mod tests {
         assert_eq!(
             project.to_cpu_frame_resource_config(frame),
             Err(ProjectConfigError::DuplicateRenderPipelineId(64))
+        );
+    }
+
+    #[test]
+    fn project_config_rejects_empty_render_pipeline_labels() {
+        let frame = CpuFrameOptions::default();
+        let mut pipeline = ProjectRenderPipelineConfig {
+            id: 65,
+            label: String::new(),
+            vertex_shader: frame.vertex_shader.raw(),
+            fragment_shader: Some(frame.fragment_shader.raw()),
+            vertex_buffers: vec![ProjectVertexBufferLayoutConfig {
+                slot: 0,
+                stride_bytes: 16,
+                step_mode: ProjectVertexStepMode::Vertex,
+            }],
+            color_targets: vec![ProjectTextureFormat::Rgba8Unorm],
+            depth_target: None,
+            bind_group_layouts: Vec::new(),
+        };
+        let mut project = OmoikaneProjectConfig {
+            name: "empty-pipeline-label".to_string(),
+            resources: ProjectResourceConfig {
+                textures: Vec::new(),
+                render_pipelines: vec![pipeline.clone()],
+            },
+            scenes: Vec::new(),
+        };
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 65,
+                reason: "render pipeline label must not be empty".to_string(),
+            })
+        );
+
+        pipeline.label = " \n ".to_string();
+        project.resources.render_pipelines = vec![pipeline];
+
+        assert_eq!(
+            project.to_cpu_frame_resource_config(frame),
+            Err(ProjectConfigError::InvalidRenderPipelineResource {
+                pipeline: 65,
+                reason: "render pipeline label must not be empty".to_string(),
+            })
         );
     }
 

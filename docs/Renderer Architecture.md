@@ -173,6 +173,8 @@ cenas serializadas permanecem fora desse primeiro corte.
 Em 2026-05-15, `ProjectTextureConfig` tambem passou a validar dimensoes
 nao-zero antes de criar descriptors CPU, reportando o erro como dado de projeto
 em vez de deixar a falha chegar apenas no catalogo grafico.
+Labels vazios ou compostos apenas por whitespace tambem sao rejeitados nesse
+preflight, mantendo descriptors e debug dumps com identidade legivel.
 O preflight de textura tambem rejeita usos duplicados no JSON autoral, antes
 que o `BTreeSet` do descriptor grafico normalize esses dados silenciosamente.
 Ele ainda confere pares obvios de formato/uso: texturas de cor nao podem
@@ -185,6 +187,8 @@ buffer, targets e bind group layouts; o app host converte isso para
 cargo de `hikari`.
 Em 2026-05-15, esse formato passou a rejeitar vertex buffers com stride zero
 como erro de projeto antes de construir o descriptor CPU-only.
+O mesmo preflight rejeita labels vazios ou compostos apenas por whitespace para
+que pipelines declarados em projeto tenham nomes uteis em diagnosticos.
 O mesmo preflight tambem rejeita pipelines sem target de cor nem depth,
 mantendo a falha no dominio do projeto em vez de delegar tudo ao descriptor
 grafico.
